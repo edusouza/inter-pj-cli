@@ -1,0 +1,153 @@
+name: Release
+
+# Publica uma release quando uma tag vX.Y.Z é enviada. Alterações neste
+# arquivo também disparam o workflow em modo de ensaio (compila e empacota,
+# sem publicar), para validar a matriz de alvos antes da primeira tag.
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+    branches: ["**"]
+    paths: [".github/workflows/release.yml"]
+  pull_request:
+    paths: [".github/workflows/release.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  preparar:
+    name: Validar versão e changelog
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.versao.outputs.tag }}
+      versao: ${{ steps.versao.outputs.versao }}
+      publicar: ${{ steps.versao.outputs.publicar }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: versao
+        name: Conferir tag, Cargo.toml e CHANGELOG.md
+        run: |
+          VERSAO_CARGO=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            TAG="$GITHUB_REF_NAME"
+            PUBLICAR=true
+          else
+            TAG="v$VERSAO_CARGO"
+            PUBLICAR=false
+          fi
+          VERSAO="${TAG#v}"
+          if [ "$VERSAO" != "$VERSAO_CARGO" ]; then
+            echo "::error::A tag $TAG não corresponde à versão $VERSAO_CARGO do Cargo.toml"
+            exit 1
+          fi
+          if ! grep -q "^## \[$VERSAO\]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md não tem a seção [$VERSAO]"
+            exit 1
+          fi
+          {
+            echo "tag=$TAG"
+            echo "versao=$VERSAO"
+            echo "publicar=$PUBLICAR"
+          } >> "$GITHUB_OUTPUT"
+
+  compilar:
+    name: Compilar (${{ matrix.target }})
+    needs: preparar
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-gnu, os: ubuntu-latest, nativo: true }
+          - { target: x86_64-unknown-linux-musl, os: ubuntu-latest, nativo: true, musl: true }
+          - { target: aarch64-apple-darwin, os: macos-latest, nativo: true }
+          - { target: x86_64-apple-darwin, os: macos-latest, nativo: false }
+          - { target: x86_64-pc-windows-msvc, os: windows-latest, nativo: true }
+    runs-on: ${{ matrix.os }}
+    env:
+      TARGET: ${{ matrix.target }}
+      VERSAO: ${{ needs.preparar.outputs.versao }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+      - name: Instalar musl-tools
+        if: ${{ matrix.musl }}
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: Compilar
+        run: cargo build --release --locked --target ${{ matrix.target }} -p inter-pj-cli
+      - name: Testar o binário
+        if: ${{ matrix.nativo }}
+        shell: bash
+        run: |
+          SAIDA=$("target/$TARGET/release/inter-pj" --version)
+          echo "$SAIDA"
+          [ "$SAIDA" = "inter-pj $VERSAO" ]
+      - name: Empacotar
+        shell: bash
+        run: |
+          NOME="inter-pj-${VERSAO}-${TARGET}"
+          BIN=inter-pj
+          if [ "$RUNNER_OS" = "Windows" ]; then BIN=inter-pj.exe; fi
+          mkdir -p "dist/$NOME"
+          cp "target/$TARGET/release/$BIN" README.md CHANGELOG.md LICENSE-MIT LICENSE-APACHE "dist/$NOME/"
+          cd dist
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            7z a -tzip "$NOME.zip" "$NOME" > /dev/null
+            echo "PACOTE=dist/$NOME.zip" >> "$GITHUB_ENV"
+          else
+            tar -czf "$NOME.tar.gz" "$NOME"
+            echo "PACOTE=dist/$NOME.tar.gz" >> "$GITHUB_ENV"
+          fi
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pacote-${{ matrix.target }}
+          path: ${{ env.PACOTE }}
+          if-no-files-found: error
+
+  publicar:
+    name: Publicar release
+    needs: [preparar, compilar]
+    if: ${{ needs.preparar.outputs.publicar == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ needs.preparar.outputs.tag }}
+      VERSAO: ${{ needs.preparar.outputs.versao }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: pacote-*
+          path: dist
+          merge-multiple: true
+      - name: Gerar SHA256SUMS
+        run: cd dist && sha256sum -- * > SHA256SUMS && cat SHA256SUMS
+      - name: Extrair notas da versão do CHANGELOG.md
+        run: |
+          awk -v versao="$VERSAO" '
+            /^## \[/ { dentro = index($0, "[" versao "]") > 0; next }
+            dentro { print }
+          ' CHANGELOG.md > NOTAS.md
+          test -s NOTAS.md
+      - name: Criar release no GitHub
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "$TAG" dist/*
+          --repo "$GITHUB_REPOSITORY"
+          --verify-tag
+          --title "inter-pj $TAG"
+          --notes-file NOTAS.md
