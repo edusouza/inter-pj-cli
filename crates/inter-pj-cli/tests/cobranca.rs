@@ -10,7 +10,7 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use common::{TestEnv, stderr_of, stdout_of};
 use serde_json::{Value, json};
-use wiremock::matchers::{any, method, path};
+use wiremock::matchers::{any, method, path, query_param, query_param_is_missing};
 use wiremock::{Mock, ResponseTemplate};
 
 const CODIGO: &str = "0b7e4c1a-5d3f-4a2b-9c8d-7e6f5a4b3c2d";
@@ -287,4 +287,201 @@ async fn codigo_invalido_nao_chama_a_api() {
         .assert()
         .code(2);
     assert!(!env.path("banking").exists());
+}
+
+fn item(codigo: &str, seu_numero: &str, situacao: &str, valor: &str) -> Value {
+    json!({
+        "cobranca": {
+            "codigoSolicitacao": codigo,
+            "seuNumero": seu_numero,
+            "situacao": situacao,
+            "dataVencimento": "2026-09-10",
+            "valorNominal": valor,
+            "pagador": {"nome": "Cliente Exemplo Ltda", "cpfCnpj": "12345678000195"}
+        }
+    })
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn lista_as_cobrancas_do_periodo() {
+    let env = env().await;
+    env.mount_token("boleto-cobranca.read", None).await;
+    Mock::given(method("GET"))
+        .and(path("/cobranca/v3/cobrancas"))
+        .and(query_param("dataInicial", "2026-09-01"))
+        .and(query_param("dataFinal", "2026-09-30"))
+        .and(query_param("filtrarDataPor", "PAGAMENTO"))
+        .and(query_param("situacao", "RECEBIDO"))
+        .and(query_param("cpfCnpjPessoaPagadora", "12345678000195"))
+        .and(query_param("paginacao.paginaAtual", "0"))
+        .and(query_param("paginacao.itensPorPagina", "1000"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "ultimaPagina": true,
+            "cobrancas": [
+                item(CODIGO, "NF-123", "RECEBIDO", "150.00"),
+                item("5a6b7c8d-1e2f-4a3b-8c9d-0e1f2a3b4c5d", "NF-124", "RECEBIDO", "300.00")
+            ]
+        })))
+        .expect(3)
+        .mount(&env.server)
+        .await;
+    let args = [
+        "cobranca",
+        "listar",
+        "--inicio",
+        "2026-09-01",
+        "--fim",
+        "2026-09-30",
+        "--filtrar-por",
+        "pagamento",
+        "--situacao",
+        "recebida",
+        "--documento",
+        "12.345.678/0001-95",
+    ];
+
+    let texto = stdout_of(&env.cmd().args(args).assert().success());
+    assert!(
+        texto.starts_with(
+            "Cobranças pagas de 01/09/2026 a 30/09/2026 (recebida, CPF/CNPJ 12345678000195)"
+        ),
+        "{texto}"
+    );
+    assert!(texto.ends_with("2 cobranças · R$ 450,00\n"), "{texto}");
+
+    let json: Value = serde_json::from_str(&stdout_of(
+        &env.cmd().args(args).arg("--json").assert().success(),
+    ))
+    .unwrap();
+    assert_eq!(json["cobrancas"].as_array().unwrap().len(), 2);
+
+    let csv = stdout_of(
+        &env.cmd()
+            .args(args)
+            .args(["--formato", "csv", "--separador", ";"])
+            .assert()
+            .success(),
+    );
+    assert!(
+        csv.starts_with("\u{feff}codigoSolicitacao;seuNumero;situacao;"),
+        "{csv}"
+    );
+    assert!(csv.contains(";150,00;"), "{csv}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn uma_pagina_so() {
+    let env = env().await;
+    env.mount_token("boleto-cobranca.read", None).await;
+    Mock::given(method("GET"))
+        .and(path("/cobranca/v3/cobrancas"))
+        .and(query_param("paginacao.paginaAtual", "1"))
+        .and(query_param("paginacao.itensPorPagina", "50"))
+        .and(query_param("ordenarPor", "DATA_VENCIMENTO"))
+        .and(query_param("tipoOrdenacao", "DESC"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "totalPaginas": 3,
+            "totalElementos": 120,
+            "ultimaPagina": false,
+            "cobrancas": [item(CODIGO, "NF-123", "A_RECEBER", "150.00")]
+        })))
+        .expect(2)
+        .mount(&env.server)
+        .await;
+    let args = [
+        "cobranca",
+        "listar",
+        "--pagina",
+        "1",
+        "--itens-por-pagina",
+        "50",
+        "--ordenar-por",
+        "vencimento",
+        "--decrescente",
+    ];
+    let texto = stdout_of(&env.cmd().args(args).assert().success());
+    assert!(
+        texto.ends_with(
+            "Página 1 de 2 (a primeira é 0); 120 cobranças no período; a próxima é --pagina 2\n"
+        ),
+        "{texto}"
+    );
+    // The page as the API returns it.
+    let json: Value = serde_json::from_str(&stdout_of(
+        &env.cmd().args(args).arg("--json").assert().success(),
+    ))
+    .unwrap();
+    assert_eq!(json["totalElementos"], 120);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn sumario_por_situacao() {
+    let env = env().await;
+    env.mount_token("boleto-cobranca.read", None).await;
+    Mock::given(method("GET"))
+        .and(path("/cobranca/v3/cobrancas/sumario"))
+        .and(query_param("dataInicial", "2026-09-01"))
+        .and(query_param_is_missing("paginacao.paginaAtual"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            {"situacao": "A_RECEBER", "valor": 1000, "quantidade": 30},
+            {"situacao": "RECEBIDO", "valor": 4000.5, "quantidade": 65},
+            {"situacao": "CANCELADO", "valor": 0, "quantidade": 0}
+        ])))
+        .expect(2)
+        .mount(&env.server)
+        .await;
+    let args = [
+        "cobranca",
+        "sumario",
+        "--inicio",
+        "2026-09-01",
+        "--fim",
+        "2026-09-30",
+    ];
+    let texto = stdout_of(&env.cmd().args(args).assert().success());
+    assert!(
+        texto.contains("Total              95  R$ 5.000,50"),
+        "{texto}"
+    );
+    assert!(!texto.contains("cancelada"), "{texto}");
+    let csv = stdout_of(
+        &env.cmd()
+            .args(args)
+            .args(["--formato", "csv"])
+            .assert()
+            .success(),
+    );
+    assert_eq!(
+        csv,
+        "situacao,quantidade,valor\r\nA_RECEBER,30,1000\r\nRECEBIDO,65,4000.5\r\nCANCELADO,0,0\r\n"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn filtros_invalidos_nao_chamam_a_api() {
+    let env = env().await;
+    nothing_is_sent(&env).await;
+    for args in [
+        &["cobranca", "listar", "--documento", "123"][..],
+        &["cobranca", "listar", "--situacao", "paga"][..],
+        &["cobranca", "listar", "--itens-por-pagina", "50"][..],
+        &[
+            "cobranca",
+            "listar",
+            "--pagina",
+            "0",
+            "--itens-por-pagina",
+            "1001",
+        ][..],
+        &[
+            "cobranca",
+            "sumario",
+            "--inicio",
+            "2026-09-30",
+            "--fim",
+            "2026-09-01",
+        ][..],
+    ] {
+        env.cmd().args(args).assert().code(2);
+    }
 }

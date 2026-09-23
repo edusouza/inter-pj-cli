@@ -353,6 +353,34 @@ $ inter-pj cobranca consultar 0b7e4c1a-5d3f-4a2b-9c8d-7e6f5a4b3c2d --qrcode-png 
 $ inter-pj cobranca pdf 0b7e4c1a-5d3f-4a2b-9c8d-7e6f5a4b3c2d                           # cobranca-<codigo>.pdf
 ```
 
+As listagens mostram as cobranças de um período, por vencimento (o padrão), emissão ou pagamento; sem datas, as com vencimento nos últimos 30 dias:
+
+```console
+$ inter-pj cobranca listar --inicio 2026-09-01 --fim 2026-10-31
+Cobranças com vencimento de 01/09/2026 a 31/10/2026
+
+Vencimento  Seu número  Pagador               Situação       Valor  Código
+20/10/2026  NF-123      Cliente Exemplo Ltda  a receber  R$ 150,00  0b7e4c1a-5d3f-4a2b-9c8d-7e6f5a4b3c2d
+10/09/2026  NF-124      Outro Cliente         recebida   R$ 300,00  5a6b7c8d-1e2f-4a3b-8c9d-0e1f2a3b4c5d
+05/09/2026  NF-125      Mercado Exemplo       atrasada    R$ 89,90  9c8d7e6f-5a4b-4c3d-8e2f-1a0b9c8d7e6f
+
+3 cobranças · R$ 539,90 · recebido R$ 300,00
+
+$ inter-pj cobranca sumario --inicio 2026-09-01 --fim 2026-10-31
+Cobranças com vencimento de 01/09/2026 a 31/10/2026
+
+Situação   Quantidade        Valor
+a receber          11  R$ 1.650,00
+atrasada            2    R$ 300,00
+recebida           27  R$ 4.200,50
+Total              40  R$ 6.150,50
+
+$ inter-pj cobranca listar --situacao atrasada --documento 12.345.678/0001-95
+$ inter-pj cobranca listar --filtrar-por pagamento --formato csv --separador ';' > recebidas.csv
+```
+
+Os filtros são `--situacao` (`a-receber`, `recebida`, `atrasada`, `cancelada`, `expirada`, `marcada-recebida`, `em-processamento`, `falha-emissao` ou `protesto`), `--pagador` (nome), `--documento` (CPF/CNPJ, conferido), `--seu-numero` e `--tipo` (`simples`, `parcelada` ou `recorrente`). A listagem lê todas as páginas, de 1.000 cobranças cada; `--pagina N` (a primeira é 0) com `--itens-por-pagina` traz uma só, e `--ordenar-por` com `--decrescente` escolhe a ordem. Em CSV, as colunas têm os nomes da API (os aninhados com ponto: `pagador.nome`, `boleto.linhaDigitavel`, `pix.pixCopiaECola`).
+
 `--qrcode` desenha o QR Code do Pix no terminal, para o cliente ler com o celular. Em um terminal, ele sai preto no branco, qualquer que seja o tema. Com `NO_COLOR` ou com a saída redirecionada, sem cores, os módulos claros é que são desenhados, como no `qrencode -t UTF8`, e o código fica certo em terminais de fundo escuro; para imprimir ou enviar, prefira `--qrcode-png`. Antes de desenhar, a CLI confere o copia e cola (CRC16). O PNG e o PDF são gravados com permissão `600` e não sobrescrevem um arquivo existente sem `--sobrescrever`; `-` os envia para a saída padrão. As consultas precisam do escopo `boleto-cobranca.read`.
 
 ### Formatos de saída
@@ -361,7 +389,7 @@ $ inter-pj cobranca pdf 0b7e4c1a-5d3f-4a2b-9c8d-7e6f5a4b3c2d                    
 | --- | --- |
 | `texto` (padrão) | leitura: tabelas alinhadas, valores em `R$ 1.234,56`, datas `DD/MM/AAAA` |
 | `json` (ou `--json`) | automação: os nomes de campo da API e valores numéricos exatos |
-| `csv` | planilhas e scripts (`saldo`, `extrato` e as listagens de pagamentos): RFC 4180, datas `AAAA-MM-DD`, ponto decimal, saídas do extrato com valor negativo |
+| `csv` | planilhas e scripts (`saldo`, `extrato` e as listagens de pagamentos e de cobranças): RFC 4180, datas `AAAA-MM-DD`, ponto decimal, saídas do extrato com valor negativo |
 
 Para o Excel em português, use `--formato csv --separador ';'`: ponto e vírgula, vírgula decimal e UTF-8 com BOM. Textos vindos de terceiros que começam com `=`, `+`, `-` ou `@` (ex.: a mensagem de um Pix) recebem um apóstrofo no CSV, para não serem executados como fórmula pela planilha.
 
