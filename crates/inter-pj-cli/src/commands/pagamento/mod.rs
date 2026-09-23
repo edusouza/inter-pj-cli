@@ -1,6 +1,7 @@
 //! `inter-pj pagamento`
 
 mod boleto;
+mod darf;
 mod pagar;
 
 use chrono::NaiveDate;
@@ -15,6 +16,7 @@ use crate::tabela::Celula;
 pub(super) async fn run(context: &Context, command: PagamentoCommand) -> Result<(), CliError> {
     match command {
         PagamentoCommand::Boleto(command) => boleto::run(context, command, &mut Stdio).await,
+        PagamentoCommand::Darf(command) => darf::run(context, command, &mut Stdio).await,
     }
 }
 
