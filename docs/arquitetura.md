@@ -25,6 +25,7 @@
 │ scope.rs      os 36 escopos documentados                                                  │
 │ problem.rs    parser tolerante de erros (RFC 7807 e variações)                            │
 │ banking/      saldo, extrato (paginação e scroll), PDF, envio e consulta de Pix           │
+│ boleto.rs     linha digitável e código de barras (FEBRABAN): DVs, valor, vencimento       │
 │ documento.rs  CPF e CNPJ (inclusive o alfanumérico) com dígitos verificadores             │
 │ pix/          chave Pix (formatos do DICT) e leitura do copia e cola (BR Code, CRC16)     │
 └───────────────────────────────────────────────────────────────────────────────────────────┘
@@ -69,6 +70,16 @@ Tudo o que pode ser conferido antes de mover dinheiro é conferido localmente, s
 - `PagamentoPix::validar` recusa valores não positivos ou com mais de 2 casas decimais, descrição com mais de 140 caracteres e dados bancários malformados, e `enviar_pix` chama a validação antes de enviar.
 
 Cada envio leva um `x-id-idempotente` (UUID v4 gerado com o gerador aleatório do aws-lc-rs, já presente pelo TLS). Com a mesma chave, a API não paga duas vezes: quando a resposta se perde (tempo esgotado, conexão caída), o mesmo pagamento pode ser reenviado com segurança. O destinatário é um enum marcado por `tipo` (`CHAVE`, `DADOS_BANCARIOS`, `PIX_COPIA_E_COLA`), como o discriminador da especificação; o teste de contrato reproduz, campo a campo, os três exemplos de requisição da documentação.
+
+### Boletos e contas conferidos localmente
+
+`boleto::CodigoBarras` aceita a linha digitável ou o código de barras e confere todos os dígitos verificadores antes de qualquer pagamento. São três DVs por campo (módulo 10) e o DV geral (módulo 11) nos boletos, e um DV por bloco nas contas e tributos (módulo 10 ou 11, conforme o terceiro dígito). O valor e o vencimento são decodificados para o resumo.
+
+O fator de vencimento chegou a 9999 em 21/02/2025 e recomeçou em 1000 no dia seguinte, então um mesmo fator corresponde a duas datas, com cerca de 24,6 anos entre elas. Escolhemos a mais próxima da data atual.
+
+O padrão tem um ponto cego conhecido: no boleto, os restos 0, 1 e 10 do módulo 11 viram todos o DV 1, então um dígito errado no valor ou no vencimento pode passar despercebido. Por isso a CLI mostra os dois, decodificados, antes da confirmação. Um teste documenta esse limite.
+
+As implementações foram conferidas com uma implementação de referência independente, usando os exemplos da documentação oficial como vetores de teste.
 
 ### Confirmação antes de mover dinheiro
 
