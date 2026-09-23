@@ -6,6 +6,10 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+### Adicionado
+
+- Biblioteca: `documento::Documento` valida CPF e CNPJ (inclusive o CNPJ alfanumérico), `pix::ChavePix` reconhece e normaliza chaves Pix (CPF, CNPJ, e-mail, celular `+55` e chave aleatória) e `pix::BrCode` decodifica o Pix copia e cola, conferindo o CRC16 (#20).
+
 ## [0.2.0] - 2026-09-23
 
 Extrato: consulta, extrato enriquecido, PDF e exportação.
