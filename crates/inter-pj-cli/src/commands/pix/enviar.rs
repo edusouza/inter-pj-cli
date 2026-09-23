@@ -4,11 +4,13 @@ use std::fmt::Write as _;
 
 use chrono::{Local, NaiveDate};
 use inter_pj::banking::{
-    Destinatario, IdIdempotente, PagamentoPix, SolicitacaoPix, TipoRetornoPix,
+    DadosBancarios, Destinatario, IdIdempotente, InstituicaoFinanceira, PagamentoPix,
+    SolicitacaoPix, TipoConta, TipoRetornoPix,
 };
 use inter_pj::documento::Documento;
-use inter_pj::pix::ChavePix;
+use inter_pj::pix::{BrCode, ChavePix};
 use inter_pj::{Environment, Error as InterError, endpoint};
+use rust_decimal::Decimal;
 use serde_json::{Map, json};
 
 use crate::cli::{Formato, PixEnviarArgs};
@@ -38,7 +40,8 @@ pub(super) async fn run(
         .clone()
         .unwrap_or_else(IdIdempotente::novo);
     let ambiente = settings.ambiente.as_ref().map(|setting| setting.value);
-    eprintln!("{}", resumo(&pagamento, ambiente, &id));
+    let brcode = args.copia_e_cola.as_ref().map(|codigo| &codigo.brcode);
+    eprintln!("{}", resumo(&pagamento, brcode, ambiente, &id));
 
     let Some(client) = client else {
         return simulacao(context, &settings, &pagamento, &id);
@@ -79,12 +82,7 @@ fn pagamento(args: &PixEnviarArgs, hoje: NaiveDate) -> Result<PagamentoPix, CliE
             data.format("%d/%m/%Y")
         )));
     }
-    let mut pagamento = PagamentoPix::new(
-        args.valor,
-        Destinatario::Chave {
-            chave: args.chave.clone(),
-        },
-    );
+    let mut pagamento = PagamentoPix::new(valor(args)?, destinatario(args)?);
     // Without a date the API pays at once: send it only to schedule.
     pagamento.data_pagamento = args.data.filter(|data| *data > hoje);
     pagamento.descricao = args
@@ -97,6 +95,72 @@ fn pagamento(args: &PixEnviarArgs, hoje: NaiveDate) -> Result<PagamentoPix, CliE
         .validar()
         .map_err(|err| CliError::Usage(err.to_string()))?;
     Ok(pagamento)
+}
+
+fn destinatario(args: &PixEnviarArgs) -> Result<Destinatario, CliError> {
+    if let Some(chave) = &args.chave {
+        return Ok(Destinatario::Chave {
+            chave: chave.clone(),
+        });
+    }
+    if let Some(copia_e_cola) = &args.copia_e_cola {
+        return Ok(Destinatario::PixCopiaECola {
+            pix_copia_e_cola: copia_e_cola.codigo.clone(),
+        });
+    }
+    // clap requires the whole set of bank details along with --ispb.
+    match (
+        &args.ispb,
+        &args.agencia,
+        &args.conta,
+        args.tipo_conta,
+        &args.documento,
+        &args.nome,
+    ) {
+        (Some(ispb), Some(agencia), Some(conta), Some(tipo), Some(documento), Some(nome)) => {
+            Ok(Destinatario::DadosBancarios(DadosBancarios {
+                nome: nome.trim().to_owned(),
+                cpf_cnpj: documento.clone(),
+                instituicao_financeira: InstituicaoFinanceira { ispb: ispb.clone() },
+                agencia: agencia.clone(),
+                conta_corrente: conta.clone(),
+                tipo_conta: tipo.into(),
+            }))
+        }
+        _ => Err(CliError::Usage(
+            "informe o destino: --chave, --copia-e-cola ou os dados bancários (--ispb, --agencia, --conta, --tipo-conta, --documento e --nome)"
+                .to_owned(),
+        )),
+    }
+}
+
+/// `--valor`, or the amount a copia e cola code fixes.
+///
+/// A static code with an amount fixes it: a different `--valor` is refused.
+/// A dynamic code keeps the charge at the receiver's institution, which may
+/// add interest or discounts, so `--valor` may differ from the code's.
+fn valor(args: &PixEnviarArgs) -> Result<Decimal, CliError> {
+    let Some(copia_e_cola) = &args.copia_e_cola else {
+        return args.valor.ok_or_else(|| {
+            CliError::Usage("informe o valor com --valor (ex.: --valor 150,00)".to_owned())
+        });
+    };
+    let brcode = &copia_e_cola.brcode;
+    match (brcode.valor, args.valor) {
+        (Some(do_codigo), None) => Ok(do_codigo),
+        (Some(do_codigo), Some(informado)) if informado == do_codigo || brcode.dinamico() => {
+            Ok(informado)
+        }
+        (Some(do_codigo), Some(informado)) => Err(CliError::Usage(format!(
+            "o código copia e cola fixa o valor em {}, e --valor informa {}: retire --valor ou use o mesmo valor",
+            output::brl(do_codigo),
+            output::brl(informado)
+        ))),
+        (None, Some(informado)) => Ok(informado),
+        (None, None) => Err(CliError::Usage(
+            "o código copia e cola não traz o valor: informe --valor".to_owned(),
+        )),
+    }
 }
 
 /// Refuses amounts above the profile's `limite_por_operacao`, even with `--sim`.
@@ -114,7 +178,13 @@ fn verificar_limite(pagamento: &PagamentoPix, settings: &Settings) -> Result<(),
 }
 
 /// What is about to be sent, for the person to check before confirming.
-fn resumo(pagamento: &PagamentoPix, ambiente: Option<Environment>, id: &IdIdempotente) -> String {
+/// `brcode` is the decoded copia e cola code, when paying one.
+fn resumo(
+    pagamento: &PagamentoPix,
+    brcode: Option<&BrCode>,
+    ambiente: Option<Environment>,
+    id: &IdIdempotente,
+) -> String {
     let producao = ambiente.is_some_and(Environment::is_production);
     let mut linhas = vec![(
         "Ambiente",
@@ -125,15 +195,38 @@ fn resumo(pagamento: &PagamentoPix, ambiente: Option<Environment>, id: &IdIdempo
         },
     )];
     let mut avisos = Vec::new();
-    if let Destinatario::Chave { chave } = &pagamento.destinatario {
-        linhas.push(("Chave Pix", descrever_chave(chave)));
-        if let ChavePix::Cpf(cpf) = chave
-            && parece_celular(cpf)
-        {
-            avisos.push(
-                "a chave foi lida como CPF; se for um celular, use +55 e o DDD (+55DD9NNNNNNNN)",
-            );
+    match &pagamento.destinatario {
+        Destinatario::Chave { chave } => {
+            linhas.push(("Chave Pix", descrever_chave(chave)));
+            if let ChavePix::Cpf(cpf) = chave
+                && parece_celular(cpf)
+            {
+                avisos.push(
+                    "a chave foi lida como CPF; se for um celular, use +55 e o DDD (+55DD9NNNNNNNN)",
+                );
+            }
         }
+        Destinatario::DadosBancarios(dados) => {
+            linhas.push(("Titular", limpo(&dados.nome)));
+            linhas.push(("CPF/CNPJ", dados.cpf_cnpj.formatado()));
+            linhas.push((
+                "Instituição",
+                format!("ISPB {}", dados.instituicao_financeira.ispb),
+            ));
+            linhas.push((
+                "Agência e conta",
+                format!(
+                    "{} / {} ({})",
+                    dados.agencia,
+                    dados.conta_corrente,
+                    tipo_conta(dados.tipo_conta)
+                ),
+            ));
+        }
+        _ => {}
+    }
+    if let Some(brcode) = brcode {
+        linhas.extend(resumo_copia_e_cola(brcode));
     }
     let extenso = por_extenso(pagamento.valor)
         .map(|extenso| format!(" ({extenso})"))
@@ -142,6 +235,11 @@ fn resumo(pagamento: &PagamentoPix, ambiente: Option<Environment>, id: &IdIdempo
         "Valor",
         format!("{}{extenso}", output::brl(pagamento.valor)),
     ));
+    if let Some(do_codigo) = brcode.and_then(|brcode| brcode.valor)
+        && do_codigo != pagamento.valor
+    {
+        linhas.push(("Valor no código", output::brl(do_codigo)));
+    }
     linhas.push((
         "Quando",
         pagamento.data_pagamento.map_or_else(
@@ -150,7 +248,7 @@ fn resumo(pagamento: &PagamentoPix, ambiente: Option<Environment>, id: &IdIdempo
         ),
     ));
     if let Some(descricao) = &pagamento.descricao {
-        linhas.push(("Descrição", descricao.clone()));
+        linhas.push(("Descrição", limpo(descricao)));
     }
     linhas.push(("Chave de idempotência", id.to_string()));
 
@@ -166,6 +264,61 @@ fn resumo(pagamento: &PagamentoPix, ambiente: Option<Environment>, id: &IdIdempo
         let _ = write!(texto, "\naviso: {aviso}");
     }
     texto
+}
+
+/// What a copia e cola code says about whom it pays.
+fn resumo_copia_e_cola(brcode: &BrCode) -> Vec<(&'static str, String)> {
+    let mut linhas = vec![
+        (
+            "Copia e cola",
+            if brcode.dinamico() {
+                "dinâmico (cobrança mantida pelo recebedor)".to_owned()
+            } else {
+                "estático".to_owned()
+            },
+        ),
+        (
+            "Recebedor",
+            format!(
+                "{} ({})",
+                limpo(&brcode.nome_recebedor),
+                limpo(&brcode.cidade)
+            ),
+        ),
+    ];
+    if let Some(chave) = &brcode.chave {
+        let chave = ChavePix::parse(chave).map_or_else(|_| limpo(chave), |c| descrever_chave(&c));
+        linhas.push(("Chave Pix", chave));
+    }
+    if let Some(url) = &brcode.url {
+        linhas.push(("Cobrança", limpo(url)));
+    }
+    if let Some(txid) = brcode.txid.as_deref().filter(|txid| *txid != "***") {
+        linhas.push(("Identificador", limpo(txid)));
+    }
+    if let Some(mensagem) = &brcode.info_adicional {
+        linhas.push(("Mensagem do código", limpo(mensagem)));
+    }
+    linhas
+}
+
+/// Text from third parties (a copia e cola code), without control
+/// characters: escape sequences could rewrite what the terminal shows.
+fn limpo(texto: &str) -> String {
+    texto
+        .chars()
+        .map(|c| if c.is_control() { '\u{FFFD}' } else { c })
+        .collect()
+}
+
+fn tipo_conta(tipo: TipoConta) -> &'static str {
+    match tipo {
+        TipoConta::ContaCorrente => "conta corrente",
+        TipoConta::ContaPoupanca => "conta poupança",
+        TipoConta::ContaSalario => "conta salário",
+        TipoConta::ContaPagamento => "conta de pagamento",
+        _ => tipo.as_str(),
+    }
 }
 
 /// The key with its kind, formatted for reading: `123.456.789-09 (CPF)`.
@@ -313,7 +466,7 @@ mod tests {
         let mut full = vec!["inter-pj", "pix", "enviar"];
         full.extend_from_slice(extra);
         match Cli::try_parse_from(full).unwrap().command {
-            Command::Pix(PixCommand::Enviar(args)) => args,
+            Command::Pix(PixCommand::Enviar(args)) => *args,
             other => panic!("comando inesperado: {other:?}"),
         }
     }
@@ -405,7 +558,7 @@ mod tests {
         pagamento.descricao = Some("NF 123".to_owned());
         pagamento.data_pagamento = NaiveDate::from_ymd_opt(2026, 10, 1);
         assert_eq!(
-            resumo(&pagamento, Some(Environment::Sandbox), &id()),
+            resumo(&pagamento, None, Some(Environment::Sandbox), &id()),
             "\
 Pix a enviar
   Ambiente               sandbox (dados fictícios)
@@ -425,7 +578,7 @@ Pix a enviar
                 chave: "11987654374".parse().unwrap(),
             },
         );
-        let texto = resumo(&pagamento, Some(Environment::Production), &id());
+        let texto = resumo(&pagamento, None, Some(Environment::Production), &id());
         assert!(
             texto.starts_with("*** PRODUÇÃO: este Pix movimenta dinheiro da conta real ***\n"),
             "{texto}"
@@ -445,12 +598,174 @@ Pix a enviar
                 chave: "123.456.789-09".parse().unwrap(),
             },
         );
-        let texto = resumo(&cpf, None, &id());
+        let texto = resumo(&cpf, None, None, &id());
         assert!(!texto.contains("aviso"), "{texto}");
         assert!(
             texto.contains("Ambiente               não definido"),
             "{texto}"
         );
+    }
+
+    fn tlv(campos: &[(&str, &str)]) -> String {
+        let mut texto = String::new();
+        for (id, valor) in campos {
+            let _ = write!(texto, "{id}{:02}{valor}", valor.chars().count());
+        }
+        texto
+    }
+
+    /// A copia e cola code paying `conta` (key or URL), with a CRC.
+    fn codigo(conta: &[(&str, &str)], valor: Option<&str>, nome: &str) -> String {
+        let conta = tlv(&[&[("00", "br.gov.bcb.pix")][..], conta].concat());
+        let mut campos = vec![
+            ("00", "01"),
+            ("26", conta.as_str()),
+            ("52", "0000"),
+            ("53", "986"),
+        ];
+        if let Some(valor) = valor {
+            campos.push(("54", valor));
+        }
+        campos.extend([
+            ("58", "BR"),
+            ("59", nome),
+            ("60", "SAO PAULO"),
+            ("62", "0505NF123"),
+        ]);
+        let mut payload = tlv(&campos);
+        payload.push_str("6304");
+        let crc = inter_pj::pix::crc16(payload.as_bytes());
+        let _ = write!(payload, "{crc:04X}");
+        payload
+    }
+
+    #[test]
+    fn copia_e_cola_amount_rules() {
+        let chave = [("01", "fornecedor@exemplo.com")];
+        let estatico = codigo(&chave, Some("150.00"), "Fornecedor Exemplo");
+        let sem_valor = codigo(&chave, None, "Fornecedor Exemplo");
+        let dinamico = codigo(
+            &[("25", "qr.exemplo.invalid/cobv/1")],
+            Some("150.00"),
+            "Loja Exemplo",
+        );
+        let valor_de = |extra: &[&str]| valor(&args(extra));
+        let dec = |texto: &str| texto.parse::<Decimal>().unwrap();
+
+        assert_eq!(
+            valor_de(&["--copia-e-cola", &estatico]).unwrap(),
+            dec("150")
+        );
+        assert_eq!(
+            valor_de(&["--copia-e-cola", &estatico, "--valor", "150"]).unwrap(),
+            dec("150")
+        );
+        let err = valor_de(&["--copia-e-cola", &estatico, "--valor", "15"])
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("fixa o valor em R$ 150,00, e --valor informa R$ 15,00"),
+            "{err}"
+        );
+        let err = valor_de(&["--copia-e-cola", &sem_valor])
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("não traz o valor"), "{err}");
+        assert_eq!(
+            valor_de(&["--copia-e-cola", &sem_valor, "--valor", "9,90"]).unwrap(),
+            dec("9.90")
+        );
+        // A dynamic charge may have interest or discounts.
+        assert_eq!(
+            valor_de(&["--copia-e-cola", &dinamico, "--valor", "151,20"]).unwrap(),
+            dec("151.20")
+        );
+        assert!(valor_de(&["--chave", "fornecedor@exemplo.com"]).is_err());
+    }
+
+    #[test]
+    fn summary_of_a_copia_e_cola_code_is_sanitized() {
+        let texto = codigo(
+            &[("01", "fornecedor@exemplo.com"), ("02", "NF 123")],
+            Some("150.00"),
+            "Fornecedor\u{1b}[2K Exemplo",
+        );
+        let args = args(&["--copia-e-cola", &texto]);
+        let construido = pagamento(&args, hoje()).unwrap();
+        let brcode = &args.copia_e_cola.as_ref().unwrap().brcode;
+        assert_eq!(
+            resumo(&construido, Some(brcode), Some(Environment::Sandbox), &id()),
+            "\
+Pix a enviar
+  Ambiente               sandbox (dados fictícios)
+  Copia e cola           estático
+  Recebedor              Fornecedor\u{FFFD}[2K Exemplo (SAO PAULO)
+  Chave Pix              fornecedor@exemplo.com (e-mail)
+  Identificador          NF123
+  Mensagem do código     NF 123
+  Valor                  R$ 150,00 (cento e cinquenta reais)
+  Quando                 agora
+  Chave de idempotência  123e4567-e89b-42d3-a456-426614174000"
+        );
+        assert_eq!(
+            construido.destinatario,
+            Destinatario::PixCopiaECola {
+                pix_copia_e_cola: texto.clone()
+            }
+        );
+
+        let dinamico = codigo(
+            &[("25", "qr.exemplo.invalid/cobv/1")],
+            Some("150.00"),
+            "Loja Exemplo",
+        );
+        let args = self::args(&["--copia-e-cola", &dinamico, "--valor", "151,20"]);
+        let construido = pagamento(&args, hoje()).unwrap();
+        let brcode = &args.copia_e_cola.as_ref().unwrap().brcode;
+        let texto = resumo(&construido, Some(brcode), None, &id());
+        for linha in [
+            "Copia e cola           dinâmico (cobrança mantida pelo recebedor)",
+            "Cobrança               qr.exemplo.invalid/cobv/1",
+            "Valor                  R$ 151,20 (cento e cinquenta e um reais e vinte centavos)",
+            "Valor no código        R$ 150,00",
+        ] {
+            assert!(texto.contains(linha), "{linha}\n{texto}");
+        }
+    }
+
+    #[test]
+    fn summary_of_bank_details() {
+        let args = args(&[
+            "--ispb",
+            "00000000",
+            "--agencia",
+            "0001",
+            "--conta",
+            "1234567",
+            "--tipo-conta",
+            "corrente",
+            "--documento",
+            "12345678000195",
+            "--nome",
+            " Fornecedor Exemplo ",
+            "--valor",
+            "10",
+        ]);
+        let construido = pagamento(&args, hoje()).unwrap();
+        let Destinatario::DadosBancarios(dados) = &construido.destinatario else {
+            panic!("{:?}", construido.destinatario);
+        };
+        assert_eq!(dados.nome, "Fornecedor Exemplo");
+        assert_eq!(dados.tipo_conta, TipoConta::ContaCorrente);
+        let texto = resumo(&construido, None, None, &id());
+        for linha in [
+            "Titular                Fornecedor Exemplo",
+            "CPF/CNPJ               12.345.678/0001-95",
+            "Instituição            ISPB 00000000",
+            "Agência e conta        0001 / 1234567 (conta corrente)",
+        ] {
+            assert!(texto.contains(linha), "{linha}\n{texto}");
+        }
     }
 
     #[test]
@@ -566,7 +881,7 @@ Chave de idempotência  123e4567-e89b-42d3-a456-426614174000"
             server,
             _dir: dir,
             context,
-            args,
+            args: *args,
         }
     }
 

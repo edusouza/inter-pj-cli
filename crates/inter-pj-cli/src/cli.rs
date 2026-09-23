@@ -8,10 +8,13 @@ use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use chrono::NaiveDate;
-use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
+use clap::{ArgAction, ArgGroup, Args, Parser, Subcommand, ValueEnum};
 use inter_pj::RetryPolicy;
-use inter_pj::banking::{IdIdempotente, TAMANHO_PAGINA_MAXIMO, TipoOperacao, TipoTransacao};
-use inter_pj::pix::ChavePix;
+use inter_pj::banking::{
+    IdIdempotente, TAMANHO_PAGINA_MAXIMO, TipoConta, TipoOperacao, TipoTransacao,
+};
+use inter_pj::documento::Documento;
+use inter_pj::pix::{BrCode, ChavePix};
 use rust_decimal::Decimal;
 
 use crate::tabela::Separador;
@@ -458,29 +461,104 @@ pub(crate) struct ExtratoPdfArgs {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum PixCommand {
-    /// Envia um Pix por chave, após mostrar um resumo e pedir confirmação
-    Enviar(PixEnviarArgs),
+    /// Envia um Pix (chave, copia e cola ou dados bancários), após mostrar um resumo e pedir confirmação
+    Enviar(Box<PixEnviarArgs>),
 }
 
 #[derive(Debug, Args)]
+#[command(group(
+    ArgGroup::new("destino")
+        .required(true)
+        .args(["chave", "copia_e_cola", "ispb"])
+))]
 pub(crate) struct PixEnviarArgs {
     /// Chave Pix: CPF, CNPJ, e-mail, celular (+55DD9NNNNNNNN) ou chave aleatória
     #[arg(
         long,
         value_name = "CHAVE",
         value_parser = parse_chave,
-        help_heading = "Destino"
+        help_heading = "Destino (escolha um)"
     )]
-    pub(crate) chave: ChavePix,
+    pub(crate) chave: Option<ChavePix>,
 
-    /// Valor em reais: 150,00, 1.500,00 ou 150.00
+    /// Código Pix copia e cola, entre aspas
+    #[arg(
+        long,
+        value_name = "CODIGO",
+        value_parser = parse_copia_e_cola,
+        help_heading = "Destino (escolha um)"
+    )]
+    pub(crate) copia_e_cola: Option<CopiaECola>,
+
+    /// ISPB da instituição, 8 dígitos (dados bancários, para quem não tem chave)
+    #[arg(
+        long,
+        value_name = "ISPB",
+        value_parser = parse_ispb,
+        requires_all = ["agencia", "conta", "tipo_conta", "documento", "nome"],
+        help_heading = "Destino (escolha um)"
+    )]
+    pub(crate) ispb: Option<String>,
+
+    /// Agência, sem o dígito verificador
+    #[arg(
+        long,
+        value_name = "AGENCIA",
+        value_parser = parse_agencia,
+        requires = "ispb",
+        help_heading = "Dados bancários"
+    )]
+    pub(crate) agencia: Option<String>,
+
+    /// Conta com o dígito verificador (1234567, 123456-7 ou 123456-X)
+    #[arg(
+        long,
+        value_name = "CONTA",
+        value_parser = parse_conta,
+        requires = "ispb",
+        help_heading = "Dados bancários"
+    )]
+    pub(crate) conta: Option<String>,
+
+    /// Tipo da conta: corrente, poupanca, salario ou pagamento
+    #[arg(
+        long,
+        value_enum,
+        ignore_case = true,
+        value_name = "TIPO",
+        hide_possible_values = true,
+        requires = "ispb",
+        help_heading = "Dados bancários"
+    )]
+    pub(crate) tipo_conta: Option<TipoContaArg>,
+
+    /// CPF ou CNPJ do titular da conta
+    #[arg(
+        long,
+        value_name = "CPF/CNPJ",
+        value_parser = parse_documento,
+        requires = "ispb",
+        help_heading = "Dados bancários"
+    )]
+    pub(crate) documento: Option<Documento>,
+
+    /// Nome do titular da conta
+    #[arg(
+        long,
+        value_name = "NOME",
+        requires = "ispb",
+        help_heading = "Dados bancários"
+    )]
+    pub(crate) nome: Option<String>,
+
+    /// Valor em reais: 150,00, 1.500,00 ou 150.00 (dispensável se o copia e cola já traz o valor)
     #[arg(
         long,
         value_name = "VALOR",
         value_parser = parse_valor,
         help_heading = "Pagamento"
     )]
-    pub(crate) valor: Decimal,
+    pub(crate) valor: Option<Decimal>,
 
     /// Mensagem ao recebedor (até 140 caracteres)
     #[arg(long, value_name = "TEXTO", help_heading = "Pagamento")]
@@ -513,6 +591,40 @@ pub(crate) struct PixEnviarArgs {
     pub(crate) id_idempotente: Option<IdIdempotente>,
 }
 
+/// A copia e cola code, as given and decoded.
+#[derive(Debug, Clone)]
+pub(crate) struct CopiaECola {
+    pub(crate) codigo: String,
+    pub(crate) brcode: BrCode,
+}
+
+/// `--tipo-conta`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum TipoContaArg {
+    /// Conta corrente
+    #[value(name = "corrente", alias = "cc")]
+    Corrente,
+    /// Conta poupança
+    #[value(name = "poupanca", alias = "poupança")]
+    Poupanca,
+    /// Conta salário
+    #[value(name = "salario", alias = "salário")]
+    Salario,
+    /// Conta de pagamento (bancos digitais e carteiras)
+    Pagamento,
+}
+
+impl From<TipoContaArg> for TipoConta {
+    fn from(arg: TipoContaArg) -> Self {
+        match arg {
+            TipoContaArg::Corrente => Self::ContaCorrente,
+            TipoContaArg::Poupanca => Self::ContaPoupanca,
+            TipoContaArg::Salario => Self::ContaSalario,
+            TipoContaArg::Pagamento => Self::ContaPagamento,
+        }
+    }
+}
+
 /// `--tipo-operacao`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub(crate) enum OperacaoArg {
@@ -540,6 +652,55 @@ fn parse_data(value: &str) -> Result<NaiveDate, String> {
 
 fn parse_chave(value: &str) -> Result<ChavePix, String> {
     ChavePix::parse(value).map_err(|err| err.to_string())
+}
+
+fn parse_copia_e_cola(value: &str) -> Result<CopiaECola, String> {
+    let codigo = value.trim();
+    let brcode = BrCode::parse(codigo).map_err(|err| err.to_string())?;
+    Ok(CopiaECola {
+        codigo: codigo.to_owned(),
+        brcode,
+    })
+}
+
+fn parse_ispb(value: &str) -> Result<String, String> {
+    let ispb = value.trim();
+    if ispb.len() == 8 && ispb.bytes().all(|b| b.is_ascii_digit()) {
+        Ok(ispb.to_owned())
+    } else {
+        Err("o ISPB tem 8 dígitos (ex.: 00416968, do Inter)".to_owned())
+    }
+}
+
+/// Without the usual punctuation (`123.456-7`).
+fn sem_pontuacao(value: &str) -> String {
+    value
+        .chars()
+        .filter(|c| !matches!(c, '.' | '-' | ' '))
+        .collect()
+}
+
+fn parse_agencia(value: &str) -> Result<String, String> {
+    let agencia = sem_pontuacao(value);
+    if (1..=4).contains(&agencia.len()) && agencia.bytes().all(|b| b.is_ascii_digit()) {
+        Ok(agencia)
+    } else {
+        Err("a agência tem até 4 dígitos, sem o dígito verificador".to_owned())
+    }
+}
+
+fn parse_conta(value: &str) -> Result<String, String> {
+    let conta = sem_pontuacao(value).to_uppercase();
+    let numero = conta.strip_suffix('X').unwrap_or(&conta);
+    if !numero.is_empty() && conta.len() <= 20 && numero.bytes().all(|b| b.is_ascii_digit()) {
+        Ok(conta)
+    } else {
+        Err("use os dígitos da conta com o dígito verificador (ex.: 123456-7)".to_owned())
+    }
+}
+
+fn parse_documento(value: &str) -> Result<Documento, String> {
+    Documento::parse(value).map_err(|err| err.to_string())
 }
 
 fn parse_id_idempotente(value: &str) -> Result<IdIdempotente, String> {
@@ -765,8 +926,8 @@ mod tests {
         let Command::Pix(PixCommand::Enviar(args)) = cli.command else {
             panic!("comando inesperado");
         };
-        assert_eq!(args.chave.as_str(), "fornecedor@exemplo.com");
-        assert_eq!(args.valor, "1500.00".parse::<Decimal>().unwrap());
+        assert_eq!(args.chave.unwrap().as_str(), "fornecedor@exemplo.com");
+        assert_eq!(args.valor, Some("1500.00".parse::<Decimal>().unwrap()));
         assert_eq!(args.data, NaiveDate::from_ymd_opt(2026, 10, 1));
         assert_eq!(
             args.id_idempotente.unwrap().as_str(),
@@ -776,7 +937,6 @@ mod tests {
 
         for args in [
             &["--valor", "10"][..],
-            &["--chave", "fornecedor@exemplo.com"],
             &["--chave", "11912345678", "--valor", "10"],
             &["--chave", "fornecedor@exemplo.com", "--valor", "1.500"],
             &[
@@ -800,6 +960,58 @@ mod tests {
         }
         let err = parse(&["--chave", "11912345678", "--valor", "10"]).unwrap_err();
         assert!(err.to_string().contains("+55"), "{err}");
+    }
+
+    #[test]
+    fn pix_destinations_are_exclusive_and_bank_details_complete() {
+        let parse = |args: &[&str]| {
+            let mut full = vec!["inter-pj", "pix", "enviar", "--valor", "10"];
+            full.extend_from_slice(args);
+            Cli::try_parse_from(full)
+        };
+        let dados = [
+            "--ispb",
+            "00000000",
+            "--agencia",
+            "0001",
+            "--conta",
+            "123.456-x",
+            "--tipo-conta",
+            "Poupança",
+            "--documento",
+            "12.345.678/0001-95",
+            "--nome",
+            "Fornecedor Exemplo",
+        ];
+        let Command::Pix(PixCommand::Enviar(args)) = parse(&dados).unwrap().command else {
+            panic!("comando inesperado");
+        };
+        assert_eq!(args.conta.as_deref(), Some("123456X"));
+        assert_eq!(args.tipo_conta, Some(TipoContaArg::Poupanca));
+        assert_eq!(
+            args.documento.map(|d| d.as_str().to_owned()).as_deref(),
+            Some("12345678000195")
+        );
+
+        // Exactly one destination.
+        assert!(parse(&["--chave", "fornecedor@exemplo.com", "--ispb", "00000000"]).is_err());
+        // Bank details go together.
+        assert!(parse(&dados[..10]).is_err());
+        assert!(parse(&["--chave", "fornecedor@exemplo.com", "--agencia", "0001"]).is_err());
+        for (flag, invalido) in [
+            ("--ispb", "0041696"),
+            ("--agencia", "12345"),
+            ("--conta", "12a45"),
+            ("--tipo-conta", "investimento"),
+            ("--documento", "123.456.789-00"),
+        ] {
+            let mut args = dados.to_vec();
+            let i = args.iter().position(|a| *a == flag).unwrap();
+            args[i + 1] = invalido;
+            assert!(parse(&args).is_err(), "{flag} {invalido}");
+        }
+        let err = parse(&["--copia-e-cola", "000201"]).unwrap_err();
+        assert!(err.to_string().contains("copia e cola"), "{err}");
     }
 
     #[test]
