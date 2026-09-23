@@ -3,20 +3,21 @@
 ## Visão geral
 
 ```text
-┌──────────────────────── crates/inter-pj-cli (binário `inter-pj`) ────────────────────────┐
-│ cli.rs        definição dos comandos (clap) e ajuda em português                         │
-│ config.rs     arquivo TOML, perfis, precedência flag > env > arquivo, origem dos valores │
-│ commands/     saldo, extrato (simples, completo, pdf), pix enviar/consultar, auth, config │
+┌──────────────────────── crates/inter-pj-cli (binário `inter-pj`) ─────────────────────────┐
+│ cli.rs        definição dos comandos (clap) e ajuda em português                          │
+│ config.rs     arquivo TOML, perfis, precedência flag > env > arquivo, origem dos valores  │
+│ commands/     saldo, extrato, pix, pagamento (boleto, darf, lote), auth, config           │
 │ token_store   cache de tokens em arquivo (600, gravação atômica)                          │
 │ confirmacao   resumo + [s/N] antes de mover dinheiro (só com stdin em terminal)           │
+│ arquivo/      arquivos de pagamento: JSON da API e CSV (RFC 4180, Excel pt-BR)            │
 │ valor.rs      valores em reais digitados (150,00 / 1.500,00) e por extenso                │
 │ tabela.rs     tabelas em texto alinhado e CSV (RFC 4180, modo Excel pt-BR)                │
 │ output.rs     R$ no formato brasileiro, JSON, escrita em stdout                           │
 │ files.rs      gravação de arquivos sensíveis com permissão 600                            │
 │ error.rs      códigos de saída e dicas                                                    │
-└──────────────────────────────────────┬───────────────────────────────────────────────────┘
+└──────────────────────────────────────┬────────────────────────────────────────────────────┘
                                        │ usa
-┌──────────────────────── crates/inter-pj (biblioteca `inter_pj`) ─────────────────────────┐
+┌──────────────────────── crates/inter-pj (biblioteca `inter_pj`) ──────────────────────────┐
 │ client.rs     InterClient: reqwest + rustls, mTLS, bearer, x-conta-corrente, 401 → renova │
 │ retry.rs      RetryPolicy: backoff exponencial com jitter, Retry-After, modos de repetição│
 │ auth.rs       AccessToken, TokenStore, TokenManager (memória + armazenamento externo)     │
@@ -24,7 +25,7 @@
 │ identity.rs   certificado + chave PEM validados                                           │
 │ scope.rs      os 36 escopos documentados                                                  │
 │ problem.rs    parser tolerante de erros (RFC 7807 e variações)                            │
-│ banking/      saldo, extrato (paginação e scroll), PDF, envio e consulta de Pix           │
+│ banking/      saldo, extrato (scroll), PDF, Pix, pagamentos (boleto, DARF, lote)          │
 │ boleto.rs     linha digitável e código de barras (FEBRABAN): DVs, valor, vencimento       │
 │ documento.rs  CPF e CNPJ (inclusive o alfanumérico) com dígitos verificadores             │
 │ pix/          chave Pix (formatos do DICT) e leitura do copia e cola (BR Code, CRC16)     │
@@ -94,6 +95,14 @@ Comandos que movimentam dinheiro validam tudo localmente, mostram um resumo em `
 A pergunta passa pelo trait `Terminal`. Os testes rodam o comando de verdade contra a API simulada com um terminal falso, para provar que uma resposta negativa não faz nenhuma requisição. Os testes E2E do binário cobrem `--simular`, a falta de terminal e o limite.
 
 Quando o envio falha depois de possivelmente ter chegado à API (tempo esgotado, `5xx`, resposta ilegível), o erro vem com a chave de idempotência e a instrução para repetir com `--id-idempotente`, sem risco de pagar duas vezes.
+
+Os pagamentos (boleto, DARF e lote) não têm chave de idempotência. Nesse mesmo caso, o erro vem com o comando que confere se o pagamento foi feito (`pagamento boleto listar --codigo ...`, `pagamento darf listar --codigo-receita ...`), para usar antes de uma nova tentativa; num lote, cada pagamento aparece na listagem do seu tipo.
+
+### Arquivos de pagamento
+
+DARFs (`pagamento darf pagar --arquivo`) e lotes (`pagamento lote enviar --arquivo`) vêm de arquivos com os nomes de campo da API, para que a documentação do Inter valha também para eles. Campos desconhecidos são recusados, porque um erro de digitação (`valorMuta`) não pode apagar a multa em silêncio, e cada erro aponta o arquivo, a linha ou posição e o campo. Valores aceitam número JSON (`47.14`) ou texto como as pessoas digitam (`"47,14"`, com as mesmas regras de `valor.rs`); datas, só `AAAA-MM-DD`, porque `05/10` é ambíguo entre planilhas brasileiras e americanas.
+
+O CSV do lote segue a RFC 4180 (aspas, quebras de linha dentro de aspas, CRLF). O separador, `,` ou `;`, é detectado pelo cabeçalho, e o BOM é ignorado, como o Excel em português grava. Cada linha vira o mesmo objeto JSON do outro formato, então as duas entradas passam pela mesma validação. O lote inteiro é conferido antes do envio, e todos os problemas são relatados de uma vez. O Excel, ao abrir um CSV, troca números longos por notação científica (perdendo dígitos) e tira zeros à esquerda: esses casos são reconhecidos e explicados. Os modelos (`pagamento lote modelo`) usam a linha digitável e o CNPJ formatados, que o Excel mantém como texto.
 
 ### Extrato completo: paginação e scroll
 
