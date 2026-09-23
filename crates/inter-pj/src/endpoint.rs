@@ -118,6 +118,20 @@ pub mod banking {
         path: "/banking/v2/extrato/exportar",
         scopes: &[Scope::ExtratoRead],
     };
+
+    /// `POST /banking/v2/pix` — sends a Pix (key, bank details or copia e cola).
+    pub const PIX_INCLUIR: Endpoint = Endpoint {
+        method: Method::Post,
+        path: "/banking/v2/pix",
+        scopes: &[Scope::PagamentoPixWrite],
+    };
+
+    /// `GET /banking/v2/pix/{codigoSolicitacao}` — status of a Pix sent.
+    pub const PIX_CONSULTAR: Endpoint = Endpoint {
+        method: Method::Get,
+        path: "/banking/v2/pix/{codigoSolicitacao}",
+        scopes: &[Scope::PagamentoPixRead],
+    };
 }
 
 /// Every operation implemented by this crate.
@@ -127,4 +141,6 @@ pub const ALL: &[Endpoint] = &[
     banking::EXTRATO,
     banking::EXTRATO_COMPLETO,
     banking::EXTRATO_EXPORTAR,
+    banking::PIX_INCLUIR,
+    banking::PIX_CONSULTAR,
 ];

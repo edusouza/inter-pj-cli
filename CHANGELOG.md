@@ -9,6 +9,7 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 ### Adicionado
 
 - Biblioteca: `documento::Documento` valida CPF e CNPJ (inclusive o CNPJ alfanumérico), `pix::ChavePix` reconhece e normaliza chaves Pix (CPF, CNPJ, e-mail, celular `+55` e chave aleatória) e `pix::BrCode` decodifica o Pix copia e cola, conferindo o CRC16 (#20).
+- Biblioteca: `Banking::enviar_pix` (por chave, dados bancários ou copia e cola, com `x-id-idempotente`) e `Banking::consultar_pix` (status e histórico), com validação local do pagamento e repetição automática só quando o envio certamente não foi processado (#20, #21).
 
 ## [0.2.0] - 2026-09-23
 

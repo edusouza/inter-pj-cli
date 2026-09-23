@@ -13,6 +13,81 @@ pub(crate) fn parse_date(raw: &str) -> Option<NaiveDate> {
         .ok()
 }
 
+/// Defines an enum with the codes the API documents for a field, plus
+/// `Outro(String)`, so codes added later do not break deserialization.
+/// Generates `DOCUMENTADOS`, `as_str` and `From<&str>`.
+macro_rules! api_enum {
+    (
+        $(#[$meta:meta])*
+        pub enum $name:ident {
+            $( $(#[$doc:meta])* $variant:ident => $api:literal, )*
+        }
+    ) => {
+        $(#[$meta])*
+        #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+        #[non_exhaustive]
+        pub enum $name {
+            $( $(#[$doc])* $variant, )*
+            /// A code the API does not document, kept as received.
+            Outro(String),
+        }
+
+        impl $name {
+            /// Every code documented by the API.
+            pub const DOCUMENTADOS: &'static [$name] = &[$($name::$variant,)*];
+
+            /// Code used by the API (e.g. `PIX`).
+            pub fn as_str(&self) -> &str {
+                match self {
+                    $( Self::$variant => $api, )*
+                    Self::Outro(raw) => raw,
+                }
+            }
+        }
+
+        impl From<&str> for $name {
+            fn from(raw: &str) -> Self {
+                match raw.trim() {
+                    $( $api => Self::$variant, )*
+                    other => Self::Outro(other.to_owned()),
+                }
+            }
+        }
+    };
+}
+pub(crate) use api_enum;
+
+/// Implements `Display`, `Serialize` and `Deserialize` for code enums through
+/// their `as_str` and `From<&str>`.
+macro_rules! string_serde {
+    ($($ty:ty),*) => {$(
+        impl std::fmt::Display for $ty {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str(self.as_str())
+            }
+        }
+
+        impl serde::Serialize for $ty {
+            fn serialize<S: serde::Serializer>(
+                &self,
+                serializer: S,
+            ) -> std::result::Result<S::Ok, S::Error> {
+                serializer.serialize_str(self.as_str())
+            }
+        }
+
+        impl<'de> serde::Deserialize<'de> for $ty {
+            fn deserialize<D: serde::Deserializer<'de>>(
+                deserializer: D,
+            ) -> std::result::Result<Self, D::Error> {
+                let raw = <String as serde::Deserialize>::deserialize(deserializer)?;
+                Ok(Self::from(raw.as_str()))
+            }
+        }
+    )*};
+}
+pub(crate) use string_serde;
+
 /// Deserializers that tolerate the type variations seen across endpoints
 /// (numbers sent as strings and vice versa).
 pub(crate) mod lenient {
@@ -55,6 +130,13 @@ pub(crate) mod lenient {
             .or_else(|_| Decimal::from_scientific(&text))
             .map(Some)
             .map_err(|_| D::Error::custom(format!("valor monetário inválido: \"{text}\"")))
+    }
+
+    /// List that may also arrive as `null`.
+    pub(crate) fn vec<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
+        deserializer: D,
+    ) -> Result<Vec<T>, D::Error> {
+        Ok(Option::<Vec<T>>::deserialize(deserializer)?.unwrap_or_default())
     }
 
     /// Counter sent as a number or a numeric string; other values are ignored.

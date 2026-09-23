@@ -3,6 +3,8 @@
 use std::fmt;
 use std::str::FromStr;
 
+use serde::{Serialize, Serializer};
+
 /// A CPF or CNPJ with valid check digits.
 ///
 /// Accepts the usual punctuation (`123.456.789-09`, `12.345.678/0001-95`)
@@ -95,6 +97,14 @@ impl FromStr for Documento {
 impl fmt::Display for Documento {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.formatado())
+    }
+}
+
+/// Serialized as the APIs expect it, without punctuation (see
+/// [`as_str`](Documento::as_str)).
+impl Serialize for Documento {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
     }
 }
 
