@@ -15,6 +15,7 @@ use inter_pj::banking::{
     DataDoPagamento, IdIdempotente, TAMANHO_PAGINA_MAXIMO, TipoConta, TipoOperacao, TipoTransacao,
 };
 use inter_pj::boleto::CodigoBarras;
+use inter_pj::cobranca::Uf;
 use inter_pj::documento::Documento;
 use inter_pj::pix::{BrCode, ChavePix};
 use rust_decimal::Decimal;
@@ -643,6 +644,10 @@ pub(crate) struct PixEnviarArgs {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum CobrancaCommand {
+    /// Emite uma cobrança (pelas opções ou por --arquivo), após mostrar um resumo e pedir confirmação
+    Emitir(Box<CobrancaEmitirArgs>),
+    /// Imprime um arquivo JSON de exemplo para --arquivo, com dados fictícios
+    Modelo(CobrancaModeloArgs),
     /// Cobranças de um período (padrão: com vencimento nos últimos 30 dias), com filtros
     Listar(CobrancaListarArgs),
     /// Quantidade e valor das cobranças de um período, por situação
@@ -651,6 +656,228 @@ pub(crate) enum CobrancaCommand {
     Consultar(CobrancaConsultarArgs),
     /// Grava o PDF de uma cobrança, com o boleto e o QR Code do Pix
     Pdf(CobrancaPdfArgs),
+}
+
+/// Where the charge comes from: a file, or the options.
+#[derive(Debug, Args)]
+#[command(group(
+    ArgGroup::new("origem")
+        .required(true)
+        .args(["arquivo", "seu_numero"])
+))]
+pub(crate) struct CobrancaEmitirArgs {
+    /// Arquivo JSON com a cobrança, nos campos da API ("-" para a entrada padrão); veja `cobranca modelo`
+    #[arg(long, value_name = "ARQUIVO", help_heading = "Origem (escolha uma)")]
+    pub(crate) arquivo: Option<PathBuf>,
+
+    /// Seu número da cobrança, até 15 caracteres (ex.: o número da nota)
+    #[arg(
+        long,
+        value_name = "TEXTO",
+        requires_all = ["valor", "vencimento", "pagador_documento", "pagador_nome", "pagador_endereco", "pagador_cidade", "pagador_uf", "pagador_cep"],
+        help_heading = "Origem (escolha uma)"
+    )]
+    pub(crate) seu_numero: Option<String>,
+
+    /// Valor: 150,00, 1.500,00 ou 150.00 (de R$ 2,50 a R$ 99.999.999,99)
+    #[arg(long, value_name = "VALOR", value_parser = parse_valor, requires = "seu_numero", help_heading = "Cobrança")]
+    pub(crate) valor: Option<Decimal>,
+
+    /// Vencimento (AAAA-MM-DD), hoje ou depois
+    #[arg(long, value_name = "AAAA-MM-DD", value_parser = parse_data, requires = "seu_numero", help_heading = "Cobrança")]
+    pub(crate) vencimento: Option<NaiveDate>,
+
+    /// Dias após o vencimento até a cobrança não paga ser cancelada, de 0 a 60 [padrão: 0]
+    #[arg(
+        long,
+        value_name = "DIAS",
+        requires = "seu_numero",
+        help_heading = "Cobrança"
+    )]
+    pub(crate) dias_agenda: Option<u32>,
+
+    /// Desconto por pagar antes: percentual (2%) ou valor (10,00)
+    #[arg(long, value_name = "TAXA|VALOR", value_parser = parse_taxa_ou_valor, requires = "seu_numero", help_heading = "Cobrança")]
+    pub(crate) desconto: Option<TaxaOuValor>,
+
+    /// Dias antes do vencimento até quando o desconto vale [padrão: 0, até o vencimento]
+    #[arg(
+        long,
+        value_name = "DIAS",
+        requires = "desconto",
+        help_heading = "Cobrança"
+    )]
+    pub(crate) desconto_dias: Option<u32>,
+
+    /// Multa por atraso: percentual (2%) ou valor (4,00)
+    #[arg(long, value_name = "TAXA|VALOR", value_parser = parse_taxa_ou_valor, requires = "seu_numero", help_heading = "Cobrança")]
+    pub(crate) multa: Option<TaxaOuValor>,
+
+    /// Juros por atraso: percentual ao mês (1%) ou valor por dia (0,33)
+    #[arg(long, value_name = "TAXA|VALOR", value_parser = parse_taxa_ou_valor, requires = "seu_numero", help_heading = "Cobrança")]
+    pub(crate) juros: Option<TaxaOuValor>,
+
+    /// Linha impressa no boleto, até 78 caracteres; repita para até 5 linhas
+    #[arg(long, value_name = "TEXTO", action = ArgAction::Append, requires = "seu_numero", help_heading = "Cobrança")]
+    pub(crate) mensagem: Vec<String>,
+
+    /// Formas de recebimento: boleto, pix ou boleto,pix [padrão: boleto e, se a conta tiver chave, Pix]
+    #[arg(
+        long,
+        value_name = "FORMAS",
+        value_enum,
+        value_delimiter = ',',
+        ignore_case = true,
+        requires = "seu_numero",
+        help_heading = "Cobrança"
+    )]
+    pub(crate) receber_com: Vec<FormaArg>,
+
+    /// CPF ou CNPJ do pagador
+    #[arg(long, value_name = "CPF/CNPJ", value_parser = parse_documento, requires = "seu_numero", help_heading = "Pagador")]
+    pub(crate) pagador_documento: Option<Documento>,
+
+    /// Nome do pagador, até 100 caracteres
+    #[arg(
+        long,
+        value_name = "NOME",
+        requires = "seu_numero",
+        help_heading = "Pagador"
+    )]
+    pub(crate) pagador_nome: Option<String>,
+
+    /// Rua do pagador, até 100 caracteres
+    #[arg(
+        long,
+        value_name = "RUA",
+        requires = "seu_numero",
+        help_heading = "Pagador"
+    )]
+    pub(crate) pagador_endereco: Option<String>,
+
+    /// Número no endereço
+    #[arg(
+        long,
+        value_name = "NUMERO",
+        requires = "seu_numero",
+        help_heading = "Pagador"
+    )]
+    pub(crate) pagador_numero: Option<String>,
+
+    /// Complemento do endereço
+    #[arg(
+        long,
+        value_name = "TEXTO",
+        requires = "seu_numero",
+        help_heading = "Pagador"
+    )]
+    pub(crate) pagador_complemento: Option<String>,
+
+    /// Bairro
+    #[arg(
+        long,
+        value_name = "BAIRRO",
+        requires = "seu_numero",
+        help_heading = "Pagador"
+    )]
+    pub(crate) pagador_bairro: Option<String>,
+
+    /// Cidade
+    #[arg(
+        long,
+        value_name = "CIDADE",
+        requires = "seu_numero",
+        help_heading = "Pagador"
+    )]
+    pub(crate) pagador_cidade: Option<String>,
+
+    /// UF (sigla do estado)
+    #[arg(long, value_name = "UF", value_parser = parse_uf, requires = "seu_numero", help_heading = "Pagador")]
+    pub(crate) pagador_uf: Option<Uf>,
+
+    /// CEP: 30110-000 ou 30110000
+    #[arg(long, value_name = "CEP", value_parser = parse_cep, requires = "seu_numero", help_heading = "Pagador")]
+    pub(crate) pagador_cep: Option<String>,
+
+    /// E-mail do pagador
+    #[arg(
+        long,
+        value_name = "EMAIL",
+        requires = "seu_numero",
+        help_heading = "Pagador"
+    )]
+    pub(crate) pagador_email: Option<String>,
+
+    /// Telefone com DDD: (31) 99999-9999
+    #[arg(long, value_name = "TELEFONE", value_parser = parse_telefone, requires = "seu_numero", help_heading = "Pagador")]
+    pub(crate) pagador_telefone: Option<Telefone>,
+
+    #[command(flatten)]
+    pub(crate) depois: DepoisDaEmissaoArgs,
+
+    /// Confirma sem perguntar (para scripts)
+    #[arg(long, conflicts_with = "simular", help_heading = "Segurança")]
+    pub(crate) sim: bool,
+
+    /// Mostra a requisição que seria enviada, sem enviar nada
+    #[arg(long, conflicts_with = "aguardar", help_heading = "Segurança")]
+    pub(crate) simular: bool,
+}
+
+/// `cobranca emitir`: what to do once the charge is requested.
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Depois da emissão")]
+pub(crate) struct DepoisDaEmissaoArgs {
+    /// Espera a emissão (consulta a cada 6 segundos) e mostra o boleto e o Pix
+    #[arg(long)]
+    pub(crate) aguardar: bool,
+
+    /// Tempo máximo de espera com --aguardar: 60s, 5m [padrão: 60s]
+    #[arg(
+        long,
+        value_name = "DURACAO",
+        value_parser = parse_duracao,
+        default_value = "60s",
+        hide_default_value = true,
+        requires = "aguardar"
+    )]
+    pub(crate) timeout: Duration,
+
+    /// Com --aguardar, desenha o QR Code do Pix no terminal
+    #[arg(long, requires = "aguardar")]
+    pub(crate) qrcode: bool,
+
+    /// Com --aguardar, grava o QR Code do Pix em PNG ("-" para a saída padrão)
+    #[arg(long, value_name = "ARQUIVO", requires = "aguardar")]
+    pub(crate) qrcode_png: Option<PathBuf>,
+
+    /// Sobrescreve a imagem se ela já existir
+    #[arg(long, requires = "qrcode_png")]
+    pub(crate) sobrescrever: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct CobrancaModeloArgs {}
+
+/// `--desconto`, `--multa` and `--juros`: a percentage (`2%`) or an amount (`4,00`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TaxaOuValor {
+    Taxa(Decimal),
+    Valor(Decimal),
+}
+
+/// A phone split into DDD and number.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Telefone {
+    pub(crate) ddd: String,
+    pub(crate) numero: String,
+}
+
+/// `--receber-com`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum FormaArg {
+    Boleto,
+    Pix,
 }
 
 /// Filters shared by `cobranca listar` and `cobranca sumario`.
@@ -1325,6 +1552,57 @@ fn parse_conta(value: &str) -> Result<String, String> {
 
 fn parse_documento(value: &str) -> Result<Documento, String> {
     Documento::parse(value).map_err(|err| err.to_string())
+}
+
+fn parse_uf(value: &str) -> Result<Uf, String> {
+    value
+        .parse()
+        .map_err(|err: inter_pj::cobranca::UfError| err.to_string())
+}
+
+/// 8 digits, with or without punctuation.
+fn parse_cep(value: &str) -> Result<String, String> {
+    let cep: String = value
+        .chars()
+        .filter(|c| !matches!(c, '-' | '.' | ' '))
+        .collect();
+    if cep.len() == 8 && cep.bytes().all(|b| b.is_ascii_digit()) {
+        Ok(cep)
+    } else {
+        Err("o CEP tem 8 dígitos (ex.: 30110-000)".to_owned())
+    }
+}
+
+/// A Brazilian phone with DDD, with or without `+55` and punctuation.
+fn parse_telefone(value: &str) -> Result<Telefone, String> {
+    let mut digitos: String = value.chars().filter(char::is_ascii_digit).collect();
+    if matches!(digitos.len(), 12 | 13) && digitos.starts_with("55") {
+        digitos.drain(..2);
+    }
+    if !matches!(digitos.len(), 10 | 11) || value.chars().any(|c| c.is_ascii_alphabetic()) {
+        return Err("telefone com DDD, como (31) 99999-9999".to_owned());
+    }
+    let numero = digitos.split_off(2);
+    Ok(Telefone {
+        ddd: digitos,
+        numero,
+    })
+}
+
+/// `2%` (or `2,5%`) is a percentage; anything else an amount (`4,00`).
+fn parse_taxa_ou_valor(value: &str) -> Result<TaxaOuValor, String> {
+    let value = value.trim();
+    match value.strip_suffix('%') {
+        Some(taxa) => taxa
+            .trim()
+            .replace(',', ".")
+            .parse::<Decimal>()
+            .ok()
+            .filter(|taxa| !taxa.is_sign_negative())
+            .map(TaxaOuValor::Taxa)
+            .ok_or_else(|| format!("percentual inválido: {value}")),
+        None => parse_valor(value).map(TaxaOuValor::Valor),
+    }
 }
 
 fn parse_codigo_barras(value: &str) -> Result<CodigoBarras, String> {
