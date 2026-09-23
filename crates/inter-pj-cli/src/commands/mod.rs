@@ -3,6 +3,7 @@
 mod auth;
 mod config;
 mod extrato;
+mod pagamento;
 mod pix;
 mod saldo;
 
@@ -10,12 +11,13 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use chrono::{Days, Local, NaiveDate};
 use clap::ArgMatches;
 use clap::parser::ValueSource;
 use inter_pj::{ClientIdentity, Credentials, InterClient};
 use secrecy::ExposeSecret;
 
-use crate::cli::{Cli, Command, Formato, GlobalArgs};
+use crate::cli::{Cli, Command, Formato, GlobalArgs, PeriodoArgs};
 use crate::config::{self as settings, Given, Inputs, Settings, Source};
 use crate::error::CliError;
 use crate::paths;
@@ -25,6 +27,9 @@ use crate::token_store::FileTokenStore;
 /// Request timeout. Longer than the library's default: a statement page can
 /// hold 10,000 transactions, and PDFs of long periods are large.
 const TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Days in the default period of listings (the last 30 days, today included).
+const DIAS_PADRAO: u64 = 30;
 
 /// Reads environment variables that are not bound to flags.
 pub(crate) trait Env {
@@ -45,7 +50,7 @@ impl Env for SystemEnv {
 pub(crate) async fn run(cli: Cli, matches: &ArgMatches) -> Result<(), CliError> {
     if cli.global.formato() == Formato::Csv && !cli.command.aceita_csv() {
         return Err(CliError::Usage(
-            "o formato csv vale apenas para listagens (saldo e extrato); use texto ou json"
+            "o formato csv vale apenas para listagens (saldo, extrato e pagamentos); use texto ou json"
                 .to_owned(),
         ));
     }
@@ -54,6 +59,7 @@ pub(crate) async fn run(cli: Cli, matches: &ArgMatches) -> Result<(), CliError> 
         Command::Saldo(args) => saldo::run(&context, &args).await,
         Command::Extrato(args) => extrato::run(&context, args).await,
         Command::Pix(command) => pix::run(&context, command).await,
+        Command::Pagamento(command) => pagamento::run(&context, command).await,
         Command::Auth(command) => auth::run(&context, command).await,
         Command::Config(command) => config::run(&context, &command),
     }
@@ -191,6 +197,21 @@ impl Context {
     }
 }
 
+fn hoje() -> NaiveDate {
+    Local::now().date_naive()
+}
+
+/// Dates of a listing: without `--fim`, today; without `--inicio`, the
+/// [`DIAS_PADRAO`] days that end on `--fim`.
+fn intervalo(periodo: PeriodoArgs, hoje: NaiveDate) -> (NaiveDate, NaiveDate) {
+    let fim = periodo.fim.unwrap_or(hoje);
+    let inicio = periodo.inicio.unwrap_or_else(|| {
+        fim.checked_sub_days(Days::new(DIAS_PADRAO - 1))
+            .unwrap_or(fim)
+    });
+    (inicio, fim)
+}
+
 /// Where the value of a global argument came from, if it was given.
 fn source_of(matches: &ArgMatches, id: &str, env: &'static str) -> Option<Source> {
     let mut current = matches;
@@ -229,6 +250,22 @@ mod tests {
         assert_eq!(
             source_of(&m, "client_id", "INTER_CLIENT_ID"),
             Some(Source::Flag)
+        );
+    }
+
+    #[test]
+    fn default_period_is_the_last_30_days() {
+        let data = |mes, dia| NaiveDate::from_ymd_opt(2026, mes, dia).unwrap();
+        let periodo = |inicio, fim| PeriodoArgs { inicio, fim };
+        let hoje = data(9, 23);
+        assert_eq!(intervalo(periodo(None, None), hoje), (data(8, 25), hoje));
+        assert_eq!(
+            intervalo(periodo(None, Some(data(9, 30))), hoje),
+            (data(9, 1), data(9, 30))
+        );
+        assert_eq!(
+            intervalo(periodo(Some(data(9, 1)), None), hoje),
+            (data(9, 1), hoje)
         );
     }
 
