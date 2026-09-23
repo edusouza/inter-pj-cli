@@ -24,6 +24,11 @@ inter-pj.workspace = true
 chrono.workspace = true
 clap.workspace = true
 etcetera.workspace = true
+# Not used directly: pins the IDNA back end of `url` to its ASCII-only
+# implementation, which drops the ~20 ICU4X crates behind Unicode domain
+# names. The CLI only talks to Inter's ASCII hosts (and to localhost in
+# tests), so non-ASCII hosts in INTER_BASE_URL are simply rejected.
+idna_adapter.workspace = true
 rust_decimal.workspace = true
 secrecy.workspace = true
 serde.workspace = true
