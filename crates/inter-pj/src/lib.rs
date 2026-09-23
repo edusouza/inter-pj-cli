@@ -43,6 +43,7 @@ pub mod endpoint;
 mod environment;
 mod error;
 mod identity;
+mod pdf;
 pub mod pix;
 pub mod problem;
 mod retry;

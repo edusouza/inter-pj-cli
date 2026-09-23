@@ -11,8 +11,6 @@ mod pagamento_pix;
 mod periodo;
 mod saldo;
 
-use base64::Engine as _;
-use base64::engine::general_purpose::STANDARD as BASE64;
 use chrono::NaiveDate;
 use serde::Deserialize;
 
@@ -47,6 +45,7 @@ pub use saldo::Saldo;
 use crate::client::{ApiRequest, InterClient};
 use crate::endpoint::{self, Endpoint};
 use crate::error::{Error, Result};
+use crate::pdf::RespostaPdf;
 use crate::pix::is_uuid;
 use crate::retry::RetryMode;
 
@@ -255,33 +254,10 @@ impl<'a> Banking<'a> {
     /// Same as [`saldo`](Self::saldo); also fails when the content received
     /// is not a base64-encoded PDF.
     pub async fn extrato_pdf(&self, periodo: Periodo) -> Result<Vec<u8>> {
-        #[derive(Deserialize)]
-        struct Resposta {
-            #[serde(default)]
-            pdf: Option<String>,
-        }
         const ENDPOINT: Endpoint = endpoint::banking::EXTRATO_EXPORTAR;
-        let invalid = |message: &str| Error::Decode {
-            operation: ENDPOINT.to_string(),
-            message: message.to_owned(),
-        };
-
         let request = ApiRequest::new(ENDPOINT).queries(periodo.query());
-        let resposta: Resposta = self.client.execute(request).await?;
-        let encoded: String = resposta
-            .pdf
-            .ok_or_else(|| invalid("a resposta não traz o campo pdf"))?
-            .chars()
-            .filter(|c| !c.is_ascii_whitespace())
-            .collect();
-        // Never quote the content in errors: it is the account statement.
-        let pdf = BASE64
-            .decode(encoded)
-            .map_err(|_| invalid("o campo pdf não está em base64"))?;
-        if !pdf.starts_with(b"%PDF") {
-            return Err(invalid("o conteúdo recebido não é um PDF"));
-        }
-        Ok(pdf)
+        let resposta: RespostaPdf = self.client.execute(request).await?;
+        resposta.decodificar(ENDPOINT)
     }
 
     /// Sends a Pix by key, bank details or copia e cola code (`POST
