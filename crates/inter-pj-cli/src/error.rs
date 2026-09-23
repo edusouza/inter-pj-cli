@@ -53,6 +53,17 @@ pub(crate) enum CliError {
         /// Command that finds the payment, to run before trying again.
         consulta: String,
     },
+    /// A charge whose issue is unknown: it may have been issued. The API
+    /// refuses an identical one for 30 minutes, but not after that.
+    #[error("{source}")]
+    EmissaoIncerta {
+        source: InterError,
+        /// Command that finds the charge, to run before trying again.
+        consulta: String,
+    },
+    /// `cobranca emitir --aguardar`: the API could not issue the charge.
+    #[error("a cobrança não foi emitida: {situacao}")]
+    CobrancaNaoEmitida { situacao: String },
     /// The user did not confirm the operation.
     #[error("operação cancelada: nada foi enviado")]
     Cancelado,
@@ -94,11 +105,14 @@ impl CliError {
             Self::Config(_) => exit::CONFIG,
             Self::Io { .. } => exit::UNEXPECTED,
             Self::Cancelado => exit::CANCELLED,
-            Self::PixNaoPago { .. } | Self::LoteComErro { .. } => exit::REJECTED,
+            Self::PixNaoPago { .. }
+            | Self::LoteComErro { .. }
+            | Self::CobrancaNaoEmitida { .. } => exit::REJECTED,
             Self::TempoEsgotado { .. } => exit::WAIT_TIMEOUT,
             Self::Inter(err)
             | Self::ResultadoIncerto { source: err, .. }
-            | Self::PagamentoIncerto { source: err, .. } => match err {
+            | Self::PagamentoIncerto { source: err, .. }
+            | Self::EmissaoIncerta { source: err, .. } => match err {
                 InterError::InvalidInput(_) => exit::USAGE,
                 InterError::Config(_) | InterError::Identity(_) => exit::CONFIG,
                 InterError::Auth(_) => exit::AUTH,
@@ -142,6 +156,12 @@ impl CliError {
                     format!(
                         "{situacao}, e esta API não tem chave de idempotência: repetir o comando pode pagar duas vezes"
                     ),
+                    format!("confira antes de tentar de novo: {consulta}"),
+                ];
+            }
+            Self::EmissaoIncerta { consulta, .. } => {
+                return vec![
+                    "a cobrança pode ter sido emitida; por 30 minutos, a API recusa outra com o mesmo seu número, valor, vencimento e pagador".to_owned(),
                     format!("confira antes de tentar de novo: {consulta}"),
                 ];
             }

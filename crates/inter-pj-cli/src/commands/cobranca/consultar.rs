@@ -8,6 +8,7 @@ use serde_json::json;
 use super::render_cobranca;
 use crate::cli::{CobrancaConsultarArgs, CobrancaPdfArgs, Formato};
 use crate::commands::Context;
+use crate::config::Settings;
 use crate::error::CliError;
 use crate::output;
 use crate::qr::{self, QrPix};
@@ -17,47 +18,82 @@ pub(super) async fn consultar(
     context: &Context,
     args: &CobrancaConsultarArgs,
 ) -> Result<(), CliError> {
-    let png = args
-        .qrcode_png
-        .clone()
-        .map(|caminho| Saida::new(caminho, args.sobrescrever));
-    let png_no_stdout = png.as_ref().is_some_and(Saida::stdout);
-    if args.qrcode && (context.formato() == Formato::Json || png_no_stdout) {
-        return Err(CliError::Usage(
-            "--qrcode desenha no terminal: não combina com --json nem com --qrcode-png -"
-                .to_owned(),
-        ));
-    }
-    if let Some(png) = &png {
-        png.conferir()?;
-    }
+    let opcoes = OpcoesQr::new(
+        context,
+        args.qrcode,
+        args.qrcode_png.clone(),
+        args.sobrescrever,
+    )?;
     let settings = context.settings()?;
     let client = context.client(&settings)?;
     let cobranca = client.cobranca().consultar(&args.codigo).await?;
+    mostrar(context, &settings, &cobranca, &opcoes)
+}
 
+/// What to do with the Pix of a charge, besides showing the charge. The
+/// default: nothing.
+#[derive(Default)]
+pub(super) struct OpcoesQr {
+    qrcode: bool,
+    png: Option<Saida>,
+}
+
+impl OpcoesQr {
+    /// Refuses what would mix outputs and checks the image file, before
+    /// any request.
+    pub(super) fn new(
+        context: &Context,
+        qrcode: bool,
+        png: Option<PathBuf>,
+        sobrescrever: bool,
+    ) -> Result<Self, CliError> {
+        let png = png.map(|caminho| Saida::new(caminho, sobrescrever));
+        if qrcode && (context.formato() == Formato::Json || png.as_ref().is_some_and(Saida::stdout))
+        {
+            return Err(CliError::Usage(
+                "--qrcode desenha no terminal: não combina com --json nem com --qrcode-png -"
+                    .to_owned(),
+            ));
+        }
+        if let Some(png) = &png {
+            png.conferir()?;
+        }
+        Ok(Self { qrcode, png })
+    }
+
+    /// Whether the standard output is for the image alone.
+    pub(super) fn png_no_stdout(&self) -> bool {
+        self.png.as_ref().is_some_and(Saida::stdout)
+    }
+}
+
+/// The charge, then its QR Code in the terminal and in a PNG, as asked.
+pub(super) fn mostrar(
+    context: &Context,
+    settings: &Settings,
+    cobranca: &CobrancaDetalhada,
+    opcoes: &OpcoesQr,
+) -> Result<(), CliError> {
     // The image alone goes to the standard output.
-    if let Some(png) = png.as_ref().filter(|png| png.stdout()) {
-        return png.gravar(&qr_code(&cobranca)?.png());
+    if let Some(png) = opcoes.png.as_ref().filter(|png| png.stdout()) {
+        return png.gravar(&qr_code(cobranca)?.png());
     }
     match context.formato() {
-        Formato::Json => output::print_json(&cobranca)?,
-        // `commands::run` refuses csv for this command.
+        Formato::Json => output::print_json(cobranca)?,
+        // `commands::run` refuses csv for these commands.
         Formato::Texto | Formato::Csv => {
-            context.warn_if_sandbox(&settings);
-            output::print(&render_cobranca(&cobranca))?;
+            context.warn_if_sandbox(settings);
+            output::print(&render_cobranca(cobranca))?;
         }
     }
-    if args.qrcode {
-        match qr_code(&cobranca) {
-            Ok(qr) => output::print_raw(&format!("\n{}", qr.terminal(qr::cores()))),
-            Err(err) => {
-                eprintln!("aviso: {err}");
-                Ok(())
-            }
-        }?;
+    if opcoes.qrcode {
+        match qr_code(cobranca) {
+            Ok(qr) => output::print_raw(&format!("\n{}", qr.terminal(qr::cores())))?,
+            Err(err) => eprintln!("aviso: {err}"),
+        }
     }
-    if let Some(png) = &png {
-        let imagem = qr_code(&cobranca)?.png();
+    if let Some(png) = &opcoes.png {
+        let imagem = qr_code(cobranca)?.png();
         png.gravar(&imagem)?;
         eprintln!(
             "QR Code salvo em {} ({})",
