@@ -302,13 +302,10 @@ fn resumo_copia_e_cola(brcode: &BrCode) -> Vec<(&'static str, String)> {
     linhas
 }
 
-/// Text from third parties (a copia e cola code), without control
-/// characters: escape sequences could rewrite what the terminal shows.
+/// Text from third parties (a copia e cola code), on one line and without
+/// control characters.
 fn limpo(texto: &str) -> String {
-    texto
-        .chars()
-        .map(|c| if c.is_control() { '\u{FFFD}' } else { c })
-        .collect()
+    output::limpo(texto).into_owned()
 }
 
 fn tipo_conta(tipo: TipoConta) -> &'static str {

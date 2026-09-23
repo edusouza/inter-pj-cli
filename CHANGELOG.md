@@ -13,6 +13,10 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 - Biblioteca: `Banking::pagar_darf` (DARF sem código de barras, com validação local do código da receita, da referência, dos textos e dos valores) e `Banking::darfs` (filtros por período, código da receita e solicitação) (#25).
 - Biblioteca: `Banking::enviar_lote` (lotes de 2 a 150 boletos e DARFs, validados item a item) e `Banking::consultar_lote` (status do lote e de cada pagamento) (#26).
 
+### Corrigido
+
+- A saída em texto neutraliza caracteres de controle vindos da API (nomes, descrições, mensagens de erro): sequências de escape e quebras de linha não chegam mais ao terminal, onde poderiam reescrever a tela ou simular linhas do extrato e das consultas. JSON e CSV continuam com o texto original.
+
 ## [0.3.0] - 2026-09-23
 
 Pix: envio e consulta, com trilhos de segurança.
