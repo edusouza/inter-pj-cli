@@ -293,6 +293,13 @@ pub(crate) enum Command {
         subcommand_value_name = "COMANDO"
     )]
     Pagamento(PagamentoCommand),
+    /// Cobranças: boletos com Pix para os clientes da empresa
+    #[command(
+        subcommand,
+        subcommand_help_heading = "Comandos",
+        subcommand_value_name = "COMANDO"
+    )]
+    Cobranca(CobrancaCommand),
     /// Tokens de acesso OAuth
     #[command(
         subcommand,
@@ -319,7 +326,11 @@ impl Command {
                 | PagamentoCommand::Darf(DarfCommand::Listar(_)),
             ) => true,
             Self::Extrato(args) => !matches!(args.comando, Some(ExtratoCommand::Pdf(_))),
-            Self::Pix(_) | Self::Pagamento(_) | Self::Auth(_) | Self::Config(_) => false,
+            Self::Pix(_)
+            | Self::Pagamento(_)
+            | Self::Cobranca(_)
+            | Self::Auth(_)
+            | Self::Config(_) => false,
         }
     }
 }
@@ -627,6 +638,50 @@ pub(crate) struct PixEnviarArgs {
         help_heading = "Segurança"
     )]
     pub(crate) id_idempotente: Option<IdIdempotente>,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum CobrancaCommand {
+    /// Mostra uma cobrança: situação, valores, boleto e Pix (com o QR Code, se pedido)
+    Consultar(CobrancaConsultarArgs),
+    /// Grava o PDF de uma cobrança, com o boleto e o QR Code do Pix
+    Pdf(CobrancaPdfArgs),
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct CobrancaConsultarArgs {
+    /// Código da cobrança (codigoSolicitacao), mostrado por `cobranca emitir` e `cobranca listar`
+    #[arg(value_name = "CODIGO")]
+    pub(crate) codigo: String,
+
+    /// Desenha no terminal o QR Code do Pix, para ler com o celular
+    #[arg(long)]
+    pub(crate) qrcode: bool,
+
+    /// Grava o QR Code do Pix em uma imagem PNG ("-" para a saída padrão)
+    #[arg(long, value_name = "ARQUIVO")]
+    pub(crate) qrcode_png: Option<PathBuf>,
+
+    /// Sobrescreve a imagem se ela já existir
+    #[arg(long, requires = "qrcode_png")]
+    pub(crate) sobrescrever: bool,
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct CobrancaPdfArgs {
+    /// Código da cobrança (codigoSolicitacao)
+    #[arg(value_name = "CODIGO")]
+    pub(crate) codigo: String,
+
+    /// Arquivo a gravar ("-" para a saída padrão). Padrão: cobranca-<codigo>.pdf
+    #[arg(short = 'o', long, value_name = "ARQUIVO")]
+    pub(crate) saida: Option<PathBuf>,
+
+    /// Sobrescreve o arquivo se ele já existir
+    #[arg(long)]
+    pub(crate) sobrescrever: bool,
 }
 
 #[derive(Debug, Subcommand)]

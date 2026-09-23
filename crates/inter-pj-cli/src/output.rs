@@ -3,7 +3,7 @@
 use std::borrow::Cow;
 use std::io::{self, Write};
 
-use chrono::{DateTime, NaiveDateTime};
+use chrono::{DateTime, NaiveDate, NaiveDateTime};
 use rust_decimal::{Decimal, RoundingStrategy};
 use serde::Serialize;
 
@@ -137,6 +137,20 @@ pub(crate) fn print_json<T: Serialize>(value: &T) -> Result<(), CliError> {
     let json = serde_json::to_string_pretty(value)
         .map_err(|err| CliError::io("falha ao gerar JSON", io::Error::other(err)))?;
     print(&json)
+}
+
+/// A date as the APIs send it: `2026-10-09`, `2026-10-09 00:00:00` or
+/// `09/10/2026`.
+pub(crate) fn parse_data(raw: &str) -> Option<NaiveDate> {
+    let raw = raw.trim();
+    NaiveDate::parse_from_str(raw.get(..10).unwrap_or(raw), "%Y-%m-%d")
+        .or_else(|_| NaiveDate::parse_from_str(raw, "%d/%m/%Y"))
+        .ok()
+}
+
+/// [`parse_data`] as `09/10/2026`; other formats as received.
+pub(crate) fn data_br(raw: &str) -> String {
+    parse_data(raw).map_or_else(|| raw.to_owned(), |dia| dia.format("%d/%m/%Y").to_string())
 }
 
 /// `2026-09-23T12:00:00(.fff)(±hh:mm)` -> `23/09/2026 12:00:00`; other

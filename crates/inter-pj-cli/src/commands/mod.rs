@@ -1,6 +1,7 @@
 //! Command implementations and the context they share.
 
 mod auth;
+mod cobranca;
 mod config;
 mod extrato;
 mod pagamento;
@@ -61,6 +62,7 @@ pub(crate) async fn run(cli: Cli, matches: &ArgMatches) -> Result<(), CliError> 
         Command::Extrato(args) => extrato::run(&context, args).await,
         Command::Pix(command) => pix::run(&context, command).await,
         Command::Pagamento(command) => pagamento::run(&context, command).await,
+        Command::Cobranca(command) => cobranca::run(&context, command).await,
         Command::Auth(command) => auth::run(&context, command).await,
         Command::Config(command) => config::run(&context, &command),
     }

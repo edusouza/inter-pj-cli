@@ -2,8 +2,7 @@
 
 use std::borrow::Cow;
 use std::fmt::Write as _;
-use std::io::{self, IsTerminal, Write};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use chrono::NaiveDate;
 use inter_pj::banking::{
@@ -18,8 +17,8 @@ use crate::cli::{
     ExtratoArgs, ExtratoCommand, ExtratoCompletoArgs, ExtratoPdfArgs, Formato, PeriodoArgs,
 };
 use crate::error::CliError;
-use crate::files::{create_private, write_private};
 use crate::output;
+use crate::saida::{Saida, tamanho};
 use crate::tabela::{Celula, Coluna, Tabela};
 
 /// Longest description shown in the text output.
@@ -402,38 +401,20 @@ async fn pdf(context: &Context, args: &ExtratoPdfArgs) -> Result<(), CliError> {
             fim.format("%Y-%m-%d")
         ))
     });
-    let para_stdout = saida.as_os_str() == "-";
-    // Checked before calling the API; the write itself is atomic.
-    if para_stdout && io::stdout().is_terminal() {
-        return Err(CliError::Usage(
-            "a saída padrão é um terminal: redirecione (> extrato.pdf) ou use --saida ARQUIVO"
-                .to_owned(),
-        ));
-    }
-    if !para_stdout && !args.sobrescrever && saida.exists() {
-        return Err(ja_existe(&saida));
-    }
+    let saida = Saida::new(saida, args.sobrescrever);
+    saida.conferir()?;
 
     let settings = context.settings()?;
     let client = context.client(&settings)?;
     let documento = client.banking().extrato_pdf(periodo).await?;
-
-    if para_stdout {
-        return escrever_stdout(&documento);
+    saida.gravar(&documento)?;
+    if saida.stdout() {
+        return Ok(());
     }
-    let gravado = if args.sobrescrever {
-        write_private(&saida, &documento)
-    } else {
-        create_private(&saida, &documento)
-    };
-    gravado.map_err(|err| match err.kind() {
-        io::ErrorKind::AlreadyExists => ja_existe(&saida),
-        _ => CliError::io(format!("falha ao gravar {}", saida.display()), err),
-    })?;
 
     match context.formato() {
         Formato::Json => output::print_json(&json!({
-            "arquivo": saida.display().to_string(),
+            "arquivo": saida.caminho().display().to_string(),
             "bytes": documento.len(),
             "dataInicio": inicio.format("%Y-%m-%d").to_string(),
             "dataFim": fim.format("%Y-%m-%d").to_string(),
@@ -443,38 +424,10 @@ async fn pdf(context: &Context, args: &ExtratoPdfArgs) -> Result<(), CliError> {
             context.warn_if_sandbox(&settings);
             output::print(&format!(
                 "Extrato de {periodo} salvo em {} ({})",
-                saida.display(),
+                saida.caminho().display(),
                 tamanho(documento.len())
             ))
         }
-    }
-}
-
-fn ja_existe(path: &Path) -> CliError {
-    CliError::Usage(format!(
-        "o arquivo {} já existe; use --sobrescrever para substituí-lo",
-        path.display()
-    ))
-}
-
-fn escrever_stdout(bytes: &[u8]) -> Result<(), CliError> {
-    let mut stdout = io::stdout().lock();
-    match stdout.write_all(bytes).and_then(|()| stdout.flush()) {
-        Err(err) if err.kind() != io::ErrorKind::BrokenPipe => {
-            Err(CliError::io("falha ao escrever na saída padrão", err))
-        }
-        _ => Ok(()),
-    }
-}
-
-/// `12,3 KB`.
-fn tamanho(bytes: usize) -> String {
-    #[allow(clippy::cast_precision_loss)] // display only
-    let kb = bytes as f64 / 1024.0;
-    if kb < 1024.0 {
-        format!("{kb:.1} KB").replace('.', ",")
-    } else {
-        format!("{:.1} MB", kb / 1024.0).replace('.', ",")
     }
 }
 

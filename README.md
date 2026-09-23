@@ -322,6 +322,39 @@ O CSV aceita `,` ou `;` como separador (detectado pelo cabeçalho), UTF-8 com ou
 
 O lote é processado depois do envio: `pagamento lote consultar` mostra o status do lote e de cada pagamento, e com `--aguardar` consulta a cada 6 segundos até o fim do processamento, saindo com o código 0 (processado sem erro), 5 (algum pagamento não foi feito) ou 8 (o tempo acabou; padrão: 5 min). Como nos outros pagamentos, não há chave de idempotência: se o resultado do envio ficar incerto, confira `pagamento boleto listar` e `pagamento darf listar` antes de enviar de novo. O envio precisa do escopo `pagamento-lote.write`, e a consulta, de `pagamento-lote.read`.
 
+### Cobranças
+
+Cobranças são boletos com Pix para os clientes da empresa. A consulta mostra a situação, os valores e os encargos, o boleto e o Pix:
+
+```console
+$ inter-pj cobranca consultar 0b7e4c1a-5d3f-4a2b-9c8d-7e6f5a4b3c2d
+Cobrança NF-123
+  Situação    a receber
+  Valor       R$ 150,00
+  Vencimento  20/10/2026
+  Pagador     Cliente Exemplo Ltda (12.345.678/0001-95)
+  Emitida em  23/09/2026
+  Tipo        simples
+  Desconto    2% até 5 dias antes do vencimento
+  Multa       2%
+  Juros       1% ao mês
+  Código      0b7e4c1a-5d3f-4a2b-9c8d-7e6f5a4b3c2d
+
+Boleto
+  Nosso número     12345678
+  Linha digitável  07790.00116 12345.678002 12345.678903 1 16050000015000
+
+Pix
+  Copia e cola  00020126580014br.gov.bcb.pix0136123e4567-e12b-...63041D3D
+  txid          COBRANCAEXEMPLO00000000001
+
+$ inter-pj cobranca consultar 0b7e4c1a-5d3f-4a2b-9c8d-7e6f5a4b3c2d --qrcode            # desenha o QR Code do Pix
+$ inter-pj cobranca consultar 0b7e4c1a-5d3f-4a2b-9c8d-7e6f5a4b3c2d --qrcode-png pix.png # grava o QR Code em PNG
+$ inter-pj cobranca pdf 0b7e4c1a-5d3f-4a2b-9c8d-7e6f5a4b3c2d                           # cobranca-<codigo>.pdf
+```
+
+`--qrcode` desenha o QR Code do Pix no terminal, para o cliente ler com o celular. Em um terminal, ele sai preto no branco, qualquer que seja o tema. Com `NO_COLOR` ou com a saída redirecionada, sem cores, os módulos claros é que são desenhados, como no `qrencode -t UTF8`, e o código fica certo em terminais de fundo escuro; para imprimir ou enviar, prefira `--qrcode-png`. Antes de desenhar, a CLI confere o copia e cola (CRC16). O PNG e o PDF são gravados com permissão `600` e não sobrescrevem um arquivo existente sem `--sobrescrever`; `-` os envia para a saída padrão. As consultas precisam do escopo `boleto-cobranca.read`.
+
 ### Formatos de saída
 
 | Formato | Para quê |
