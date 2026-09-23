@@ -10,9 +10,11 @@ mod cli;
 mod commands;
 mod config;
 mod error;
+mod files;
 mod logging;
 mod output;
 mod paths;
+mod tabela;
 mod token_store;
 
 use std::process::ExitCode;

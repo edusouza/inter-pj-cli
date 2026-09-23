@@ -7,6 +7,7 @@ use super::Context;
 use crate::cli::{Formato, SaldoArgs};
 use crate::error::CliError;
 use crate::output;
+use crate::tabela::{Celula, Coluna, Tabela};
 
 pub(super) async fn run(context: &Context, args: &SaldoArgs) -> Result<(), CliError> {
     let settings = context.settings()?;
@@ -14,6 +15,7 @@ pub(super) async fn run(context: &Context, args: &SaldoArgs) -> Result<(), CliEr
     let saldo = client.banking().saldo(args.data).await?;
     match context.formato() {
         Formato::Json => output::print_json(&saldo),
+        Formato::Csv => output::print_raw(&csv(&saldo, args.data).csv(context.separador())),
         Formato::Texto => {
             context.warn_if_sandbox(&settings);
             output::print(&render(&saldo, args.data))
@@ -45,6 +47,27 @@ fn render(saldo: &Saldo, data: Option<NaiveDate>) -> String {
         rows.push(("Saldo", "não informado pela API".to_owned()));
     }
     output::key_values(&rows)
+}
+
+/// One line with the API field names (plus the date queried, if any).
+fn csv(saldo: &Saldo, data: Option<NaiveDate>) -> Tabela {
+    let valores = [
+        ("disponivel", saldo.disponivel),
+        ("bloqueadoCheque", saldo.bloqueado_cheque),
+        ("bloqueadoJudicialmente", saldo.bloqueado_judicialmente),
+        ("bloqueadoAdministrativo", saldo.bloqueado_administrativo),
+        ("limite", saldo.limite),
+    ];
+    let mut colunas = vec![Coluna::texto("dataSaldo", "dataSaldo")];
+    colunas.extend(valores.iter().map(|(campo, _)| Coluna::valor(campo, campo)));
+    colunas.push(Coluna::texto("dataReferencia", "dataReferencia"));
+    let mut linha = vec![data.map_or(Celula::Vazia, Celula::Data)];
+    linha.extend(valores.iter().map(|(_, valor)| Celula::dinheiro(*valor)));
+    linha.push(Celula::texto(saldo.data_referencia.as_deref()));
+
+    let mut tabela = Tabela::new(colunas);
+    tabela.linha(linha);
+    tabela
 }
 
 #[cfg(test)]
@@ -87,6 +110,16 @@ Limite                    R$ 1.000,00"
 Data da consulta    03/01/2026
 Saldo disponível      -R$ 5,00
 Data de referência  02/01/2026"
+        );
+    }
+
+    #[test]
+    fn csv_has_one_line_with_api_names() {
+        let saldo = saldo(r#"{"disponivel":2850.55,"limite":1000}"#);
+        let data = NaiveDate::from_ymd_opt(2026, 1, 3);
+        assert_eq!(
+            csv(&saldo, data).csv(crate::tabela::Separador::Virgula),
+            "dataSaldo,disponivel,bloqueadoCheque,bloqueadoJudicialmente,bloqueadoAdministrativo,limite,dataReferencia\r\n2026-01-03,2850.55,,,,1000,\r\n"
         );
     }
 
