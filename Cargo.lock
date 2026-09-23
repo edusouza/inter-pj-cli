@@ -873,6 +873,7 @@ name = "inter-pj-cli"
 version = "0.1.0"
 dependencies = [
  "assert_cmd",
+ "base64 0.23.1",
  "chrono",
  "clap",
  "etcetera",

@@ -2,10 +2,12 @@
 
 mod auth;
 mod config;
+mod extrato;
 mod saldo;
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use clap::ArgMatches;
 use clap::parser::ValueSource;
@@ -16,7 +18,12 @@ use crate::cli::{Cli, Command, Formato, GlobalArgs};
 use crate::config::{self as settings, Given, Inputs, Settings, Source};
 use crate::error::CliError;
 use crate::paths;
+use crate::tabela::Separador;
 use crate::token_store::FileTokenStore;
+
+/// Request timeout. Longer than the library's default: a statement page can
+/// hold 10,000 transactions, and PDFs of long periods are large.
+const TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Reads environment variables that are not bound to flags.
 pub(crate) trait Env {
@@ -35,9 +42,16 @@ impl Env for SystemEnv {
 
 /// Runs the parsed command.
 pub(crate) async fn run(cli: Cli, matches: &ArgMatches) -> Result<(), CliError> {
+    if cli.global.formato() == Formato::Csv && !cli.command.aceita_csv() {
+        return Err(CliError::Usage(
+            "o formato csv vale apenas para listagens (saldo e extrato); use texto ou json"
+                .to_owned(),
+        ));
+    }
     let context = Context::new(cli.global, matches, &SystemEnv)?;
     match cli.command {
         Command::Saldo(args) => saldo::run(&context, &args).await,
+        Command::Extrato(args) => extrato::run(&context, args).await,
         Command::Auth(command) => auth::run(&context, command).await,
         Command::Config(command) => config::run(&context, &command),
     }
@@ -88,6 +102,10 @@ impl Context {
 
     pub(crate) fn formato(&self) -> Formato {
         self.global.formato()
+    }
+
+    pub(crate) fn separador(&self) -> Separador {
+        self.global.separador
     }
 
     pub(crate) fn config_path(&self) -> &PathBuf {
@@ -141,6 +159,7 @@ impl Context {
             ))
             .identity(identity)
             .user_agent(concat!("inter-pj-cli/", env!("CARGO_PKG_VERSION")))
+            .timeout(TIMEOUT)
             .retry_policy(self.global.retry_policy());
         if let Some(url) = &settings.base_url {
             builder = builder.base_url(url.value.clone());
