@@ -154,7 +154,107 @@ fn saldo_endpoint_documents_the_date_parameter() {
     assert!(names.contains(&"x-conta-corrente"), "{names:?}");
 }
 
+/// The portal's examples carried real-looking CPFs, phone numbers and bank
+/// accounts; `spec/sanitizar.py` replaces them with synthetic values. This
+/// test keeps it that way when the specification is updated.
+#[test]
+fn spec_examples_contain_no_real_looking_personal_data() {
+    const ALLOWED_CPFS: [&str; 2] = ["01234567890", "12345678909"];
+    const SYNTHETIC_PHONE: &str = "+5500000000000";
+    const ACCOUNT_DIGITS: &str = "123456789012345678901234567890";
+
+    let mut problems = Vec::new();
+    visit(spec(), &mut Vec::new(), &mut |path, value| {
+        let text = match value {
+            Value::String(s) => s.clone(),
+            Value::Number(n) if n.is_u64() => n.to_string(),
+            _ => return,
+        };
+        let digits: String = text.chars().filter(char::is_ascii_digit).collect();
+        let location = path.join("/");
+
+        let in_cpf_field = path.iter().any(|p| p.to_lowercase().contains("cpf"));
+        if in_cpf_field
+            && looks_like_cpf(&text)
+            && cpf_is_valid(&digits)
+            && !ALLOWED_CPFS.contains(&digits.as_str())
+        {
+            problems.push(format!("CPF em {location}"));
+        }
+        if text.starts_with("+55") && text != SYNTHETIC_PHONE {
+            problems.push(format!("telefone em {location}"));
+        }
+        let field = path
+            .iter()
+            .rev()
+            .find(|p| !matches!(p.as_str(), "example" | "value" | "default"));
+        let account_field = field.is_some_and(|f| f.to_lowercase().contains("conta"));
+        if account_field
+            && digits == text
+            && text.len() >= 4
+            && !text.chars().all(|c| c == '0')
+            && !ACCOUNT_DIGITS.starts_with(&text)
+        {
+            problems.push(format!("conta em {location}"));
+        }
+    });
+    assert!(
+        problems.is_empty(),
+        "rode `python3 spec/sanitizar.py`; dados possivelmente reais:\n{problems:#?}"
+    );
+}
+
+#[test]
+fn cpf_check_digits() {
+    assert!(cpf_is_valid("12345678909"));
+    assert!(!cpf_is_valid("12345678900"));
+    assert!(!cpf_is_valid("11111111111"));
+    assert!(looks_like_cpf("123.456.789-09"));
+    assert!(!looks_like_cpf("1234567890"));
+}
+
 // --- helpers ---------------------------------------------------------------
+
+fn visit(value: &Value, path: &mut Vec<String>, f: &mut dyn FnMut(&[String], &Value)) {
+    match value {
+        Value::Object(object) => {
+            for (key, item) in object {
+                path.push(key.clone());
+                visit(item, path, f);
+                path.pop();
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                visit(item, path, f);
+            }
+        }
+        other => f(path, other),
+    }
+}
+
+fn looks_like_cpf(text: &str) -> bool {
+    let digits = text.chars().filter(char::is_ascii_digit).count();
+    let allowed = text
+        .chars()
+        .all(|c| c.is_ascii_digit() || c == '.' || c == '-');
+    digits == 11 && allowed && (text.len() == 11 || text.len() == 14)
+}
+
+fn cpf_is_valid(digits: &str) -> bool {
+    let d: Vec<u32> = digits.chars().filter_map(|c| c.to_digit(10)).collect();
+    if d.len() != 11 || d.iter().all(|&x| x == d[0]) {
+        return false;
+    }
+    [9usize, 10].iter().all(|&size| {
+        let total: u32 = d[..size]
+            .iter()
+            .zip((2..=u32::try_from(size).unwrap() + 1).rev())
+            .map(|(digit, weight)| digit * weight)
+            .sum();
+        (total * 10) % 11 % 10 == d[size]
+    })
+}
 
 fn schema(name: &str) -> &'static Value {
     let schema = &spec()["components"]["schemas"][name];

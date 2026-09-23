@@ -21,10 +21,17 @@ A especificação é a **fonte de verdade dos testes de contrato** (`crates/inte
 - o enum `Scope` precisa conter exatamente os escopos declarados (exceto os do Fórum);
 - os modelos Rust precisam aceitar os exemplos derivados dos schemas.
 
+## Dados pessoais nos exemplos
+
+Alguns exemplos do portal traziam CPFs com dígitos verificadores válidos, telefone e números de conta com aparência real (por exemplo, no detalhe de transferências e nos pagadores de cobranças). Para não manter possíveis dados de terceiros no repositório, eles foram substituídos por valores sintéticos (`123.456.789-09`, `+5500000000000`, contas `1234…`) pelo script [`sanitizar.py`](sanitizar.py), que preserva o restante do arquivo byte a byte.
+
+O teste `spec_examples_contain_no_real_looking_personal_data` falha se um dado desse tipo voltar à especificação.
+
 ## Atualização
 
 1. Substitua o arquivo pela versão nova, sem reformatar.
-2. Rode `cargo test -p inter-pj --test contract` e revise o `git diff` da especificação.
-3. Registre no `CHANGELOG.md` qualquer mudança de contrato relevante.
+2. Rode `python3 spec/sanitizar.py`.
+3. Rode `cargo test -p inter-pj --test contract` e revise o `git diff` da especificação.
+4. Registre no `CHANGELOG.md` qualquer mudança de contrato relevante.
 
-O arquivo contém apenas a documentação pública do portal, com exemplos fictícios. Nunca adicione aqui respostas reais da sua conta.
+Nunca adicione aqui respostas reais da sua conta.
