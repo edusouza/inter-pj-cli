@@ -1,12 +1,10 @@
-use std::fmt;
-
 use chrono::NaiveDate;
 use rust_decimal::Decimal;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 
 use super::detalhe::Detalhe;
 use super::periodo::Periodo;
-use crate::serde_util::{decimal_as_number, lenient, parse_date};
+use crate::serde_util::{api_enum, decimal_as_number, lenient, parse_date, string_serde};
 
 /// Direction of a transaction.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -41,120 +39,65 @@ impl From<&str> for TipoOperacao {
     }
 }
 
-macro_rules! tipos_transacao {
-    ($( $(#[$doc:meta])* $variant:ident => $api:literal, )*) => {
-        /// Kind of transaction, as classified by the API.
-        ///
-        /// Unknown values do not break deserialization: they are kept in
-        /// [`TipoTransacao::Outro`].
-        #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-        #[non_exhaustive]
-        pub enum TipoTransacao {
-            $( $(#[$doc])* $variant, )*
-            /// A type the API does not document, kept as received.
-            Outro(String),
-        }
-
-        impl TipoTransacao {
-            /// Every type documented by the API.
-            pub const DOCUMENTADOS: &'static [TipoTransacao] = &[$(TipoTransacao::$variant,)*];
-
-            /// Name used by the API (e.g. `PIX`).
-            pub fn as_str(&self) -> &str {
-                match self {
-                    $( Self::$variant => $api, )*
-                    Self::Outro(raw) => raw,
-                }
-            }
-        }
-
-        impl From<&str> for TipoTransacao {
-            fn from(raw: &str) -> Self {
-                match raw.trim() {
-                    $( $api => Self::$variant, )*
-                    other => Self::Outro(other.to_owned()),
-                }
-            }
-        }
-    };
-}
-
-tipos_transacao! {
-    /// `ANTECIPACAO_RECEBIVEIS`
-    AntecipacaoRecebiveis => "ANTECIPACAO_RECEBIVEIS",
-    /// `ANTECIPACAO_RECEBIVEIS_CARTAO`
-    AntecipacaoRecebiveisCartao => "ANTECIPACAO_RECEBIVEIS_CARTAO",
-    /// `BOLETO_COBRANCA`: boleto issued by the account and paid by someone.
-    BoletoCobranca => "BOLETO_COBRANCA",
-    /// `CAMBIO`
-    Cambio => "CAMBIO",
-    /// `CASHBACK`
-    Cashback => "CASHBACK",
-    /// `CHEQUE`
-    Cheque => "CHEQUE",
-    /// `COMPRA_DEBITO`: debit card purchase.
-    CompraDebito => "COMPRA_DEBITO",
-    /// `DEBITO_AUTOMATICO`
-    DebitoAutomatico => "DEBITO_AUTOMATICO",
-    /// `DEBITO_EM_CONTA`
-    DebitoEmConta => "DEBITO_EM_CONTA",
-    /// `DEPOSITO_BOLETO`: deposit made by paying a boleto.
-    DepositoBoleto => "DEPOSITO_BOLETO",
-    /// `DOMICILIO_CARTAO`
-    DomicilioCartao => "DOMICILIO_CARTAO",
-    /// `ESTORNO`: reversal.
-    Estorno => "ESTORNO",
-    /// `FINANCIAMENTO`
-    Financiamento => "FINANCIAMENTO",
-    /// `IMPOSTO`: tax payment.
-    Imposto => "IMPOSTO",
-    /// `INTERPAG`
-    Interpag => "INTERPAG",
-    /// `INVESTIMENTO`
-    Investimento => "INVESTIMENTO",
-    /// `JUROS`: interest.
-    Juros => "JUROS",
-    /// `MAQUININHA_GRANITO`: card machine settlement.
-    MaquininhaGranito => "MAQUININHA_GRANITO",
-    /// `MULTA`: fine.
-    Multa => "MULTA",
-    /// `OUTROS`: other.
-    Outros => "OUTROS",
-    /// `PAGAMENTO`: bill payment.
-    Pagamento => "PAGAMENTO",
-    /// `PIX`
-    Pix => "PIX",
-    /// `PROVENTOS`
-    Proventos => "PROVENTOS",
-    /// `SAQUE`: withdrawal.
-    Saque => "SAQUE",
-    /// `TARIFA`: bank fee.
-    Tarifa => "TARIFA",
-    /// `TRANSFERENCIA`: TED/transfer.
-    Transferencia => "TRANSFERENCIA",
-}
-
-macro_rules! string_serde {
-    ($($ty:ty),*) => {$(
-        impl fmt::Display for $ty {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str(self.as_str())
-            }
-        }
-
-        impl Serialize for $ty {
-            fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-                serializer.serialize_str(self.as_str())
-            }
-        }
-
-        impl<'de> Deserialize<'de> for $ty {
-            fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-                let raw = String::deserialize(deserializer)?;
-                Ok(Self::from(raw.as_str()))
-            }
-        }
-    )*};
+api_enum! {
+    /// Kind of transaction, as classified by the API.
+    ///
+    /// Unknown values do not break deserialization: they are kept in
+    /// [`TipoTransacao::Outro`].
+    pub enum TipoTransacao {
+        /// `ANTECIPACAO_RECEBIVEIS`
+        AntecipacaoRecebiveis => "ANTECIPACAO_RECEBIVEIS",
+        /// `ANTECIPACAO_RECEBIVEIS_CARTAO`
+        AntecipacaoRecebiveisCartao => "ANTECIPACAO_RECEBIVEIS_CARTAO",
+        /// `BOLETO_COBRANCA`: boleto issued by the account and paid by someone.
+        BoletoCobranca => "BOLETO_COBRANCA",
+        /// `CAMBIO`
+        Cambio => "CAMBIO",
+        /// `CASHBACK`
+        Cashback => "CASHBACK",
+        /// `CHEQUE`
+        Cheque => "CHEQUE",
+        /// `COMPRA_DEBITO`: debit card purchase.
+        CompraDebito => "COMPRA_DEBITO",
+        /// `DEBITO_AUTOMATICO`
+        DebitoAutomatico => "DEBITO_AUTOMATICO",
+        /// `DEBITO_EM_CONTA`
+        DebitoEmConta => "DEBITO_EM_CONTA",
+        /// `DEPOSITO_BOLETO`: deposit made by paying a boleto.
+        DepositoBoleto => "DEPOSITO_BOLETO",
+        /// `DOMICILIO_CARTAO`
+        DomicilioCartao => "DOMICILIO_CARTAO",
+        /// `ESTORNO`: reversal.
+        Estorno => "ESTORNO",
+        /// `FINANCIAMENTO`
+        Financiamento => "FINANCIAMENTO",
+        /// `IMPOSTO`: tax payment.
+        Imposto => "IMPOSTO",
+        /// `INTERPAG`
+        Interpag => "INTERPAG",
+        /// `INVESTIMENTO`
+        Investimento => "INVESTIMENTO",
+        /// `JUROS`: interest.
+        Juros => "JUROS",
+        /// `MAQUININHA_GRANITO`: card machine settlement.
+        MaquininhaGranito => "MAQUININHA_GRANITO",
+        /// `MULTA`: fine.
+        Multa => "MULTA",
+        /// `OUTROS`: other.
+        Outros => "OUTROS",
+        /// `PAGAMENTO`: bill payment.
+        Pagamento => "PAGAMENTO",
+        /// `PIX`
+        Pix => "PIX",
+        /// `PROVENTOS`
+        Proventos => "PROVENTOS",
+        /// `SAQUE`: withdrawal.
+        Saque => "SAQUE",
+        /// `TARIFA`: bank fee.
+        Tarifa => "TARIFA",
+        /// `TRANSFERENCIA`: TED/transfer.
+        Transferencia => "TRANSFERENCIA",
+    }
 }
 
 string_serde!(TipoOperacao, TipoTransacao);

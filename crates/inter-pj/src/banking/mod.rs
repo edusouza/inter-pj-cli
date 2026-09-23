@@ -1,8 +1,10 @@
-//! Banking API (`/banking/v2`): balance and statements; payments and
-//! outbound Pix in later versions.
+//! Banking API (`/banking/v2`): balance, statements and outbound Pix;
+//! payments in later versions.
 
+mod consulta_pix;
 mod detalhe;
 mod extrato;
+mod pagamento_pix;
 mod periodo;
 mod saldo;
 
@@ -11,6 +13,7 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use chrono::NaiveDate;
 use serde::Deserialize;
 
+pub use consulta_pix::{ConsultaPix, ErroPix, EventoPix, RecebedorPix, StatusPix, TransacaoPix};
 pub use detalhe::{
     Detalhe, DetalheBoletoCobranca, DetalheCashback, DetalheCheque, DetalheCompraDebito,
     DetalheDepositoBoleto, DetalhePagamento, DetalhePix, DetalheTarifa, DetalheTransferencia,
@@ -19,12 +22,17 @@ pub use extrato::{
     FiltroExtrato, LoteScroll, PaginaExtrato, TipoOperacao, TipoTransacao, TransacaoCompleta,
     TransacaoSimples,
 };
+pub use pagamento_pix::{
+    DadosBancarios, Destinatario, IdIdempotente, IdIdempotenteError, InstituicaoFinanceira,
+    MAX_DESCRICAO, PagamentoPix, PagamentoPixError, SolicitacaoPix, TipoConta, TipoRetornoPix,
+};
 pub use periodo::{Periodo, PeriodoError};
 pub use saldo::Saldo;
 
 use crate::client::{ApiRequest, InterClient};
 use crate::endpoint::{self, Endpoint};
 use crate::error::{Error, Result};
+use crate::pix::is_uuid;
 use crate::retry::RetryMode;
 
 /// Largest page of the enriched statement the API returns.
@@ -36,6 +44,9 @@ pub const LIMITE_PAGINACAO: u64 = 10_000;
 
 /// Safety net against an API that never reports the last page.
 const MAX_PAGINAS: u32 = 10_000;
+
+/// Header with the idempotency key of Pix payments.
+const ID_IDEMPOTENTE: &str = "x-id-idempotente";
 
 /// Operations of the Banking API. Obtained with [`InterClient::banking`].
 #[derive(Debug, Clone, Copy)]
@@ -256,6 +267,63 @@ impl<'a> Banking<'a> {
             return Err(invalid("o conteúdo recebido não é um PDF"));
         }
         Ok(pdf)
+    }
+
+    /// Sends a Pix by key, bank details or copia e cola code (`POST
+    /// /banking/v2/pix`, scope `pagamento-pix.write`).
+    ///
+    /// The payment is checked with [`PagamentoPix::validar`] before anything
+    /// is sent. `id_idempotente` goes in the `x-id-idempotente` header: the
+    /// API does not pay twice for the same key, so when the outcome is
+    /// unknown (timeout, dropped connection) the call can be repeated with
+    /// the same key. Automatic retries happen only when the request surely
+    /// was not processed (`429`, connection refused).
+    ///
+    /// Depending on the account settings, the payment waits for approval in
+    /// the Internet Banking ([`TipoRetornoPix::Aprovacao`]).
+    ///
+    /// # Errors
+    ///
+    /// [`Error::InvalidInput`] with a [`PagamentoPixError`] when the payment
+    /// is invalid (nothing is sent); otherwise the same as
+    /// [`saldo`](Self::saldo).
+    pub async fn enviar_pix(
+        &self,
+        pagamento: &PagamentoPix,
+        id_idempotente: &IdIdempotente,
+    ) -> Result<SolicitacaoPix> {
+        pagamento
+            .validar()
+            .map_err(|err| Error::InvalidInput(Box::new(err)))?;
+        let body =
+            serde_json::to_value(pagamento).map_err(|err| Error::InvalidInput(Box::new(err)))?;
+        let request = ApiRequest::new(endpoint::banking::PIX_INCLUIR)
+            .header(ID_IDEMPOTENTE, id_idempotente.to_string())
+            .json(body)
+            .retry(RetryMode::WhenNotProcessed);
+        self.client.execute(request).await
+    }
+
+    /// Status and history of a Pix sent with [`enviar_pix`](Self::enviar_pix)
+    /// (`GET /banking/v2/pix/{codigoSolicitacao}`, scope `pagamento-pix.read`).
+    /// The API answers for payments of the last 90 days.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::InvalidInput`] when `codigo_solicitacao` is not a UUID, the
+    /// format of [`SolicitacaoPix::codigo_solicitacao`]; otherwise the same
+    /// as [`saldo`](Self::saldo). Unknown requests fail with status `404`.
+    pub async fn consultar_pix(&self, codigo_solicitacao: &str) -> Result<ConsultaPix> {
+        let codigo = codigo_solicitacao.trim();
+        if !is_uuid(codigo) {
+            return Err(Error::InvalidInput(
+                "código da solicitação do Pix inválido: esperado um UUID (8-4-4-4-12 dígitos hexadecimais)"
+                    .into(),
+            ));
+        }
+        let request = ApiRequest::new(endpoint::banking::PIX_CONSULTAR)
+            .path_param("codigoSolicitacao", codigo.to_ascii_lowercase());
+        self.client.execute(request).await
     }
 }
 

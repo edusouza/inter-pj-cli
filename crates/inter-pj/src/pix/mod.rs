@@ -5,4 +5,5 @@ mod brcode;
 mod chave;
 
 pub use brcode::{BrCode, BrCodeError, crc16};
+pub(crate) use chave::is_uuid;
 pub use chave::{ChavePix, ChavePixError};
