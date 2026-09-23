@@ -7,8 +7,8 @@
 | Autenticação OAuth | `/oauth/v2` | 1 |
 | Cobrança (Boleto com Pix) | `/cobranca/v3` | 14 |
 | Banking | `/banking/v2` | 18 |
-| Pix | `/pix/v2` | 33 |
-| Pix Automático | `/pix/v2` | 28 |
+| Pix | `/pix/v2` | 32 |
+| Pix Automático | `/pix/v2` | 27 |
 | Fórum (fora do escopo, ver #60) | `/forum/v1` | 6 |
 
 Cada operação declara em `security` os escopos OAuth exigidos.
