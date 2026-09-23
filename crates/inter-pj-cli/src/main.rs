@@ -7,6 +7,7 @@
 //! rejected by the API, 6 service unavailable, rate limited or network
 //! failure, 7 operation cancelled at the confirmation.
 
+mod arquivo;
 mod cli;
 mod commands;
 mod config;

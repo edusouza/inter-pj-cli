@@ -20,7 +20,7 @@ use inter_pj::pix::{BrCode, ChavePix};
 use rust_decimal::Decimal;
 
 use crate::tabela::Separador;
-use crate::valor::parse_valor;
+use crate::valor::{parse_valor, parse_valor_ou_zero};
 
 const AFTER_HELP: &str = "\
 Credenciais:
@@ -314,7 +314,10 @@ impl Command {
     pub(crate) fn aceita_csv(&self) -> bool {
         match self {
             Self::Saldo(_)
-            | Self::Pagamento(PagamentoCommand::Boleto(BoletoCommand::Listar(_))) => true,
+            | Self::Pagamento(
+                PagamentoCommand::Boleto(BoletoCommand::Listar(_))
+                | PagamentoCommand::Darf(DarfCommand::Listar(_)),
+            ) => true,
             Self::Extrato(args) => !matches!(args.comando, Some(ExtratoCommand::Pdf(_))),
             Self::Pix(_) | Self::Pagamento(_) | Self::Auth(_) | Self::Config(_) => false,
         }
@@ -635,6 +638,166 @@ pub(crate) enum PagamentoCommand {
         subcommand_value_name = "COMANDO"
     )]
     Boleto(BoletoCommand),
+    /// DARF sem código de barras (tributos federais)
+    #[command(
+        subcommand,
+        subcommand_help_heading = "Comandos",
+        subcommand_value_name = "COMANDO"
+    )]
+    Darf(DarfCommand),
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum DarfCommand {
+    /// Paga um DARF (pelas opções ou por --arquivo), após mostrar um resumo e pedir confirmação
+    Pagar(Box<DarfPagarArgs>),
+    /// Lista os pagamentos de DARF (padrão: incluídos nos últimos 30 dias)
+    Listar(DarfListarArgs),
+}
+
+#[derive(Debug, Args)]
+#[command(group(
+    ArgGroup::new("origem")
+        .required(true)
+        .args(["arquivo", "codigo_receita"])
+))]
+pub(crate) struct DarfPagarArgs {
+    /// Arquivo JSON com o DARF, nos campos da API ("-" para a entrada padrão)
+    #[arg(long, value_name = "ARQUIVO", help_heading = "Origem (escolha uma)")]
+    pub(crate) arquivo: Option<PathBuf>,
+
+    /// Código da receita, 4 dígitos (ex.: 0220)
+    #[arg(
+        long,
+        value_name = "CODIGO",
+        requires_all = ["contribuinte", "nome_empresa", "periodo_apuracao", "vencimento", "valor_principal", "referencia", "descricao"],
+        help_heading = "Origem (escolha uma)"
+    )]
+    pub(crate) codigo_receita: Option<String>,
+
+    /// CPF ou CNPJ do contribuinte
+    #[arg(
+        long,
+        value_name = "CPF/CNPJ",
+        value_parser = parse_documento,
+        requires = "codigo_receita",
+        help_heading = "DARF"
+    )]
+    pub(crate) contribuinte: Option<Documento>,
+
+    /// Nome do contribuinte (até 100 caracteres)
+    #[arg(
+        long,
+        value_name = "NOME",
+        requires = "codigo_receita",
+        help_heading = "DARF"
+    )]
+    pub(crate) nome_empresa: Option<String>,
+
+    /// Telefone do contribuinte (opcional, até 50 caracteres)
+    #[arg(
+        long,
+        value_name = "TELEFONE",
+        requires = "codigo_receita",
+        help_heading = "DARF"
+    )]
+    pub(crate) telefone: Option<String>,
+
+    /// Período de apuração (AAAA-MM-DD)
+    #[arg(
+        long,
+        value_name = "AAAA-MM-DD",
+        value_parser = parse_data,
+        requires = "codigo_receita",
+        help_heading = "DARF"
+    )]
+    pub(crate) periodo_apuracao: Option<NaiveDate>,
+
+    /// Vencimento (AAAA-MM-DD)
+    #[arg(
+        long,
+        value_name = "AAAA-MM-DD",
+        value_parser = parse_data,
+        requires = "codigo_receita",
+        help_heading = "DARF"
+    )]
+    pub(crate) vencimento: Option<NaiveDate>,
+
+    /// Número de referência (só dígitos, até 30)
+    #[arg(
+        long,
+        value_name = "NUMERO",
+        requires = "codigo_receita",
+        help_heading = "DARF"
+    )]
+    pub(crate) referencia: Option<String>,
+
+    /// Descrição do pagamento (até 1000 caracteres)
+    #[arg(
+        long,
+        value_name = "TEXTO",
+        requires = "codigo_receita",
+        help_heading = "DARF"
+    )]
+    pub(crate) descricao: Option<String>,
+
+    /// Valor principal: 150,00, 1.500,00 ou 150.00
+    #[arg(
+        long,
+        value_name = "VALOR",
+        value_parser = parse_valor,
+        requires = "codigo_receita",
+        help_heading = "Valores"
+    )]
+    pub(crate) valor_principal: Option<Decimal>,
+
+    /// Multa, se houver
+    #[arg(
+        long,
+        value_name = "VALOR",
+        value_parser = parse_valor_ou_zero,
+        requires = "codigo_receita",
+        help_heading = "Valores"
+    )]
+    pub(crate) multa: Option<Decimal>,
+
+    /// Juros, se houver
+    #[arg(
+        long,
+        value_name = "VALOR",
+        value_parser = parse_valor_ou_zero,
+        requires = "codigo_receita",
+        help_heading = "Valores"
+    )]
+    pub(crate) juros: Option<Decimal>,
+
+    /// Confirma sem perguntar (para scripts)
+    #[arg(long, conflicts_with = "simular", help_heading = "Segurança")]
+    pub(crate) sim: bool,
+
+    /// Mostra a requisição que seria enviada, sem enviar nada
+    #[arg(long, help_heading = "Segurança")]
+    pub(crate) simular: bool,
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct DarfListarArgs {
+    /// Primeiro dia de pagamento (AAAA-MM-DD). Só com --fim: 29 dias antes dele
+    #[arg(long, value_name = "AAAA-MM-DD", value_parser = parse_data)]
+    pub(crate) inicio: Option<NaiveDate>,
+
+    /// Último dia de pagamento (AAAA-MM-DD). Só com --inicio: hoje
+    #[arg(long, value_name = "AAAA-MM-DD", value_parser = parse_data)]
+    pub(crate) fim: Option<NaiveDate>,
+
+    /// Apenas os DARFs deste código da receita
+    #[arg(long, value_name = "CODIGO")]
+    pub(crate) codigo_receita: Option<String>,
+
+    /// Apenas o pagamento com este código de solicitação
+    #[arg(long, value_name = "UUID", value_parser = parse_uuid)]
+    pub(crate) codigo_solicitacao: Option<String>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -1349,6 +1512,93 @@ mod tests {
         ] {
             assert!(parse(args).is_err(), "{args:?}");
         }
+    }
+
+    #[test]
+    fn darf_arguments_come_from_options_or_a_file() {
+        let parse = |args: &[&str]| {
+            let mut full = vec!["inter-pj", "pagamento", "darf"];
+            full.extend_from_slice(args);
+            Cli::try_parse_from(full)
+        };
+        let opcoes = [
+            "pagar",
+            "--codigo-receita",
+            "0220",
+            "--contribuinte",
+            "12.345.678/0001-95",
+            "--nome-empresa",
+            "Empresa Exemplo",
+            "--periodo-apuracao",
+            "2026-09-30",
+            "--vencimento",
+            "2026-10-30",
+            "--referencia",
+            "13609400849201739",
+            "--descricao",
+            "IRPJ de setembro",
+            "--valor-principal",
+            "47,14",
+            "--multa",
+            "0",
+            "--juros",
+            "10,11",
+        ];
+        let Command::Pagamento(PagamentoCommand::Darf(DarfCommand::Pagar(args))) =
+            parse(&opcoes).unwrap().command
+        else {
+            panic!("comando inesperado");
+        };
+        assert_eq!(
+            args.valor_principal,
+            Some("47.14".parse::<Decimal>().unwrap())
+        );
+        assert_eq!(args.multa, Some(Decimal::ZERO));
+        assert!(args.arquivo.is_none());
+
+        let cli = parse(&["pagar", "--arquivo", "darf.json", "--sim"]).unwrap();
+        assert!(!cli.command.aceita_csv());
+        let Command::Pagamento(PagamentoCommand::Darf(DarfCommand::Pagar(args))) = cli.command
+        else {
+            panic!("comando inesperado");
+        };
+        assert_eq!(args.arquivo, Some(PathBuf::from("darf.json")));
+
+        // No origin, both origins, options without the revenue code, missing options.
+        for args in [
+            &["pagar"][..],
+            &[
+                "pagar",
+                "--arquivo",
+                "darf.json",
+                "--codigo-receita",
+                "0220",
+            ],
+            &["pagar", "--arquivo", "darf.json", "--multa", "1"],
+            &opcoes[..opcoes.len() - 6],
+            &["pagar", "--arquivo", "darf.json", "--sim", "--simular"],
+        ] {
+            assert!(parse(args).is_err(), "{args:?}");
+        }
+
+        let cli = parse(&[
+            "listar",
+            "--inicio",
+            "2026-09-01",
+            "--codigo-solicitacao",
+            "3414F226-36FB-4D87-811E-CFD99911D845",
+        ])
+        .unwrap();
+        assert!(cli.command.aceita_csv());
+        let Command::Pagamento(PagamentoCommand::Darf(DarfCommand::Listar(args))) = cli.command
+        else {
+            panic!("comando inesperado");
+        };
+        assert_eq!(args.inicio, NaiveDate::from_ymd_opt(2026, 9, 1));
+        assert_eq!(
+            args.codigo_solicitacao.as_deref(),
+            Some("3414f226-36fb-4d87-811e-cfd99911d845")
+        );
     }
 
     #[test]

@@ -239,13 +239,44 @@ $ inter-pj pagamento boleto cancelar 3414f226-36fb-4d87-811e-cfd99911d845   # mo
 
 A listagem cobre até 90 dias por consulta; sem datas, mostra os pagamentos incluídos nos últimos 30 dias. `--filtrar-por` escolhe a data a que o período se refere (`inclusao`, `pagamento` ou `vencimento`), e o código (linha digitável ou código de barras) tem os dígitos verificadores conferidos antes da consulta. O cancelamento vale para agendamentos: a CLI mostra o pagamento (beneficiário, valor, data e status) e pede confirmação `[s/N]`, ou `--sim` em scripts. A listagem precisa do escopo `pagamento-boleto.read`; o cancelamento, também de `pagamento-boleto.write`.
 
+### DARF
+
+DARFs sem código de barras (tributos federais) são pagos pelas opções ou por um arquivo JSON com os campos da API:
+
+```console
+$ inter-pj pagamento darf pagar --codigo-receita 0220 --contribuinte 12.345.678/0001-95 \
+    --nome-empresa "Empresa Exemplo" --periodo-apuracao 2026-09-30 --vencimento 2026-10-30 \
+    --referencia 13609400849201739 --descricao "IRPJ de setembro" --valor-principal 47,14
+$ inter-pj pagamento darf pagar --arquivo darf.json
+$ inter-pj pagamento darf listar --inicio 2026-10-01 --fim 2026-10-31 --codigo-receita 0220
+```
+
+```json
+{
+  "cnpjCpf": "12.345.678/0001-95",
+  "codigoReceita": "0220",
+  "nomeEmpresa": "Empresa Exemplo",
+  "periodoApuracao": "2026-09-30",
+  "dataVencimento": "2026-10-30",
+  "referencia": "13609400849201739",
+  "descricao": "IRPJ de setembro",
+  "valorPrincipal": 47.14,
+  "valorMulta": 0,
+  "valorJuros": "10,11"
+}
+```
+
+Antes de enviar, a CLI confere o CPF/CNPJ (dígitos verificadores), o código da receita (4 dígitos), a referência (só dígitos, até 30), os textos e os valores; no arquivo, campos desconhecidos são recusados, para que um erro de digitação (`valorMuta`) não apague a multa, e as mensagens apontam o campo. Valores aceitam número (`47.14`) ou texto (`"47,14"`). O resumo mostra principal, multa, juros e o total por extenso, e avisa quando um DARF vencido não tem multa nem juros: esses acréscimos não são calculados pela API. Os trilhos são os mesmos dos outros pagamentos (confirmação, `--sim`, `--simular`, limite por operação e, sem chave de idempotência, o comando para conferir um resultado incerto). Com `--arquivo -`, o DARF vem da entrada padrão e a confirmação exige `--sim`.
+
+A listagem filtra pela data de pagamento; sem datas, mostra os DARFs incluídos nos últimos 30 dias (o padrão da API). O pagamento precisa do escopo `pagamento-darf.write`, e a listagem, de `pagamento-boleto.read`.
+
 ### Formatos de saída
 
 | Formato | Para quê |
 | --- | --- |
 | `texto` (padrão) | leitura: tabelas alinhadas, valores em `R$ 1.234,56`, datas `DD/MM/AAAA` |
 | `json` (ou `--json`) | automação: os nomes de campo da API e valores numéricos exatos |
-| `csv` | planilhas e scripts (`saldo`, `extrato` e `pagamento boleto listar`): RFC 4180, datas `AAAA-MM-DD`, ponto decimal, saídas do extrato com valor negativo |
+| `csv` | planilhas e scripts (`saldo`, `extrato` e as listagens de pagamentos): RFC 4180, datas `AAAA-MM-DD`, ponto decimal, saídas do extrato com valor negativo |
 
 Para o Excel em português, use `--formato csv --separador ';'`: ponto e vírgula, vírgula decimal e UTF-8 com BOM. Textos vindos de terceiros que começam com `=`, `+`, `-` ou `@` (ex.: a mensagem de um Pix) recebem um apóstrofo no CSV, para não serem executados como fórmula pela planilha.
 
