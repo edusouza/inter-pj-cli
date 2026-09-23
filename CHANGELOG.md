@@ -6,16 +6,25 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+## [0.3.0] - 2026-09-23
+
+Pix: envio e consulta, com trilhos de segurança.
+
 ### Adicionado
 
-- `inter-pj pix enviar --chave`: Pix por chave com resumo antes do envio (valor por extenso, ambiente de produção em destaque), confirmação `[s/N]`, `--sim` para scripts, `--simular` (mostra a requisição sem enviar), `--data` para agendar, chave de idempotência exibida e `--id-idempotente` para repetir com segurança, `limite_por_operacao` no perfil e aviso quando o resultado do envio é incerto (#19, #20).
-- `inter-pj pix enviar --copia-e-cola`: o código é decodificado e conferido localmente, e o resumo mostra recebedor, cidade, chave ou cobrança, identificador e mensagem; o valor do código é usado quando `--valor` não é informado, e um valor diferente é recusado em códigos estáticos (#20).
-- `inter-pj pix enviar` por dados bancários: `--ispb`, `--agencia`, `--conta`, `--tipo-conta`, `--documento` (CPF/CNPJ conferido) e `--nome` (#20).
-- `inter-pj pix consultar <codigo>`: status, recebedor, erros e histórico de um Pix enviado; `--aguardar [--timeout 60s]` consulta a cada 6 s até um status final, com códigos de saída próprios (#21).
+- `inter-pj pix enviar`: Pix por chave (`--chave`), código copia e cola (`--copia-e-cola`) ou dados bancários (`--ispb`, `--agencia`, `--conta`, `--tipo-conta`, `--documento`, `--nome`), com descrição e agendamento (`--data`) (#20).
+- Trilhos de segurança do envio (#19):
+  - validação local da chave (CPF/CNPJ com dígitos verificadores, inclusive o CNPJ alfanumérico; e-mail; celular `+55`; chave aleatória), do valor, da descrição e dos dados bancários;
+  - resumo antes do envio, com o valor por extenso e o ambiente de produção em destaque;
+  - confirmação `[s/N]` digitada em um terminal (respostas de *pipe* não valem) ou `--sim` para scripts;
+  - `--simular`, que mostra a requisição sem enviar nada;
+  - chave de idempotência exibida e `--id-idempotente` para repetir um envio interrompido sem pagar duas vezes, com aviso quando o resultado é incerto (tempo esgotado, `5xx`);
+  - `limite_por_operacao` no perfil, que vale mesmo com `--sim`.
+- Copia e cola decodificado e conferido localmente (CRC16): o resumo mostra recebedor, cidade, chave ou cobrança, identificador e mensagem; o valor do código prevalece em códigos estáticos; textos do código passam por um filtro de caracteres de controle (#20).
+- `inter-pj pix consultar <codigo>`: status, recebedor, erros e histórico de um Pix enviado; `--aguardar [--timeout 60s]` consulta a cada 6 s até um status final (#21).
 - Valores em reais aceitos como `150,00`, `1.500,00` ou `150.00`, recusando formas ambíguas (`1.500`).
 - Códigos de saída 7 (operação cancelada na confirmação) e 8 (tempo de espera esgotado em `pix consultar --aguardar`).
-- Biblioteca: `documento::Documento` valida CPF e CNPJ (inclusive o CNPJ alfanumérico), `pix::ChavePix` reconhece e normaliza chaves Pix (CPF, CNPJ, e-mail, celular `+55` e chave aleatória) e `pix::BrCode` decodifica o Pix copia e cola, conferindo o CRC16 (#20).
-- Biblioteca: `Banking::enviar_pix` (por chave, dados bancários ou copia e cola, com `x-id-idempotente`) e `Banking::consultar_pix` (status e histórico), com validação local do pagamento e repetição automática só quando o envio certamente não foi processado (#20, #21).
+- Biblioteca: `Banking::enviar_pix` (com `x-id-idempotente`; repetido automaticamente só quando certamente não foi processado) e `Banking::consultar_pix`; `documento::Documento`, `pix::ChavePix`, `pix::BrCode`, `IdIdempotente` e `Error::InvalidInput`.
 
 ## [0.2.0] - 2026-09-23
 
