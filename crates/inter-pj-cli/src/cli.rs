@@ -6,6 +6,7 @@
 
 use std::fmt::Write as _;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use chrono::NaiveDate;
 use clap::{ArgAction, ArgGroup, Args, Parser, Subcommand, ValueEnum};
@@ -277,7 +278,7 @@ pub(crate) enum Command {
         subcommand_value_name = "COMANDO"
     )]
     Extrato(ExtratoArgs),
-    /// Pix: envio de pagamentos
+    /// Pix: envio e consulta de pagamentos
     #[command(
         subcommand,
         subcommand_help_heading = "Comandos",
@@ -463,6 +464,31 @@ pub(crate) struct ExtratoPdfArgs {
 pub(crate) enum PixCommand {
     /// Envia um Pix (chave, copia e cola ou dados bancários), após mostrar um resumo e pedir confirmação
     Enviar(Box<PixEnviarArgs>),
+    /// Consulta o status e o histórico de um Pix enviado (últimos 90 dias)
+    Consultar(PixConsultarArgs),
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct PixConsultarArgs {
+    /// Código da solicitação, mostrado pelo `pix enviar`
+    #[arg(value_name = "CODIGO")]
+    pub(crate) codigo: String,
+
+    /// Consulta de novo, a cada 6 segundos, até o Pix chegar a um status final
+    #[arg(long)]
+    pub(crate) aguardar: bool,
+
+    /// Tempo máximo de espera com --aguardar: 60s, 5m, 1h [padrão: 60s]
+    #[arg(
+        long,
+        value_name = "DURACAO",
+        value_parser = parse_duracao,
+        default_value = "60s",
+        hide_default_value = true,
+        requires = "aguardar"
+    )]
+    pub(crate) timeout: Duration,
 }
 
 #[derive(Debug, Args)]
@@ -707,6 +733,26 @@ fn parse_id_idempotente(value: &str) -> Result<IdIdempotente, String> {
     value
         .parse()
         .map_err(|err: inter_pj::banking::IdIdempotenteError| err.to_string())
+}
+
+/// `90`, `90s`, `5m` or `1h`, from 1 second to 1 hour.
+fn parse_duracao(value: &str) -> Result<Duration, String> {
+    let texto = value.trim();
+    let (numero, unidade) = texto
+        .find(|c: char| !c.is_ascii_digit())
+        .map_or((texto, "s"), |i| texto.split_at(i));
+    let segundos = match (numero.parse::<u64>(), unidade) {
+        (Ok(n), "s") => Some(n),
+        (Ok(n), "m") => n.checked_mul(60),
+        (Ok(n), "h") => n.checked_mul(3600),
+        _ => None,
+    };
+    segundos
+        .filter(|s| (1..=3600).contains(s))
+        .map(Duration::from_secs)
+        .ok_or_else(|| {
+            format!("duração inválida \"{texto}\": use, por exemplo, 90s, 5m ou 1h (até 1h)")
+        })
 }
 
 fn parse_separador(value: &str) -> Result<Separador, String> {
@@ -1012,6 +1058,61 @@ mod tests {
         }
         let err = parse(&["--copia-e-cola", "000201"]).unwrap_err();
         assert!(err.to_string().contains("copia e cola"), "{err}");
+    }
+
+    #[test]
+    fn pix_query_arguments() {
+        let cli = Cli::try_parse_from([
+            "inter-pj",
+            "pix",
+            "consultar",
+            "c42f0787-02cb-4b31-827e-459ec9d7ece1",
+            "--aguardar",
+            "--timeout",
+            "2m",
+        ])
+        .unwrap();
+        let Command::Pix(PixCommand::Consultar(args)) = cli.command else {
+            panic!("comando inesperado");
+        };
+        assert!(args.aguardar);
+        assert_eq!(args.timeout, Duration::from_secs(120));
+        // --timeout only makes sense while waiting.
+        assert!(
+            Cli::try_parse_from(["inter-pj", "pix", "consultar", "x", "--timeout", "5s"]).is_err()
+        );
+        assert!(Cli::try_parse_from(["inter-pj", "pix", "consultar"]).is_err());
+    }
+
+    #[test]
+    fn durations() {
+        for (texto, segundos) in [
+            ("90", 90),
+            ("90s", 90),
+            ("5m", 300),
+            ("1h", 3600),
+            ("1s", 1),
+        ] {
+            assert_eq!(
+                parse_duracao(texto),
+                Ok(Duration::from_secs(segundos)),
+                "{texto}"
+            );
+        }
+        for texto in [
+            "",
+            "0",
+            "0s",
+            "2h",
+            "3601",
+            "1d",
+            "m",
+            "1.5m",
+            "-1s",
+            "99999999999999999999",
+        ] {
+            assert!(parse_duracao(texto).is_err(), "{texto}");
+        }
     }
 
     #[test]
