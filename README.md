@@ -162,6 +162,8 @@ Data do pagamento      23/09/2026
 Data da operação       23/09/2026
 Chave de idempotência  9b2f6c1e-5d0a-4c1b-8f3e-2a7d4e6b8c90
 
+Acompanhe com: inter-pj pix consultar c42f0787-02cb-4b31-827e-459ec9d7ece1 --aguardar
+
 $ inter-pj pix enviar --chave +5511912345678 --valor 1.500,00 --data 2026-10-01   # agendado
 $ inter-pj pix enviar --chave 12.345.678/0001-95 --valor 99,90 --simular          # mostra a requisição, não envia
 $ inter-pj pix enviar --chave fornecedor@exemplo.com --valor 150 --sim --json     # sem perguntar (scripts)
@@ -183,6 +185,15 @@ Trilhos de segurança de todo envio:
 - **Aprovação**: conforme a configuração da conta, o Pix aguarda aprovação no Internet Banking (Aprovar > Gestão de Aprovações); a CLI avisa quando for o caso.
 
 A integração precisa do escopo `pagamento-pix.write`.
+
+Para acompanhar um Pix enviado (últimos 90 dias), use o código da solicitação:
+
+```console
+$ inter-pj pix consultar c42f0787-02cb-4b31-827e-459ec9d7ece1                        # status, recebedor, erros e histórico
+$ inter-pj pix consultar c42f0787-02cb-4b31-827e-459ec9d7ece1 --aguardar --timeout 5m # até um status final
+```
+
+Com `--aguardar`, a CLI consulta a cada 6 segundos (dentro do limite de requisições da API) até o Pix ser pago, agendado ou terminar sem pagamento, e sai com o código 0 (pago ou agendado), 5 (terminou sem ser pago: reprovado, expirado, cancelado, falha...) ou 8 (o tempo acabou antes de um status final; padrão: 60 s). A consulta precisa do escopo `pagamento-pix.read`.
 
 ### Formatos de saída
 
@@ -219,9 +230,10 @@ $ curl --cert certificado.crt --key chave.key \
 | 2 | uso incorreto (argumentos inválidos) |
 | 3 | configuração ausente ou inválida (inclui certificado/chave) |
 | 4 | falha de autenticação ou acesso negado (credenciais, escopos, 401/403) |
-| 5 | requisição rejeitada pela API (400, 404, 409, 422) |
+| 5 | requisição rejeitada pela API (400, 404, 409, 422); com `pix consultar --aguardar`, Pix que terminou sem ser pago |
 | 6 | serviço indisponível, limite de requisições (429), erro 5xx ou falha de rede |
 | 7 | operação cancelada na confirmação (nada foi enviado) |
+| 8 | `pix consultar --aguardar`: tempo esgotado antes de um status final |
 
 Mensagens de erro vão para `stderr`, em português, com a explicação da API e dicas. Com `-v`/`-vv` a CLI mostra detalhes das requisições (método, caminho, status e tempo) — nunca tokens, segredos ou corpos de resposta.
 

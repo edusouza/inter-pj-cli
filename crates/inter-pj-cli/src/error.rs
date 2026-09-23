@@ -14,6 +14,7 @@ pub(crate) mod exit {
     pub(crate) const REJECTED: u8 = 5;
     pub(crate) const UNAVAILABLE: u8 = 6;
     pub(crate) const CANCELLED: u8 = 7;
+    pub(crate) const WAIT_TIMEOUT: u8 = 8;
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -45,6 +46,12 @@ pub(crate) enum CliError {
     /// The user did not confirm the operation.
     #[error("operação cancelada: nada foi enviado")]
     Cancelado,
+    /// `pix consultar --aguardar`: the payment ended without being paid.
+    #[error("o Pix terminou sem ser pago: {status}")]
+    PixNaoPago { status: String },
+    /// `pix consultar --aguardar`: no final status before the time limit.
+    #[error("tempo de espera esgotado ({segundos} s): o Pix ainda está {status}")]
+    TempoEsgotado { status: String, segundos: u64 },
     /// Local I/O failure.
     #[error("{context}: {source}")]
     Io {
@@ -68,6 +75,8 @@ impl CliError {
             Self::Config(_) => exit::CONFIG,
             Self::Io { .. } => exit::UNEXPECTED,
             Self::Cancelado => exit::CANCELLED,
+            Self::PixNaoPago { .. } => exit::REJECTED,
+            Self::TempoEsgotado { .. } => exit::WAIT_TIMEOUT,
             Self::Inter(err) | Self::ResultadoIncerto { source: err, .. } => match err {
                 InterError::InvalidInput(_) => exit::USAGE,
                 InterError::Config(_) | InterError::Identity(_) => exit::CONFIG,
@@ -93,6 +102,9 @@ impl CliError {
             Self::Periodo {
                 dica: Some(dica), ..
             } => return vec![(*dica).to_owned()],
+            Self::TempoEsgotado { .. } => {
+                return vec!["consulte de novo mais tarde, ou aumente o --timeout".to_owned()];
+            }
             Self::ResultadoIncerto { id_idempotente, .. } => {
                 return vec![
                     "o pagamento pode ter sido feito: confira o extrato antes de tentar de novo"

@@ -6,7 +6,7 @@
 ┌──────────────────────── crates/inter-pj-cli (binário `inter-pj`) ────────────────────────┐
 │ cli.rs        definição dos comandos (clap) e ajuda em português                         │
 │ config.rs     arquivo TOML, perfis, precedência flag > env > arquivo, origem dos valores │
-│ commands/     saldo, extrato (simples, completo, pdf), pix enviar, auth, config           │
+│ commands/     saldo, extrato (simples, completo, pdf), pix enviar/consultar, auth, config │
 │ token_store   cache de tokens em arquivo (600, gravação atômica)                          │
 │ confirmacao   resumo + [s/N] antes de mover dinheiro (só com stdin em terminal)           │
 │ valor.rs      valores em reais digitados (150,00 / 1.500,00) e por extenso                │
