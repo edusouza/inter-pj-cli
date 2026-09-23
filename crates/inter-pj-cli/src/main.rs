@@ -17,6 +17,8 @@ mod files;
 mod logging;
 mod output;
 mod paths;
+mod qr;
+mod saida;
 mod tabela;
 mod token_store;
 mod valor;
