@@ -135,9 +135,13 @@ pub trait TokenStore: Send + Sync + fmt::Debug {
 
 /// Key identifying the tokens of an integration (base URL + `client_id`).
 ///
-/// It is a hash, so that the `client_id` does not show up in file names.
+/// It is a hash, so that the `client_id` does not show up in file names. The
+/// URL is normalised first (case of scheme and host, trailing slash), so the
+/// same integration always maps to the same key.
 pub fn cache_key(base_url: &str, client_id: &str) -> String {
-    let digest = Sha256::digest(format!("{}\n{client_id}", base_url.trim_end_matches('/')));
+    let raw = base_url.trim();
+    let normalized = url::Url::parse(raw).map_or_else(|_| raw.to_owned(), String::from);
+    let digest = Sha256::digest(format!("{}\n{client_id}", normalized.trim_end_matches('/')));
     digest
         .iter()
         .take(16)
@@ -511,6 +515,15 @@ mod tests {
         assert_ne!(
             key,
             cache_key("https://cdpj-sandbox.partners.uatinter.co", "meu-client-id")
+        );
+        assert_eq!(
+            key,
+            cache_key(" HTTPS://CDPJ.partners.bancointer.com.br ", "meu-client-id"),
+            "URL normalizada"
+        );
+        assert_ne!(
+            key,
+            cache_key("https://cdpj.partners.bancointer.com.br", "outro-id")
         );
     }
 }
