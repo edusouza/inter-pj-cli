@@ -1,0 +1,30 @@
+# Artefatos de build
+/target/
+/dist/
+**/*.rs.bk
+
+# ---------------------------------------------------------------------------
+# DADOS SENSÍVEIS — nunca versionar.
+# Certificados, chaves privadas, arquivos de ambiente e configurações locais
+# com credenciais da integração do Inter. Veja SECURITY.md.
+# ---------------------------------------------------------------------------
+*.crt
+*.cer
+*.key
+*.pem
+*.pfx
+*.p12
+*.jks
+.env
+.env.*
+config.toml
+!/.cargo/config.toml
+tokens/
+*.token
+
+# Editores e sistemas operacionais
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db

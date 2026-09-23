@@ -1,0 +1,2 @@
+# Termos técnicos aceitos sem crases na documentação (".." mantém os padrões do clippy).
+doc-valid-idents = ["OAuth", "OAuth2", "OpenAPI", "PKCS", ".."]
