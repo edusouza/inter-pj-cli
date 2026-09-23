@@ -140,7 +140,8 @@ impl Context {
                 required.client_secret.expose_secret(),
             ))
             .identity(identity)
-            .user_agent(concat!("inter-pj-cli/", env!("CARGO_PKG_VERSION")));
+            .user_agent(concat!("inter-pj-cli/", env!("CARGO_PKG_VERSION")))
+            .retry_policy(self.global.retry_policy());
         if let Some(url) = &settings.base_url {
             builder = builder.base_url(url.value.clone());
         }

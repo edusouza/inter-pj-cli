@@ -41,6 +41,7 @@ mod environment;
 mod error;
 mod identity;
 pub mod problem;
+mod retry;
 mod scope;
 mod serde_util;
 
@@ -51,4 +52,5 @@ pub use environment::{Environment, ParseEnvironmentError};
 pub use error::{ApiError, ApiErrorKind, Error, Result};
 pub use identity::{ClientIdentity, IdentityError};
 pub use problem::{Problem, Violacao};
+pub use retry::RetryPolicy;
 pub use scope::{Scope, ScopeSet, UnknownScopeError};

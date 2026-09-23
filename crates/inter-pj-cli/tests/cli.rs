@@ -494,11 +494,35 @@ async fn erros_da_api_viram_mensagens_e_codigos_de_saida() {
         env.mount_token("extrato.read", None).await;
         env.mount_saldo(response, 1).await;
         env.cmd()
-            .args(["saldo", "--sem-cache"])
+            .args(["saldo", "--sem-cache", "--sem-retentativa"])
             .assert()
             .code(code)
             .stderr(predicate::str::contains(message).and(predicate::str::starts_with("erro: ")));
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn falhas_temporarias_sao_repetidas() {
+    let env = TestEnv::new().await;
+    env.write_config("");
+    env.mount_token("extrato.read", None).await;
+    Mock::given(method("GET"))
+        .and(path("/banking/v2/saldo"))
+        .respond_with(ResponseTemplate::new(503))
+        .up_to_n_times(1)
+        .expect(1)
+        .mount(&env.server)
+        .await;
+    env.mount_saldo(saldo_ok(), 1).await;
+
+    let assert = env
+        .cmd()
+        .args(["saldo", "-v", "--tentativas", "2"])
+        .assert()
+        .success();
+    let err = stderr_of(&assert);
+    assert!(err.contains("resposta 503; tentativa 2 de 2"), "{err}");
+    assert!(stdout_of(&assert).contains("R$ 2.850,55"));
 }
 
 #[tokio::test(flavor = "multi_thread")]
