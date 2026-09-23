@@ -81,7 +81,7 @@ certificado = "~/inter/certificado.crt"
 chave_privada = "~/inter/chave.key"
 # conta_corrente = "<numero>"     # só se a integração tiver mais de uma conta
 # escopos = ["extrato.read"]      # opcional: escopos pedidos em todo token
-# limite_por_operacao = "1.000,00" # opcional: valor máximo de cada Pix
+# limite_por_operacao = "1.000,00" # opcional: valor máximo de cada Pix ou pagamento
 ```
 
 ### 3. Informe o segredo pela variável de ambiente
@@ -201,6 +201,29 @@ Com `--aguardar`, a CLI consulta a cada 6 segundos (dentro do limite de requisi�
 Boletos, contas de consumo e tributos com código de barras:
 
 ```console
+$ inter-pj pagamento boleto pagar '07797.77705 11678.471159 90071.126347 1 15950000003010'
+Pagamento a enviar
+  Ambiente         sandbox (dados fictícios)
+  Tipo             boleto do banco 077
+  Linha digitável  07797.77705 11678.471159 90071.126347 1 15950000003010
+  Valor            R$ 30,10 (trinta reais e dez centavos)
+  Vencimento       10/10/2026
+  Quando           agora
+Confirmar o pagamento? [s/N] s
+Pagamento realizado.
+Código da transação  3414f226-36fb-4d87-811e-cfd99911d845
+
+Acompanhe com: inter-pj pagamento boleto listar --codigo-transacao 3414f226-36fb-4d87-811e-cfd99911d845
+
+$ inter-pj pagamento boleto pagar 82670000000653301602023123106000000002830894 --vencimento 2026-10-10   # conta de água
+$ inter-pj pagamento boleto pagar '<linha digitável>' --valor 31,20 --data 2026-10-09 --beneficiario 12.345.678/0001-95
+```
+
+O código — linha digitável (47 dígitos nos boletos, 48 nas contas e tributos) ou código de barras (44) — tem todos os dígitos verificadores conferidos localmente. Valor e vencimento vêm do próprio código quando ele os traz; contas de consumo e tributos não trazem o vencimento, então precisam de `--vencimento` (a data impressa no documento). O resumo mostra o valor por extenso e, quando `--valor` ou `--vencimento` diferem do código, os dois lados com um aviso (juros, multa ou desconto); também avisa quando o pagamento fica para depois do vencimento. `--data` agenda o pagamento, e `--beneficiario` pede à API que confira o CPF/CNPJ de quem recebe. Os trilhos de segurança são os do Pix: confirmação `[s/N]` ou `--sim`, `--simular` e o limite por operação do perfil.
+
+Esta API não tem chave de idempotência. Se o resultado ficar incerto (tempo esgotado, erro 5xx), o pagamento pode ter sido feito e repetir o comando pode pagar duas vezes: a CLI mostra o `pagamento boleto listar --codigo ...` que confere isso antes de uma nova tentativa. Conforme a configuração da conta, o pagamento aguarda aprovação no Internet Banking. O pagamento precisa do escopo `pagamento-boleto.write`; no sandbox, a documentação oferece os códigos `03395988500000666539201493990000372830030102` (boleto vencido) e `82670000000653301602023123106000000002830894` (conta de água).
+
+```console
 $ inter-pj pagamento boleto listar --inicio 2026-09-01 --fim 2026-09-30
 Pagamentos incluídos de 01/09/2026 a 30/09/2026
 
@@ -228,7 +251,7 @@ Para o Excel em português, use `--formato csv --separador ';'`: ponto e vírgul
 
 ### Retentativas
 
-Consultas que falham por limite de requisições (`429`), instabilidade do servidor (`500`, `502`, `503`, `504`) ou falha de conexão são repetidas automaticamente, com espera crescente (1 s, 2 s, ...) e respeitando o cabeçalho `Retry-After`. O padrão é de 3 tentativas; ajuste com `--tentativas N` (ou `INTER_TENTATIVAS`) ou desative com `--sem-retentativa`. Com `-v`, cada nova tentativa aparece em `stderr`. O envio de Pix só é repetido quando certamente não foi processado (`429` ou conexão recusada), sempre com a mesma chave de idempotência.
+Consultas que falham por limite de requisições (`429`), instabilidade do servidor (`500`, `502`, `503`, `504`) ou falha de conexão são repetidas automaticamente, com espera crescente (1 s, 2 s, ...) e respeitando o cabeçalho `Retry-After`. O padrão é de 3 tentativas; ajuste com `--tentativas N` (ou `INTER_TENTATIVAS`) ou desative com `--sem-retentativa`. Com `-v`, cada nova tentativa aparece em `stderr`. O envio de Pix e os pagamentos só são repetidos quando certamente não foram processados (`429` ou conexão recusada); o Pix, sempre com a mesma chave de idempotência.
 
 ### Tokens e rate limit
 

@@ -56,8 +56,8 @@ chave_privada = ""
 # Todos precisam estar habilitados na integração.
 # escopos = ["extrato.read"]
 
-# Valor máximo de cada Pix enviado pela CLI (opcional). Acima dele a operação é
-# recusada, mesmo com --sim.
+# Valor máximo de cada Pix ou pagamento feito pela CLI (opcional). Acima dele a
+# operação é recusada, mesmo com --sim.
 # limite_por_operacao = "1.000,00"
 "#;
 

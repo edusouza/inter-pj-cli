@@ -43,6 +43,14 @@ pub(crate) enum CliError {
         /// Key that repeats the payment without paying twice.
         id_idempotente: String,
     },
+    /// A payment without idempotency key (boleto, DARF, batch) whose outcome
+    /// is unknown: it may have been made, and repeating it may pay twice.
+    #[error("{source}")]
+    PagamentoIncerto {
+        source: InterError,
+        /// Command that finds the payment, to run before trying again.
+        consulta: String,
+    },
     /// The user did not confirm the operation.
     #[error("operação cancelada: nada foi enviado")]
     Cancelado,
@@ -77,7 +85,9 @@ impl CliError {
             Self::Cancelado => exit::CANCELLED,
             Self::PixNaoPago { .. } => exit::REJECTED,
             Self::TempoEsgotado { .. } => exit::WAIT_TIMEOUT,
-            Self::Inter(err) | Self::ResultadoIncerto { source: err, .. } => match err {
+            Self::Inter(err)
+            | Self::ResultadoIncerto { source: err, .. }
+            | Self::PagamentoIncerto { source: err, .. } => match err {
                 InterError::InvalidInput(_) => exit::USAGE,
                 InterError::Config(_) | InterError::Identity(_) => exit::CONFIG,
                 InterError::Auth(_) => exit::AUTH,
@@ -114,6 +124,13 @@ impl CliError {
                     ),
                 ];
             }
+            Self::PagamentoIncerto { consulta, .. } => {
+                return vec![
+                    "o pagamento pode ter sido feito, e esta API não tem chave de idempotência: repetir o comando pode pagar duas vezes"
+                        .to_owned(),
+                    format!("confira antes de tentar de novo: {consulta}"),
+                ];
+            }
             _ => return Vec::new(),
         };
         let hints: Vec<&str> = match err {
@@ -148,6 +165,18 @@ impl CliError {
             _ => Vec::new(),
         };
         hints.into_iter().map(str::to_owned).collect()
+    }
+}
+
+/// Whether a payment may have been made despite the error: the request
+/// may have reached the API (timeout, dropped connection, `5xx`, an
+/// unreadable success). A refused connection never reached it.
+pub(crate) fn resultado_incerto(err: &InterError) -> bool {
+    match err {
+        InterError::Transport(source) => !source.is_connect(),
+        InterError::Api(api) => api.status >= 500,
+        InterError::Decode { .. } => true,
+        _ => false,
     }
 }
 

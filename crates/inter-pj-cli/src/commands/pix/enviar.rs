@@ -9,15 +9,15 @@ use inter_pj::banking::{
 };
 use inter_pj::documento::Documento;
 use inter_pj::pix::{BrCode, ChavePix};
-use inter_pj::{Environment, Error as InterError, endpoint};
+use inter_pj::{Environment, endpoint};
 use rust_decimal::Decimal;
-use serde_json::{Map, json};
+use serde_json::json;
 
 use crate::cli::{Formato, PixEnviarArgs};
-use crate::commands::Context;
+use crate::commands::{Context, simulacao};
 use crate::config::Settings;
-use crate::confirmacao::{Terminal, confirmar, descrever_ambiente};
-use crate::error::CliError;
+use crate::confirmacao::{Terminal, confirmar, descrever_ambiente, verificar_limite};
+use crate::error::{CliError, resultado_incerto};
 use crate::output;
 use crate::valor::por_extenso;
 
@@ -28,7 +28,7 @@ pub(super) async fn run(
 ) -> Result<(), CliError> {
     let pagamento = pagamento(args, Local::now().date_naive())?;
     let settings = context.settings()?;
-    verificar_limite(&pagamento, &settings)?;
+    verificar_limite(pagamento.valor, &settings)?;
     // Configuration problems show up before the confirmation, not after it.
     let client = if args.simular {
         None
@@ -160,20 +160,6 @@ fn valor(args: &PixEnviarArgs) -> Result<Decimal, CliError> {
         (None, None) => Err(CliError::Usage(
             "o código copia e cola não traz o valor: informe --valor".to_owned(),
         )),
-    }
-}
-
-/// Refuses amounts above the profile's `limite_por_operacao`, even with `--sim`.
-fn verificar_limite(pagamento: &PagamentoPix, settings: &Settings) -> Result<(), CliError> {
-    match &settings.limite_por_operacao {
-        Some(limite) if pagamento.valor > limite.value => Err(CliError::Usage(format!(
-            "{} passa do limite por operação do perfil \"{}\" ({}); para enviar, ajuste limite_por_operacao em {}",
-            output::brl(pagamento.valor),
-            settings.perfil.value,
-            output::brl(limite.value),
-            settings.config_path.display()
-        ))),
-        _ => Ok(()),
     }
 }
 
@@ -350,54 +336,13 @@ fn simulacao(
     pagamento: &PagamentoPix,
     id: &IdIdempotente,
 ) -> Result<(), CliError> {
-    let base = settings
-        .effective_base_url()
-        .unwrap_or_else(|| "<URL do ambiente>".to_owned());
-    let url = format!(
-        "{}{}",
-        base.trim_end_matches('/'),
-        endpoint::banking::PIX_INCLUIR.path
-    );
-    let corpo = serde_json::to_value(pagamento)
-        .map_err(|err| CliError::io("falha ao gerar JSON", std::io::Error::other(err)))?;
-    let mut cabecalhos = Map::new();
-    cabecalhos.insert("x-id-idempotente".to_owned(), json!(id.as_str()));
-    if let Some(conta) = &settings.conta_corrente {
-        cabecalhos.insert(
-            "x-conta-corrente".to_owned(),
-            json!(output::mask(&conta.value, 2)),
-        );
-    }
-    match context.formato() {
-        Formato::Json => output::print_json(&json!({
-            "simulacao": true,
-            "metodo": "POST",
-            "url": url,
-            "cabecalhos": cabecalhos,
-            "corpo": corpo,
-        })),
-        Formato::Texto | Formato::Csv => {
-            let mut texto = format!("Simulação: nada foi enviado.\n\nPOST {url}");
-            for (nome, valor) in &cabecalhos {
-                let _ = write!(texto, "\n{nome}: {}", valor.as_str().unwrap_or_default());
-            }
-            let corpo = serde_json::to_string_pretty(&corpo).unwrap_or_default();
-            let _ = write!(texto, "\n\n{corpo}");
-            output::print(&texto)
-        }
-    }
-}
-
-/// Whether the payment may have been made despite the error.
-fn resultado_incerto(err: &InterError) -> bool {
-    match err {
-        // A refused connection never reached the API.
-        InterError::Transport(source) => !source.is_connect(),
-        InterError::Api(api) => api.status >= 500,
-        // A success status with a body that could not be read.
-        InterError::Decode { .. } => true,
-        _ => false,
-    }
+    simulacao::mostrar(
+        context,
+        settings,
+        endpoint::banking::PIX_INCLUIR,
+        &[("x-id-idempotente", id.to_string())],
+        pagamento,
+    )
 }
 
 fn render(solicitacao: &SolicitacaoPix, id: &IdIdempotente) -> String {
@@ -449,6 +394,7 @@ mod tests {
     use std::fs;
 
     use clap::{CommandFactory, FromArgMatches, Parser};
+    use inter_pj::Error as InterError;
     use wiremock::matchers::{any, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 

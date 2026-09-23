@@ -639,10 +639,63 @@ pub(crate) enum PagamentoCommand {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum BoletoCommand {
+    /// Paga ou agenda um boleto, conta ou tributo, após mostrar um resumo e pedir confirmação
+    Pagar(BoletoPagarArgs),
     /// Lista os pagamentos por código de barras de um período (até 90 dias; padrão: incluídos nos últimos 30 dias)
     Listar(BoletoListarArgs),
     /// Cancela um pagamento agendado, após mostrá-lo e pedir confirmação
     Cancelar(BoletoCancelarArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct BoletoPagarArgs {
+    /// Linha digitável ou código de barras, entre aspas se tiver espaços
+    #[arg(value_name = "CODIGO", value_parser = parse_codigo_barras)]
+    pub(crate) codigo: CodigoBarras,
+
+    /// Valor a pagar: 150,00, 1.500,00 ou 150.00. Padrão: o valor do código
+    #[arg(
+        long,
+        value_name = "VALOR",
+        value_parser = parse_valor,
+        help_heading = "Pagamento"
+    )]
+    pub(crate) valor: Option<Decimal>,
+
+    /// Vencimento (AAAA-MM-DD). Padrão: o do boleto; contas e tributos precisam informar
+    #[arg(
+        long,
+        value_name = "AAAA-MM-DD",
+        value_parser = parse_data,
+        help_heading = "Pagamento"
+    )]
+    pub(crate) vencimento: Option<NaiveDate>,
+
+    /// Agenda o pagamento para o dia (AAAA-MM-DD). Padrão: agora
+    #[arg(
+        long,
+        value_name = "AAAA-MM-DD",
+        value_parser = parse_data,
+        help_heading = "Pagamento"
+    )]
+    pub(crate) data: Option<NaiveDate>,
+
+    /// CPF ou CNPJ do beneficiário, para a API conferir antes de pagar
+    #[arg(
+        long,
+        value_name = "CPF/CNPJ",
+        value_parser = parse_documento,
+        help_heading = "Pagamento"
+    )]
+    pub(crate) beneficiario: Option<Documento>,
+
+    /// Confirma sem perguntar (para scripts)
+    #[arg(long, conflicts_with = "simular", help_heading = "Segurança")]
+    pub(crate) sim: bool,
+
+    /// Mostra a requisição que seria enviada, sem enviar nada
+    #[arg(long, help_heading = "Segurança")]
+    pub(crate) simular: bool,
 }
 
 #[derive(Debug, Args)]
@@ -1238,8 +1291,56 @@ mod tests {
         };
         assert!(args.sim);
 
+        let cli = parse(&[
+            "pagar",
+            "82670000000653301602023123106000000002830894",
+            "--valor",
+            "65,33",
+            "--vencimento",
+            "2026-10-10",
+            "--data",
+            "2026-10-09",
+            "--beneficiario",
+            "12.345.678/0001-95",
+            "--sim",
+        ])
+        .unwrap();
+        assert!(!cli.command.aceita_csv());
+        let Command::Pagamento(PagamentoCommand::Boleto(BoletoCommand::Pagar(args))) = cli.command
+        else {
+            panic!("comando inesperado");
+        };
+        assert_eq!(args.valor, Some("65.33".parse::<Decimal>().unwrap()));
+        assert_eq!(args.vencimento, NaiveDate::from_ymd_opt(2026, 10, 10));
+        assert_eq!(args.data, NaiveDate::from_ymd_opt(2026, 10, 9));
+        assert_eq!(
+            args.beneficiario.map(|d| d.as_str().to_owned()).as_deref(),
+            Some("12345678000195")
+        );
+        assert!(args.sim && !args.simular);
+
         for args in [
-            &["listar", "--codigo", "123"][..],
+            &["pagar"][..],
+            &["pagar", "03395988500000666539201493990000372830030103"],
+            &[
+                "pagar",
+                "03395988500000666539201493990000372830030102",
+                "--valor",
+                "1.500",
+            ],
+            &[
+                "pagar",
+                "03395988500000666539201493990000372830030102",
+                "--sim",
+                "--simular",
+            ],
+            &[
+                "pagar",
+                "03395988500000666539201493990000372830030102",
+                "--beneficiario",
+                "123",
+            ],
+            &["listar", "--codigo", "123"],
             &["listar", "--codigo-transacao", "../pix"],
             &["listar", "--filtrar-por", "hoje"],
             &["cancelar"],

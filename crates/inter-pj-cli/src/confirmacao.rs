@@ -3,8 +3,11 @@
 use std::io::{self, BufRead, IsTerminal, Write};
 
 use inter_pj::Environment;
+use rust_decimal::Decimal;
 
+use crate::config::Settings;
 use crate::error::CliError;
+use crate::output;
 
 /// Where confirmations are asked: the process' terminal, or a fake in tests.
 pub(crate) trait Terminal {
@@ -74,6 +77,25 @@ pub(crate) fn pode_confirmar(terminal: &dyn Terminal, sim: bool) -> Result<(), C
             "confirmação necessária: execute em um terminal para responder, ou use --sim para confirmar sem perguntar"
                 .to_owned(),
         ))
+    }
+}
+
+/// Refuses amounts above the profile's `limite_por_operacao`, even with
+/// `--sim`.
+///
+/// # Errors
+///
+/// [`CliError::Usage`] naming the limit and where to change it.
+pub(crate) fn verificar_limite(valor: Decimal, settings: &Settings) -> Result<(), CliError> {
+    match &settings.limite_por_operacao {
+        Some(limite) if valor > limite.value => Err(CliError::Usage(format!(
+            "{} passa do limite por operação do perfil \"{}\" ({}); para permitir, ajuste limite_por_operacao em {}",
+            output::brl(valor),
+            settings.perfil.value,
+            output::brl(limite.value),
+            settings.config_path.display()
+        ))),
+        _ => Ok(()),
     }
 }
 
