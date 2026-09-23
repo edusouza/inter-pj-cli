@@ -324,7 +324,8 @@ impl Command {
             | Self::Pagamento(
                 PagamentoCommand::Boleto(BoletoCommand::Listar(_))
                 | PagamentoCommand::Darf(DarfCommand::Listar(_)),
-            ) => true,
+            )
+            | Self::Cobranca(CobrancaCommand::Listar(_) | CobrancaCommand::Sumario(_)) => true,
             Self::Extrato(args) => !matches!(args.comando, Some(ExtratoCommand::Pdf(_))),
             Self::Pix(_)
             | Self::Pagamento(_)
@@ -642,10 +643,166 @@ pub(crate) struct PixEnviarArgs {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum CobrancaCommand {
+    /// Cobranças de um período (padrão: com vencimento nos últimos 30 dias), com filtros
+    Listar(CobrancaListarArgs),
+    /// Quantidade e valor das cobranças de um período, por situação
+    Sumario(CobrancaSumarioArgs),
     /// Mostra uma cobrança: situação, valores, boleto e Pix (com o QR Code, se pedido)
     Consultar(CobrancaConsultarArgs),
     /// Grava o PDF de uma cobrança, com o boleto e o QR Code do Pix
     Pdf(CobrancaPdfArgs),
+}
+
+/// Filters shared by `cobranca listar` and `cobranca sumario`.
+#[derive(Debug, Clone, Args)]
+pub(crate) struct FiltroCobrancaArgs {
+    #[command(flatten)]
+    pub(crate) periodo: PeriodoArgs,
+
+    /// Data a que o período se refere: vencimento (padrão), emissao ou pagamento
+    #[arg(
+        long,
+        value_enum,
+        ignore_case = true,
+        value_name = "DATA",
+        hide_possible_values = true
+    )]
+    pub(crate) filtrar_por: Option<FiltrarDataPorArg>,
+
+    /// Apenas nesta situação: a-receber, recebida, atrasada, cancelada, expirada, marcada-recebida, em-processamento, falha-emissao ou protesto
+    #[arg(
+        long,
+        value_enum,
+        ignore_case = true,
+        value_name = "SITUACAO",
+        hide_possible_values = true
+    )]
+    pub(crate) situacao: Option<SituacaoArg>,
+
+    /// Apenas deste pagador (nome)
+    #[arg(long, value_name = "NOME")]
+    pub(crate) pagador: Option<String>,
+
+    /// Apenas deste pagador (CPF ou CNPJ)
+    #[arg(long, value_name = "CPF/CNPJ", value_parser = parse_documento)]
+    pub(crate) documento: Option<Documento>,
+
+    /// Apenas com este seu número
+    #[arg(long, value_name = "TEXTO")]
+    pub(crate) seu_numero: Option<String>,
+
+    /// Apenas deste tipo: simples, parcelada ou recorrente
+    #[arg(
+        long,
+        value_enum,
+        ignore_case = true,
+        value_name = "TIPO",
+        hide_possible_values = true
+    )]
+    pub(crate) tipo: Option<TipoCobrancaArg>,
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct CobrancaListarArgs {
+    #[command(flatten)]
+    pub(crate) filtro: FiltroCobrancaArgs,
+
+    /// Ordem: pagador (padrão), vencimento, emissao, valor, situacao, seu-numero, tipo ou codigo
+    #[arg(
+        long,
+        value_enum,
+        ignore_case = true,
+        value_name = "CAMPO",
+        hide_possible_values = true
+    )]
+    pub(crate) ordenar_por: Option<OrdenarPorArg>,
+
+    /// Ordem decrescente
+    #[arg(long)]
+    pub(crate) decrescente: bool,
+
+    /// Só esta página (começa em 0), em vez de todas
+    #[arg(long, value_name = "N")]
+    pub(crate) pagina: Option<u32>,
+
+    /// Cobranças por página com --pagina, até 1000 [padrão: 100]
+    #[arg(
+        long,
+        value_name = "N",
+        requires = "pagina",
+        value_parser = clap::value_parser!(u32).range(1..=1000)
+    )]
+    pub(crate) itens_por_pagina: Option<u32>,
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct CobrancaSumarioArgs {
+    #[command(flatten)]
+    pub(crate) filtro: FiltroCobrancaArgs,
+}
+
+/// `--filtrar-por` of the charges.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum FiltrarDataPorArg {
+    /// Data de vencimento (padrão)
+    Vencimento,
+    /// Data de emissão
+    #[value(name = "emissao", alias = "emissão")]
+    Emissao,
+    /// Data do pagamento
+    Pagamento,
+}
+
+/// `--situacao`: the words of the text output, or the API's codes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum SituacaoArg {
+    #[value(name = "a-receber", alias = "a_receber")]
+    AReceber,
+    #[value(name = "recebida", alias = "recebido")]
+    Recebida,
+    #[value(name = "atrasada", alias = "atrasado")]
+    Atrasada,
+    #[value(name = "cancelada", alias = "cancelado")]
+    Cancelada,
+    #[value(name = "expirada", alias = "expirado")]
+    Expirada,
+    #[value(name = "marcada-recebida", alias = "marcado_recebido")]
+    MarcadaRecebida,
+    #[value(name = "em-processamento", alias = "em_processamento")]
+    EmProcessamento,
+    #[value(name = "falha-emissao", alias = "falha_emissao")]
+    FalhaEmissao,
+    Protesto,
+}
+
+/// `--tipo` of the charges.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum TipoCobrancaArg {
+    #[value(name = "simples")]
+    Simples,
+    #[value(name = "parcelada", alias = "parcelado")]
+    Parcelada,
+    #[value(name = "recorrente")]
+    Recorrente,
+}
+
+/// `--ordenar-por` of the charges.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum OrdenarPorArg {
+    Pagador,
+    Vencimento,
+    #[value(name = "emissao", alias = "emissão")]
+    Emissao,
+    Valor,
+    #[value(name = "situacao", alias = "situação")]
+    Situacao,
+    #[value(name = "seu-numero", alias = "seu-número")]
+    SeuNumero,
+    Tipo,
+    #[value(name = "codigo", alias = "código")]
+    Codigo,
 }
 
 #[derive(Debug, Args)]

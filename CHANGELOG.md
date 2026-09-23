@@ -8,6 +8,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ### Adicionado
 
+- `inter-pj cobranca listar`: cobranças de um período por vencimento (padrão), emissão ou pagamento, com filtros de situação, pagador, CPF/CNPJ, seu número e tipo, ordem e todas as páginas (ou `--pagina`), em texto com totais, JSON ou CSV com os nomes da API (#29).
+- `inter-pj cobranca sumario`: quantidade e valor das cobranças do período por situação, com total, em texto, JSON ou CSV (#29).
 - `inter-pj cobranca consultar <codigo>`: situação, valores, encargos, pagador, boleto (linha digitável formatada) e Pix de uma cobrança, em texto ou JSON; `--qrcode` desenha o QR Code do Pix no terminal (preto no branco em qualquer tema; sem cores com `NO_COLOR` ou saída redirecionada) e `--qrcode-png` o grava em PNG, depois de conferir o CRC do copia e cola (#29, #31).
 - `inter-pj cobranca pdf <codigo> [--saida ARQUIVO|-] [--sobrescrever]`: PDF da cobrança com o boleto e o QR Code, gravado com permissão 600 (#29).
 - Biblioteca: `InterClient::cobranca`, com `Cobranca::emitir` (cobrança com boleto e Pix, conferida localmente: seu número, valor, pagador com CPF/CNPJ, UF e CEP, desconto, multa, mora, mensagem, formas de recebimento e nota fiscal, cuja chave de acesso confere número e série; o tipo de pessoa vem do documento) e `Cobranca::consultar` (situação, valores, encargos, boleto, Pix e nota fiscal) (#28).
