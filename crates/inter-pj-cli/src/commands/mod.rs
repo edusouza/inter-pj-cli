@@ -6,6 +6,7 @@ mod extrato;
 mod pagamento;
 mod pix;
 mod saldo;
+mod simulacao;
 
 use std::path::PathBuf;
 use std::sync::Arc;

@@ -27,6 +27,7 @@ pub(super) async fn run(
     terminal: &mut dyn Terminal,
 ) -> Result<(), CliError> {
     match command {
+        BoletoCommand::Pagar(args) => super::pagar::run(context, &args, terminal).await,
         BoletoCommand::Listar(args) => listar(context, &args).await,
         BoletoCommand::Cancelar(args) => cancelar(context, &args, terminal).await,
     }
