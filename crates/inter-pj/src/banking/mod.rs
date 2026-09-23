@@ -1,9 +1,10 @@
-//! Banking API (`/banking/v2`): balance, statements and outbound Pix;
-//! payments in later versions.
+//! Banking API (`/banking/v2`): balance, statements, outbound Pix and
+//! payments by barcode.
 
 mod consulta_pix;
 mod detalhe;
 mod extrato;
+mod pagamento;
 mod pagamento_pix;
 mod periodo;
 mod saldo;
@@ -21,6 +22,10 @@ pub use detalhe::{
 pub use extrato::{
     FiltroExtrato, LoteScroll, PaginaExtrato, TipoOperacao, TipoTransacao, TransacaoCompleta,
     TransacaoSimples,
+};
+pub use pagamento::{
+    DataDoPagamento, FiltroPagamentos, Pagamento, PagamentoBoleto, PagamentoBoletoError,
+    SolicitacaoPagamento, StatusPagamento,
 };
 pub use pagamento_pix::{
     DadosBancarios, Destinatario, IdIdempotente, IdIdempotenteError, InstituicaoFinanceira,
@@ -304,6 +309,76 @@ impl<'a> Banking<'a> {
         self.client.execute(request).await
     }
 
+    /// Pays or schedules a boleto, utility bill or tax with a barcode (`POST
+    /// /banking/v2/pagamento`, scope `pagamento-boleto.write`).
+    ///
+    /// The amount is checked with [`PagamentoBoleto::validar`] before
+    /// anything is sent. This API has no idempotency key: the request is
+    /// repeated automatically only when it surely was not processed (`429`,
+    /// connection refused), and after an unknown outcome the payment should
+    /// be looked up with [`pagamentos`](Self::pagamentos) before trying
+    /// again. Depending on the account settings, it waits for approval in the
+    /// Internet Banking ([`StatusPagamento::AguardandoAprovacao`]).
+    ///
+    /// # Errors
+    ///
+    /// [`Error::InvalidInput`] with a [`PagamentoBoletoError`] when the
+    /// amount is invalid (nothing is sent); otherwise the same as
+    /// [`saldo`](Self::saldo).
+    pub async fn pagar_boleto(&self, pagamento: &PagamentoBoleto) -> Result<SolicitacaoPagamento> {
+        pagamento
+            .validar()
+            .map_err(|err| Error::InvalidInput(Box::new(err)))?;
+        let body =
+            serde_json::to_value(pagamento).map_err(|err| Error::InvalidInput(Box::new(err)))?;
+        let request = ApiRequest::new(endpoint::banking::PAGAMENTO_INCLUIR)
+            .json(body)
+            .retry(RetryMode::WhenNotProcessed);
+        self.client.execute(request).await
+    }
+
+    /// Payments by barcode (`GET /banking/v2/pagamento`, scope
+    /// `pagamento-boleto.read`): by default, the ones requested in the last
+    /// 30 days.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::InvalidInput`] when the period ends before it starts or the
+    /// transaction code is not a UUID; otherwise the same as
+    /// [`saldo`](Self::saldo).
+    pub async fn pagamentos(&self, filtro: &FiltroPagamentos) -> Result<Vec<Pagamento>> {
+        if let Some((inicio, fim)) = filtro.periodo
+            && inicio > fim
+        {
+            return Err(Error::InvalidInput(
+                "o período dos pagamentos termina antes de começar".into(),
+            ));
+        }
+        if let Some(codigo) = &filtro.codigo_transacao {
+            codigo_transacao(codigo)?;
+        }
+        let request = ApiRequest::new(endpoint::banking::PAGAMENTO_BUSCAR).queries(filtro.query());
+        let lista: Option<Vec<Pagamento>> = self.client.execute(request).await?;
+        Ok(lista.unwrap_or_default())
+    }
+
+    /// Cancels a scheduled payment (`DELETE
+    /// /banking/v2/pagamento/{codigoTransacao}`, scope
+    /// `pagamento-boleto.write`).
+    ///
+    /// # Errors
+    ///
+    /// [`Error::InvalidInput`] when the code is not a UUID; otherwise the
+    /// same as [`saldo`](Self::saldo). Payments that cannot be cancelled
+    /// (already made, unknown) fail with the API's status (`404`, `422`).
+    pub async fn cancelar_pagamento(&self, codigo_transacao: &str) -> Result<()> {
+        let codigo = self::codigo_transacao(codigo_transacao)?;
+        let request = ApiRequest::new(endpoint::banking::PAGAMENTO_CANCELAR)
+            .path_param("codigoTransacao", codigo)
+            .retry(RetryMode::WhenNotProcessed);
+        self.client.execute_empty(request).await
+    }
+
     /// Status and history of a Pix sent with [`enviar_pix`](Self::enviar_pix)
     /// (`GET /banking/v2/pix/{codigoSolicitacao}`, scope `pagamento-pix.read`).
     /// The API answers for payments of the last 90 days.
@@ -324,6 +399,19 @@ impl<'a> Banking<'a> {
         let request = ApiRequest::new(endpoint::banking::PIX_CONSULTAR)
             .path_param("codigoSolicitacao", codigo.to_ascii_lowercase());
         self.client.execute(request).await
+    }
+}
+
+/// A payment's transaction code, a UUID, in lower case.
+fn codigo_transacao(codigo: &str) -> Result<String> {
+    let codigo = codigo.trim();
+    if is_uuid(codigo) {
+        Ok(codigo.to_ascii_lowercase())
+    } else {
+        Err(Error::InvalidInput(
+            "código da transação inválido: esperado um UUID (8-4-4-4-12 dígitos hexadecimais)"
+                .into(),
+        ))
     }
 }
 

@@ -163,6 +163,27 @@ impl InterClient {
 
     /// Sends an API request and decodes the JSON response.
     pub(crate) async fn execute<T: DeserializeOwned>(&self, request: ApiRequest) -> Result<T> {
+        self.execute_with(request, |operation, body| {
+            serde_json::from_slice(body).map_err(|err| Error::Decode {
+                operation,
+                message: err.to_string(),
+            })
+        })
+        .await
+    }
+
+    /// Sends an API request whose success carries no body to read (`204`).
+    pub(crate) async fn execute_empty(&self, request: ApiRequest) -> Result<()> {
+        self.execute_with(request, |_, _| Ok(())).await
+    }
+
+    /// Sends an API request, renewing the token once after a `401`, and
+    /// hands the body of a successful response to `read`.
+    async fn execute_with<T>(
+        &self,
+        request: ApiRequest,
+        read: impl FnOnce(String, &[u8]) -> Result<T>,
+    ) -> Result<T> {
         let operation = request.endpoint.to_string();
         let required = request.endpoint.scope_set();
         let url = self.url_for(&request.endpoint, &request.path_params)?;
@@ -213,10 +234,7 @@ impl InterClient {
                     &body,
                 ))));
             }
-            return serde_json::from_slice(&body).map_err(|err| Error::Decode {
-                operation,
-                message: err.to_string(),
-            });
+            return read(operation, &body);
         }
     }
 
