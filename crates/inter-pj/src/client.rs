@@ -564,6 +564,20 @@ fn error_chain(err: &dyn std::error::Error) -> String {
 mod tests {
     use super::*;
 
+    /// The client is shared across tasks and errors cross thread boundaries
+    /// (Rust API Guidelines C-SEND-SYNC and C-GOOD-ERR).
+    #[test]
+    fn public_types_are_send_and_sync() {
+        fn assert_send_sync<T: Send + Sync + 'static>() {}
+        assert_send_sync::<InterClient>();
+        assert_send_sync::<InterClientBuilder>();
+        assert_send_sync::<Error>();
+        assert_send_sync::<ApiError>();
+        assert_send_sync::<AccessToken>();
+        assert_send_sync::<ClientIdentity>();
+        assert_send_sync::<Credentials>();
+    }
+
     #[test]
     fn base_url_requires_https_except_loopback() {
         assert!(parse_base_url("https://exemplo.com.br").is_ok());
