@@ -145,4 +145,9 @@ jobs:
       - name: Criar release no GitHub
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$TAG" dist/* --verify-tag --title "inter-pj $TAG" --notes-file NOTAS.md
+        run: >-
+          gh release create "$TAG" dist/*
+          --repo "$GITHUB_REPOSITORY"
+          --verify-tag
+          --title "inter-pj $TAG"
+          --notes-file NOTAS.md
