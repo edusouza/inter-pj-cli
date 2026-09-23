@@ -6,20 +6,23 @@
 ┌──────────────────────── crates/inter-pj-cli (binário `inter-pj`) ────────────────────────┐
 │ cli.rs        definição dos comandos (clap) e ajuda em português                         │
 │ config.rs     arquivo TOML, perfis, precedência flag > env > arquivo, origem dos valores │
-│ commands/     saldo, auth, config                                                         │
+│ commands/     saldo, extrato (simples, completo, pdf), auth, config                       │
 │ token_store   cache de tokens em arquivo (600, gravação atômica)                          │
-│ output.rs     R$ no formato brasileiro, tabelas, JSON                                     │
+│ tabela.rs     tabelas em texto alinhado e CSV (RFC 4180, modo Excel pt-BR)                │
+│ output.rs     R$ no formato brasileiro, JSON, escrita em stdout                           │
+│ files.rs      gravação de arquivos sensíveis com permissão 600                            │
 │ error.rs      códigos de saída e dicas                                                    │
 └──────────────────────────────────────┬───────────────────────────────────────────────────┘
                                        │ usa
 ┌──────────────────────── crates/inter-pj (biblioteca `inter_pj`) ─────────────────────────┐
 │ client.rs     InterClient: reqwest + rustls, mTLS, bearer, x-conta-corrente, 401 → renova │
+│ retry.rs      RetryPolicy: backoff exponencial com jitter, Retry-After, modos de repetição│
 │ auth.rs       AccessToken, TokenStore, TokenManager (memória + armazenamento externo)     │
 │ endpoint.rs   registro de operações (método, caminho, escopos) — verificado por contrato  │
 │ identity.rs   certificado + chave PEM validados                                           │
 │ scope.rs      os 36 escopos documentados                                                  │
 │ problem.rs    parser tolerante de erros (RFC 7807 e variações)                            │
-│ banking/      modelos e operações da API Banking                                          │
+│ banking/      saldo, extrato, extrato completo (paginação e scroll), PDF, Periodo         │
 └───────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -45,6 +48,24 @@ Um mutex serializa as renovações para que chamadas concorrentes não gastem o 
 ### Registro de endpoints + testes de contrato
 
 Os endpoints ficam em um só lugar (`endpoint.rs`) e são usados tanto para montar as requisições quanto pelos testes de contrato, que conferem método, caminho e escopos com a especificação OpenAPI versionada em `spec/`. Assim, divergências com a documentação oficial quebram o CI em vez de quebrar em produção.
+
+### Retentativas só quando repetir é seguro
+
+Cada requisição tem um modo de repetição. Consultas (`GET`) e o pedido de token são repetidas em `429`, `500`, `502`, `503`, `504`, falhas de conexão e tempo esgotado. As requisições do modo *scroll* do extrato mudam estado no servidor (avançam o cursor): repeti-las depois de um `504` poderia pular um lote inteiro, então elas só são repetidas quando certamente não foram processadas (`429` ou conexão recusada). Operações com efeitos (pagamentos, Pix) nunca são repetidas. Falhas de TLS (certificado recusado, CA desconhecida) também não, porque repetir não resolve.
+
+A espera cresce exponencialmente a partir de 1 s, com *jitter* (entre metade e o total do intervalo) e teto de 60 s; um `Retry-After` maior que o teto faz a CLI desistir na hora, com a dica de aguardar.
+
+### Extrato completo: paginação e scroll
+
+A paginação tradicional da API alcança apenas as primeiras 10.000 transações de um período. `extrato_completo_todas` pede a primeira página com o tamanho máximo (10.000): se `totalElementos` couber, segue página a página; senão, recomeça no modo *scroll*, lote a lote, até `hasMore = false`. Contadores ausentes ou inconsistentes não levam a laços infinitos (página vazia, total já atingido e um teto de páginas encerram a leitura).
+
+### Detalhes tipados, sem perder dados
+
+`detalhes` não tem discriminador próprio: seu formato depende de `tipoTransacao`. A desserialização lê o tipo e escolhe um dos nove modelos documentados (`DetalhePix`, `DetalhePagamento`...); campos novos ficam em `outros` e tipos sem modelo (ou detalhes fora do formato) ficam em `Detalhe::Outro`, então a saída JSON reproduz tudo o que a API enviou. O teste de contrato deriva o par tipo ↔ modelo dos schemas `Transacao*` da especificação e falha se algum campo documentado não estiver mapeado.
+
+### CSV para planilhas
+
+O CSV segue a RFC 4180 (cabeçalho, CRLF, aspas quando necessário), usa os códigos e nomes de campo da API e valores com sinal (saídas negativas), para somar direto na planilha. Com `--separador ';'` o arquivo sai no padrão do Excel em português (vírgula decimal e BOM UTF-8). Descrições vêm de terceiros (por exemplo, a mensagem de um Pix recebido); textos que começam com `=`, `+`, `-` ou `@` recebem um apóstrofo para não virarem fórmulas (*CSV injection*).
 
 ### Valores monetários exatos
 

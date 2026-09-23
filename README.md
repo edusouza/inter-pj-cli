@@ -17,6 +17,18 @@ Limite                    R$ 1.000,00
 
 $ inter-pj saldo --json | jq .disponivel
 2850.55
+
+$ inter-pj extrato --inicio 2026-08-01 --fim 2026-08-31
+Extrato de 01/08/2026 a 31/08/2026
+
+Data        Tipo       Descrição                                   Valor
+03/08/2026  Pix        Pix recebido · Cliente Exemplo Ltda   R$ 1.500,00
+05/08/2026  Pagamento  Pagamento efetuado · Boleto; energia   -R$ 250,10
+
+Entradas              R$ 1.500,00
+Saídas                 -R$ 250,10
+Resultado do período  R$ 1.249,90
+2 transações
 ```
 
 ## O que já funciona
@@ -24,8 +36,9 @@ $ inter-pj saldo --json | jq .disponivel
 | Versão | Funcionalidades |
 | --- | --- |
 | **0.1.0** | Autenticação OAuth2 com mTLS e cache de token · `saldo` · `auth token`/`auth limpar` · `config init`/`caminho`/`mostrar` |
+| **0.2.0** | `extrato` · `extrato completo` (detalhes, filtros, todas as páginas e modo scroll) · `extrato pdf` · saída CSV · retentativas automáticas |
 
-O plano completo — extrato, Pix, pagamentos, cobranças (boleto com Pix), Pix Cobrança, webhooks e Pix Automático — está em [`docs/roadmap.md`](docs/roadmap.md) e é acompanhado pelas [issues do projeto](https://github.com/edusouza/inter-pj-cli/issues).
+O plano completo — Pix, pagamentos, cobranças (boleto com Pix), Pix Cobrança, webhooks e Pix Automático — está em [`docs/roadmap.md`](docs/roadmap.md) e é acompanhado pelas [issues do projeto](https://github.com/edusouza/inter-pj-cli/issues).
 
 ## Instalação
 
@@ -34,14 +47,14 @@ O plano completo — extrato, Pix, pagamentos, cobranças (boleto com Pix), Pix 
 **Com Cargo** (Rust 1.88 ou superior):
 
 ```console
-$ cargo install --locked --git https://github.com/edusouza/inter-pj-cli --tag v0.1.0 inter-pj-cli
+$ cargo install --locked --git https://github.com/edusouza/inter-pj-cli --tag v0.2.0 inter-pj-cli
 ```
 
 ## Configuração
 
 ### 1. Crie a integração no Internet Banking PJ
 
-No Internet Banking do Inter Empresas, crie uma integração com os **escopos** que você vai usar (para `saldo`: `extrato.read`) e baixe:
+No Internet Banking do Inter Empresas, crie uma integração com os **escopos** que você vai usar (para `saldo` e `extrato`: `extrato.read`) e baixe:
 
 - o **certificado** (`.crt`) e a **chave privada** (`.key`);
 - o **client_id** e o **client_secret** (o segredo só é mostrado uma vez).
@@ -93,6 +106,7 @@ Vários perfis (ex.: `sandbox` e `producao`) podem conviver no mesmo arquivo; es
 | Certificado (`.crt`) | `--certificado` | `INTER_CERTIFICADO` |
 | Chave privada (`.key`) | `--chave-privada` | `INTER_CHAVE_PRIVADA` |
 | Conta corrente | `--conta-corrente` | `INTER_CONTA_CORRENTE` |
+| Tentativas por requisição | `--tentativas` | `INTER_TENTATIVAS` |
 | Diretório de cache | — | `INTER_CACHE_DIR` |
 
 Locais padrão: configuração em `~/.config/inter-pj/config.toml` (Windows: `%APPDATA%\inter-pj\config.toml`) e cache em `~/.cache/inter-pj` (Windows: `%LOCALAPPDATA%\inter-pj`). Veja com `inter-pj config caminho`.
@@ -110,6 +124,38 @@ $ inter-pj auth limpar                           # apaga os tokens em cache do p
 $ inter-pj --perfil producao saldo
 $ inter-pj --help                                # ajuda de todos os comandos
 ```
+
+### Extrato
+
+```console
+$ inter-pj extrato                                          # últimos 30 dias, hoje incluído
+$ inter-pj extrato --inicio 2026-01-01 --fim 2026-12-31 --dividir-periodo
+
+$ inter-pj extrato completo --inicio 2026-08-01 --fim 2026-08-31            # 1ª página, com contraparte
+$ inter-pj extrato completo --tipo-operacao D --tipo-transacao pix --pagina 1 --tamanho-pagina 100
+$ inter-pj extrato completo --inicio 2026-08-01 --fim 2026-08-31 --todas-paginas --formato csv > agosto.csv
+
+$ inter-pj extrato pdf --inicio 2026-08-01 --fim 2026-08-31                 # extrato-2026-08-01-a-2026-08-31.pdf
+$ inter-pj extrato pdf --inicio 2026-08-01 --fim 2026-08-31 --saida - | lpr
+```
+
+- A API aceita **no máximo 90 dias por consulta** (contando o primeiro e o último dia). A CLI confere o período antes de chamar a API; `--dividir-periodo` consulta períodos maiores em partes consecutivas.
+- `extrato completo` traz os detalhes de cada transação (pagador/recebedor do Pix, dados do boleto, do pagamento...). `--todas-paginas` percorre todas as páginas e, acima de 10.000 transações, passa para o modo *scroll* da API (um por conta, expira após 6 minutos sem uso).
+- `extrato pdf` grava o arquivo com permissão `600` e nunca substitui um arquivo existente sem `--sobrescrever`.
+
+### Formatos de saída
+
+| Formato | Para quê |
+| --- | --- |
+| `texto` (padrão) | leitura: tabelas alinhadas, valores em `R$ 1.234,56`, datas `DD/MM/AAAA` |
+| `json` (ou `--json`) | automação: os nomes de campo da API e valores numéricos exatos |
+| `csv` | planilhas e scripts (`saldo` e `extrato`): RFC 4180, datas `AAAA-MM-DD`, ponto decimal, saídas com valor negativo |
+
+Para o Excel em português, use `--formato csv --separador ';'`: ponto e vírgula, vírgula decimal e UTF-8 com BOM. Textos vindos de terceiros que começam com `=`, `+`, `-` ou `@` (ex.: a mensagem de um Pix) recebem um apóstrofo no CSV, para não serem executados como fórmula pela planilha.
+
+### Retentativas
+
+Consultas que falham por limite de requisições (`429`), instabilidade do servidor (`500`, `502`, `503`, `504`) ou falha de conexão são repetidas automaticamente, com espera crescente (1 s, 2 s, ...) e respeitando o cabeçalho `Retry-After`. O padrão é de 3 tentativas; ajuste com `--tentativas N` (ou `INTER_TENTATIVAS`) ou desative com `--sem-retentativa`. Com `-v`, cada nova tentativa aparece em `stderr`. Operações que movimentam dinheiro (nas próximas versões) nunca são repetidas automaticamente.
 
 ### Tokens e rate limit
 

@@ -14,7 +14,7 @@ Planejado a partir das especificações de todas as APIs do [Portal do Desenvolv
 | Versão | Tema | Épico | Operações |
 | --- | --- | --- | --- |
 | **0.1.0** | Fundação: autenticação mTLS e saldo | [#1](https://github.com/edusouza/inter-pj-cli/issues/1) | `POST /oauth/v2/token`, `GET /banking/v2/saldo` |
-| 0.2.0 | Extrato: consulta, enriquecido, PDF e exportação | [#12](https://github.com/edusouza/inter-pj-cli/issues/12) | `GET /banking/v2/extrato`, `/extrato/completo`, `/extrato/exportar` |
+| **0.2.0** | Extrato: consulta, enriquecido, PDF e exportação | [#12](https://github.com/edusouza/inter-pj-cli/issues/12) | `GET /banking/v2/extrato`, `/extrato/completo`, `/extrato/exportar` |
 | 0.3.0 | Pix: envio e consulta | [#18](https://github.com/edusouza/inter-pj-cli/issues/18) | `POST /banking/v2/pix`, `GET /banking/v2/pix/{codigoSolicitacao}` |
 | 0.4.0 | Pagamentos: boletos, tributos, DARF e lotes | [#22](https://github.com/edusouza/inter-pj-cli/issues/22) | `/banking/v2/pagamento*` (7 operações) |
 | 0.5.0 | Cobrança: boleto com Pix | [#27](https://github.com/edusouza/inter-pj-cli/issues/27) | `/cobranca/v3/cobrancas*` (9 operações) |
