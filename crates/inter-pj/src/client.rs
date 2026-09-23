@@ -12,6 +12,7 @@ use url::{Host, Url};
 
 use crate::auth::{self, AccessToken, TokenManager, TokenStore};
 use crate::banking::Banking;
+use crate::cobranca::Cobranca;
 use crate::credentials::Credentials;
 use crate::endpoint::{self, Endpoint, Method};
 use crate::environment::Environment;
@@ -67,6 +68,11 @@ impl InterClient {
     /// Operations of the Banking API (balance, statements, payments...).
     pub fn banking(&self) -> Banking<'_> {
         Banking::new(self)
+    }
+
+    /// Operations of the Cobrança API (charges: boleto with Pix).
+    pub fn cobranca(&self) -> Cobranca<'_> {
+        Cobranca::new(self)
     }
 
     /// Returns an access token covering `scopes`, reusing a cached one when possible.
