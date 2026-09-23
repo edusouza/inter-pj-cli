@@ -480,7 +480,9 @@ async fn paga_com_sim_e_mostra_como_acompanhar() {
     let stderr = stderr_of(&assert);
     assert!(stderr.contains("Valor no código  R$ 30,10"), "{stderr}");
     assert!(
-        stderr.contains("aviso: o valor a pagar é maior que o do código: confira juros e multa"),
+        stderr.contains(
+            "aviso: o valor a pagar (R$ 31,00) é maior que o do código (R$ 30,10): confira juros e multa"
+        ),
         "{stderr}"
     );
 }

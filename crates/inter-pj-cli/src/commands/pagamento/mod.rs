@@ -2,6 +2,7 @@
 
 mod boleto;
 mod darf;
+mod lote;
 mod pagar;
 
 use chrono::NaiveDate;
@@ -17,6 +18,7 @@ pub(super) async fn run(context: &Context, command: PagamentoCommand) -> Result<
     match command {
         PagamentoCommand::Boleto(command) => boleto::run(context, command, &mut Stdio).await,
         PagamentoCommand::Darf(command) => darf::run(context, command, &mut Stdio).await,
+        PagamentoCommand::Lote(command) => lote::run(context, command, &mut Stdio).await,
     }
 }
 
