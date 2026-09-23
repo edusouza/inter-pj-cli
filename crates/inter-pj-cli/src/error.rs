@@ -48,6 +48,8 @@ pub(crate) enum CliError {
     #[error("{source}")]
     PagamentoIncerto {
         source: InterError,
+        /// What may have happened: "o pagamento pode ter sido feito".
+        situacao: &'static str,
         /// Command that finds the payment, to run before trying again.
         consulta: String,
     },
@@ -57,9 +59,18 @@ pub(crate) enum CliError {
     /// `pix consultar --aguardar`: the payment ended without being paid.
     #[error("o Pix terminou sem ser pago: {status}")]
     PixNaoPago { status: String },
-    /// `pix consultar --aguardar`: no final status before the time limit.
-    #[error("tempo de espera esgotado ({segundos} s): o Pix ainda está {status}")]
-    TempoEsgotado { status: String, segundos: u64 },
+    /// `pagamento lote consultar --aguardar`: some payments of the batch
+    /// were not made.
+    #[error("o lote foi processado com erro: {detalhe}")]
+    LoteComErro { detalhe: String },
+    /// `--aguardar`: no final status before the time limit.
+    #[error("tempo de espera esgotado ({segundos} s): {oque} ainda está {status}")]
+    TempoEsgotado {
+        /// What was awaited: `o Pix`, `o lote`.
+        oque: &'static str,
+        status: String,
+        segundos: u64,
+    },
     /// Local I/O failure.
     #[error("{context}: {source}")]
     Io {
@@ -83,7 +94,7 @@ impl CliError {
             Self::Config(_) => exit::CONFIG,
             Self::Io { .. } => exit::UNEXPECTED,
             Self::Cancelado => exit::CANCELLED,
-            Self::PixNaoPago { .. } => exit::REJECTED,
+            Self::PixNaoPago { .. } | Self::LoteComErro { .. } => exit::REJECTED,
             Self::TempoEsgotado { .. } => exit::WAIT_TIMEOUT,
             Self::Inter(err)
             | Self::ResultadoIncerto { source: err, .. }
@@ -124,10 +135,13 @@ impl CliError {
                     ),
                 ];
             }
-            Self::PagamentoIncerto { consulta, .. } => {
+            Self::PagamentoIncerto {
+                situacao, consulta, ..
+            } => {
                 return vec![
-                    "o pagamento pode ter sido feito, e esta API não tem chave de idempotência: repetir o comando pode pagar duas vezes"
-                        .to_owned(),
+                    format!(
+                        "{situacao}, e esta API não tem chave de idempotência: repetir o comando pode pagar duas vezes"
+                    ),
                     format!("confira antes de tentar de novo: {consulta}"),
                 ];
             }

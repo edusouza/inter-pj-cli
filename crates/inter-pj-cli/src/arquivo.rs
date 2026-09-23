@@ -4,13 +4,17 @@
 //! Unknown fields are refused: a typo such as `valorMuta` would otherwise
 //! drop the fine without anyone noticing.
 
+mod csv;
+mod lote;
+
 use std::fmt::Display;
 use std::io::{self, Read};
 use std::path::Path;
 use std::str::FromStr;
 
 use chrono::NaiveDate;
-use inter_pj::banking::PagamentoDarf;
+use inter_pj::banking::{PagamentoBoleto, PagamentoDarf};
+use inter_pj::boleto::CodigoBarras;
 use inter_pj::documento::Documento;
 use rust_decimal::Decimal;
 use serde_json::{Map, Value};
@@ -20,6 +24,17 @@ use crate::valor::parse_valor_ou_zero;
 
 /// Largest file accepted: a batch of 150 payments takes about 60 KB.
 const TAMANHO_MAXIMO: u64 = 1024 * 1024;
+
+pub(crate) use lote::{ArquivoLote, MODELO_CSV, MODELO_JSON, ler_lote};
+
+/// Fields of a payment by barcode, as in the API (`EfetuarPagamento`).
+pub(crate) const CAMPOS_BOLETO: [&str; 5] = [
+    "codBarraLinhaDigitavel",
+    "valorPagar",
+    "dataVencimento",
+    "dataPagamento",
+    "cpfCnpjBeneficiario",
+];
 
 /// Fields of a DARF, as in the API (`DarfRequest`).
 pub(crate) const CAMPOS_DARF: [&str; 11] = [
@@ -36,9 +51,18 @@ pub(crate) const CAMPOS_DARF: [&str; 11] = [
     "referencia",
 ];
 
+/// How messages name a file: its path, or the standard input for `-`.
+pub(crate) fn nome(caminho: &Path) -> String {
+    if caminho.as_os_str() == "-" {
+        "entrada padrão".to_owned()
+    } else {
+        caminho.display().to_string()
+    }
+}
+
 /// Reads a text file, or the standard input for `-`.
 pub(crate) fn ler(caminho: &Path) -> Result<String, CliError> {
-    let erro = |err: io::Error| CliError::io(format!("falha ao ler {}", caminho.display()), err);
+    let erro = |err: io::Error| CliError::io(format!("falha ao ler {}", nome(caminho)), err);
     let mut texto = String::new();
     if caminho.as_os_str() == "-" {
         io::stdin()
@@ -54,7 +78,7 @@ pub(crate) fn ler(caminho: &Path) -> Result<String, CliError> {
     if texto.len() as u64 > TAMANHO_MAXIMO {
         return Err(CliError::Usage(format!(
             "{}: arquivo grande demais (máximo de 1 MB)",
-            caminho.display()
+            nome(caminho)
         )));
     }
     // Files saved by some editors start with a byte order mark.
@@ -67,7 +91,7 @@ pub(crate) fn ler_json(caminho: &Path) -> Result<Value, CliError> {
     serde_json::from_str(&texto).map_err(|err| {
         CliError::Usage(format!(
             "{}: JSON inválido na linha {}, coluna {}",
-            caminho.display(),
+            nome(caminho),
             err.line(),
             err.column()
         ))
@@ -168,6 +192,47 @@ impl<'a> Campos<'a> {
     }
 }
 
+/// A payment by barcode from its fields ([`CAMPOS_BOLETO`]), validated. As
+/// in `pagamento boleto pagar`, amount and due date come from the code
+/// unless given, and today means now.
+pub(crate) fn boleto(campos: &Campos<'_>, hoje: NaiveDate) -> Result<PagamentoBoleto, CliError> {
+    const CODIGO: &str = "codBarraLinhaDigitavel";
+    let texto = campos.obrigatorio(CODIGO, campos.texto(CODIGO)?)?;
+    let codigo = CodigoBarras::parse(&texto).map_err(|err| campos.erro(CODIGO, err))?;
+    let valor = campos
+        .valor("valorPagar")?
+        .or_else(|| codigo.valor())
+        .ok_or_else(|| campos.erro("valorPagar", "obrigatório: o código não traz o valor"))?;
+    let vencimento = campos
+        .data("dataVencimento")?
+        .or_else(|| codigo.vencimento(hoje))
+        .ok_or_else(|| {
+            campos.erro(
+                "dataVencimento",
+                "obrigatório: o código não traz o vencimento (contas e tributos)",
+            )
+        })?;
+    let data_pagamento = campos.data("dataPagamento")?;
+    if let Some(data) = data_pagamento
+        && data < hoje
+    {
+        return Err(campos.erro(
+            "dataPagamento",
+            format!(
+                "o dia {} já passou: agende para hoje ou depois",
+                data.format("%d/%m/%Y")
+            ),
+        ));
+    }
+    let mut pagamento = PagamentoBoleto::new(codigo, valor, vencimento);
+    pagamento.data_pagamento = data_pagamento.filter(|data| *data > hoje);
+    pagamento.cpf_cnpj_beneficiario = campos.documento("cpfCnpjBeneficiario")?;
+    pagamento
+        .validar()
+        .map_err(|err| campos.erro("valorPagar", err))?;
+    Ok(pagamento)
+}
+
 /// A DARF from its fields ([`CAMPOS_DARF`]), validated.
 pub(crate) fn darf(campos: &Campos<'_>) -> Result<PagamentoDarf, CliError> {
     let obrigatorio = |campo: &str| {
@@ -218,6 +283,12 @@ mod tests {
         Campos::de(valor, "darf.json", &CAMPOS_DARF)
             .and_then(|campos| darf(&campos))
             .map_err(|err| err.to_string())
+    }
+
+    #[test]
+    fn names_the_standard_input() {
+        assert_eq!(nome(Path::new("-")), "entrada padrão");
+        assert_eq!(nome(Path::new("darf.json")), "darf.json");
     }
 
     #[test]
@@ -317,6 +388,74 @@ mod tests {
             erro.starts_with("darf.json: esperado um objeto JSON"),
             "{erro}"
         );
+    }
+
+    #[test]
+    fn reads_a_payment_by_barcode() {
+        let hoje = NaiveDate::from_ymd_opt(2026, 9, 23).unwrap();
+        let ler_boleto = |valor: Value| {
+            Campos::de(&valor, "pagamento 1", &CAMPOS_BOLETO)
+                .and_then(|campos| boleto(&campos, hoje))
+                .map_err(|err| err.to_string())
+        };
+        // Amount and due date from the code.
+        let lido = ler_boleto(json!({
+            "codBarraLinhaDigitavel": "07797.77705 11678.471159 90071.126347 1 15950000003010"
+        }))
+        .unwrap();
+        assert_eq!(lido.valor_pagar, "30.10".parse().unwrap());
+        assert_eq!(
+            lido.data_vencimento,
+            NaiveDate::from_ymd_opt(2026, 10, 10).unwrap()
+        );
+        assert_eq!(lido.data_pagamento, None);
+
+        let lido = ler_boleto(json!({
+            "codBarraLinhaDigitavel": "82670000000653301602023123106000000002830894",
+            "valorPagar": "65,33",
+            "dataVencimento": "2026-10-10",
+            "dataPagamento": "2026-10-09",
+            "cpfCnpjBeneficiario": "12345678000195"
+        }))
+        .unwrap();
+        assert_eq!(lido.data_pagamento, NaiveDate::from_ymd_opt(2026, 10, 9));
+        assert!(lido.cpf_cnpj_beneficiario.is_some());
+
+        for (valor, esperado) in [
+            (
+                json!({}),
+                "pagamento 1, campo \"codBarraLinhaDigitavel\": obrigatório",
+            ),
+            (
+                json!({"codBarraLinhaDigitavel": "123"}),
+                "pagamento 1, campo \"codBarraLinhaDigitavel\": ",
+            ),
+            (
+                json!({"codBarraLinhaDigitavel": "82670000000653301602023123106000000002830894"}),
+                "pagamento 1, campo \"dataVencimento\": obrigatório: o código não traz o vencimento",
+            ),
+            (
+                json!({"codBarraLinhaDigitavel": "00195000000000000000000000000000000000000000"}),
+                "pagamento 1, campo \"valorPagar\": obrigatório: o código não traz o valor",
+            ),
+            (
+                json!({
+                    "codBarraLinhaDigitavel": "07797777051167847115990071126347115950000003010",
+                    "dataPagamento": "2026-09-22"
+                }),
+                "pagamento 1, campo \"dataPagamento\": o dia 22/09/2026 já passou",
+            ),
+            (
+                json!({
+                    "codBarraLinhaDigitavel": "07797777051167847115990071126347115950000003010",
+                    "valorPagar": 0
+                }),
+                "pagamento 1, campo \"valorPagar\": o valor a pagar deve ser maior que zero",
+            ),
+        ] {
+            let erro = ler_boleto(valor).unwrap_err();
+            assert!(erro.starts_with(esperado), "{esperado}\n{erro}");
+        }
     }
 
     #[test]

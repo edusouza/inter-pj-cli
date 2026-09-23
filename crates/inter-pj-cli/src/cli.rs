@@ -645,6 +645,89 @@ pub(crate) enum PagamentoCommand {
         subcommand_value_name = "COMANDO"
     )]
     Darf(DarfCommand),
+    /// Lotes de 2 a 150 boletos e DARFs, a partir de um arquivo JSON ou CSV
+    #[command(
+        subcommand,
+        subcommand_help_heading = "Comandos",
+        subcommand_value_name = "COMANDO"
+    )]
+    Lote(LoteCommand),
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum LoteCommand {
+    /// Envia os pagamentos de um arquivo, após conferir todos, mostrar um resumo e pedir confirmação
+    Enviar(LoteEnviarArgs),
+    /// Mostra um lote e o status de cada pagamento
+    Consultar(LoteConsultarArgs),
+    /// Imprime um arquivo de exemplo, com dados fictícios: json (padrão) ou csv
+    Modelo(LoteModeloArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct LoteEnviarArgs {
+    /// Arquivo JSON ou CSV com os pagamentos ("-" para a entrada padrão); veja `pagamento lote modelo`
+    #[arg(long, value_name = "ARQUIVO", help_heading = "Lote")]
+    pub(crate) arquivo: PathBuf,
+
+    /// Seu identificador do lote (até 30 caracteres); substitui o do arquivo
+    #[arg(long, value_name = "TEXTO", help_heading = "Lote")]
+    pub(crate) identificador: Option<String>,
+
+    /// Confirma sem perguntar (para scripts)
+    #[arg(long, conflicts_with = "simular", help_heading = "Segurança")]
+    pub(crate) sim: bool,
+
+    /// Mostra a requisição que seria enviada, sem enviar nada
+    #[arg(long, help_heading = "Segurança")]
+    pub(crate) simular: bool,
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct LoteConsultarArgs {
+    /// Identificador do lote, mostrado por `pagamento lote enviar`
+    #[arg(value_name = "ID_LOTE")]
+    pub(crate) id_lote: String,
+
+    /// Consulta de novo, a cada 6 segundos, até o lote ser processado
+    #[arg(long)]
+    pub(crate) aguardar: bool,
+
+    /// Tempo máximo de espera com --aguardar: 60s, 5m, 1h [padrão: 5m]
+    #[arg(
+        long,
+        value_name = "DURACAO",
+        value_parser = parse_duracao,
+        default_value = "5m",
+        hide_default_value = true,
+        requires = "aguardar"
+    )]
+    pub(crate) timeout: Duration,
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct LoteModeloArgs {
+    /// Formato do arquivo: json ou csv (separado por ";", para o Excel em português)
+    #[arg(
+        value_name = "FORMATO",
+        value_enum,
+        ignore_case = true,
+        default_value_t = TipoArquivo::Json,
+        hide_possible_values = true,
+        hide_default_value = true
+    )]
+    pub(crate) tipo: TipoArquivo,
+}
+
+/// Format of a batch file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum TipoArquivo {
+    /// JSON, nos campos da API
+    Json,
+    /// CSV, um pagamento por linha
+    Csv,
 }
 
 #[derive(Debug, Subcommand)]
@@ -1599,6 +1682,60 @@ mod tests {
             args.codigo_solicitacao.as_deref(),
             Some("3414f226-36fb-4d87-811e-cfd99911d845")
         );
+    }
+
+    #[test]
+    fn batch_arguments() {
+        let parse = |args: &[&str]| {
+            let mut full = vec!["inter-pj", "pagamento", "lote"];
+            full.extend_from_slice(args);
+            Cli::try_parse_from(full)
+        };
+        let cli = parse(&[
+            "enviar",
+            "--arquivo",
+            "lote.csv",
+            "--identificador",
+            "Outubro",
+            "--sim",
+        ])
+        .unwrap();
+        assert!(!cli.command.aceita_csv());
+        let Command::Pagamento(PagamentoCommand::Lote(LoteCommand::Enviar(args))) = cli.command
+        else {
+            panic!("comando inesperado");
+        };
+        assert_eq!(args.arquivo, PathBuf::from("lote.csv"));
+        assert_eq!(args.identificador.as_deref(), Some("Outubro"));
+
+        let Command::Pagamento(PagamentoCommand::Lote(LoteCommand::Consultar(args))) =
+            parse(&["consultar", "0123456789abcdef01234567", "--aguardar"])
+                .unwrap()
+                .command
+        else {
+            panic!("comando inesperado");
+        };
+        assert_eq!(args.timeout, Duration::from_secs(300));
+
+        for (args, esperado) in [
+            (&["modelo"][..], TipoArquivo::Json),
+            (&["modelo", "CSV"], TipoArquivo::Csv),
+        ] {
+            let Command::Pagamento(PagamentoCommand::Lote(LoteCommand::Modelo(modelo))) =
+                parse(args).unwrap().command
+            else {
+                panic!("comando inesperado");
+            };
+            assert_eq!(modelo.tipo, esperado);
+        }
+        for args in [
+            &["enviar"][..],
+            &["enviar", "--arquivo", "lote.csv", "--sim", "--simular"],
+            &["consultar", "x", "--timeout", "5m"],
+            &["modelo", "xml"],
+        ] {
+            assert!(parse(args).is_err(), "{args:?}");
+        }
     }
 
     #[test]
