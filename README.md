@@ -80,6 +80,7 @@ certificado = "~/inter/certificado.crt"
 chave_privada = "~/inter/chave.key"
 # conta_corrente = "<numero>"     # só se a integração tiver mais de uma conta
 # escopos = ["extrato.read"]      # opcional: escopos pedidos em todo token
+# limite_por_operacao = "1.000,00" # opcional: valor máximo de cada Pix
 ```
 
 ### 3. Informe o segredo pela variável de ambiente
@@ -143,6 +144,40 @@ $ inter-pj extrato pdf --inicio 2026-08-01 --fim 2026-08-31 --saida - | lpr
 - `extrato completo` traz os detalhes de cada transação (pagador/recebedor do Pix, dados do boleto, do pagamento...). `--todas-paginas` percorre todas as páginas e, acima de 10.000 transações, passa para o modo *scroll* da API (um por conta, expira após 6 minutos sem uso).
 - `extrato pdf` grava o arquivo com permissão `600` e nunca substitui um arquivo existente sem `--sobrescrever`.
 
+### Pix
+
+```console
+$ inter-pj pix enviar --chave fornecedor@exemplo.com --valor 150,00 --descricao "NF 123"
+Pix a enviar
+  Ambiente               sandbox (dados fictícios)
+  Chave Pix              fornecedor@exemplo.com (e-mail)
+  Valor                  R$ 150,00 (cento e cinquenta reais)
+  Quando                 agora
+  Descrição              NF 123
+  Chave de idempotência  9b2f6c1e-5d0a-4c1b-8f3e-2a7d4e6b8c90
+Enviar o Pix? [s/N] s
+Pix enviado.
+Código da solicitação  c42f0787-02cb-4b31-827e-459ec9d7ece1
+Data do pagamento      23/09/2026
+Data da operação       23/09/2026
+Chave de idempotência  9b2f6c1e-5d0a-4c1b-8f3e-2a7d4e6b8c90
+
+$ inter-pj pix enviar --chave +5511912345678 --valor 1.500,00 --data 2026-10-01   # agendado
+$ inter-pj pix enviar --chave 12.345.678/0001-95 --valor 99,90 --simular          # mostra a requisição, não envia
+$ inter-pj pix enviar --chave fornecedor@exemplo.com --valor 150 --sim --json     # sem perguntar (scripts)
+```
+
+Trilhos de segurança de todo envio:
+
+- **Resumo e confirmação**: antes de enviar, a CLI mostra destino, valor (também por extenso), data e ambiente (produção em destaque) e pergunta `[s/N]`; o padrão é não. `--sim` confirma sem perguntar. Respostas vindas de um *pipe* não valem: sem terminal e sem `--sim`, a CLI recusa (código 2).
+- **Validação local**: chave Pix (CPF/CNPJ com dígitos verificadores, e-mail, celular `+55DD9NNNNNNNN`, chave aleatória), valor maior que zero com até 2 casas, descrição de até 140 caracteres e data de agendamento. O valor aceita `150,00`, `1.500,00` e `150.00`; formas ambíguas como `1.500` são recusadas.
+- **`--simular`**: valida e mostra a requisição (sem segredos), sem enviar nada.
+- **Idempotência**: cada envio leva uma chave (`x-id-idempotente`), mostrada no resumo. Se a resposta se perder (tempo esgotado, erro 5xx), o Pix pode ter sido feito: confira o extrato e, para repetir sem risco de pagar duas vezes, use `--id-idempotente <chave>`.
+- **Limite por operação**: com `limite_por_operacao` no perfil, valores acima dele são recusados, mesmo com `--sim`.
+- **Aprovação**: conforme a configuração da conta, o Pix aguarda aprovação no Internet Banking (Aprovar > Gestão de Aprovações); a CLI avisa quando for o caso.
+
+A integração precisa do escopo `pagamento-pix.write`.
+
 ### Formatos de saída
 
 | Formato | Para quê |
@@ -155,7 +190,7 @@ Para o Excel em português, use `--formato csv --separador ';'`: ponto e vírgul
 
 ### Retentativas
 
-Consultas que falham por limite de requisições (`429`), instabilidade do servidor (`500`, `502`, `503`, `504`) ou falha de conexão são repetidas automaticamente, com espera crescente (1 s, 2 s, ...) e respeitando o cabeçalho `Retry-After`. O padrão é de 3 tentativas; ajuste com `--tentativas N` (ou `INTER_TENTATIVAS`) ou desative com `--sem-retentativa`. Com `-v`, cada nova tentativa aparece em `stderr`. Operações que movimentam dinheiro (nas próximas versões) nunca são repetidas automaticamente.
+Consultas que falham por limite de requisições (`429`), instabilidade do servidor (`500`, `502`, `503`, `504`) ou falha de conexão são repetidas automaticamente, com espera crescente (1 s, 2 s, ...) e respeitando o cabeçalho `Retry-After`. O padrão é de 3 tentativas; ajuste com `--tentativas N` (ou `INTER_TENTATIVAS`) ou desative com `--sem-retentativa`. Com `-v`, cada nova tentativa aparece em `stderr`. O envio de Pix só é repetido quando certamente não foi processado (`429` ou conexão recusada), sempre com a mesma chave de idempotência.
 
 ### Tokens e rate limit
 
@@ -180,6 +215,7 @@ $ curl --cert certificado.crt --key chave.key \
 | 4 | falha de autenticação ou acesso negado (credenciais, escopos, 401/403) |
 | 5 | requisição rejeitada pela API (400, 404, 409, 422) |
 | 6 | serviço indisponível, limite de requisições (429), erro 5xx ou falha de rede |
+| 7 | operação cancelada na confirmação (nada foi enviado) |
 
 Mensagens de erro vão para `stderr`, em português, com a explicação da API e dicas. Com `-v`/`-vv` a CLI mostra detalhes das requisições (método, caminho, status e tempo) — nunca tokens, segredos ou corpos de resposta.
 

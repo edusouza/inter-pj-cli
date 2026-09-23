@@ -546,7 +546,10 @@ async fn config_mostrar_indica_origem_e_oculta_segredos() {
                 .and(predicate::str::contains("definido (oculto) (arquivo)"))
                 .and(predicate::str::contains("*****21 (arquivo)"))
                 .and(predicate::str::contains(
-                    "Escopos adicionais  (não definido)",
+                    "Escopos adicionais   (não definido)",
+                ))
+                .and(predicate::str::contains(
+                    "Limite por operação  (não definido)",
                 )),
         );
     let output = format!("{}{}", stdout_of(&assert), stderr_of(&assert));

@@ -6,8 +6,10 @@
 ┌──────────────────────── crates/inter-pj-cli (binário `inter-pj`) ────────────────────────┐
 │ cli.rs        definição dos comandos (clap) e ajuda em português                         │
 │ config.rs     arquivo TOML, perfis, precedência flag > env > arquivo, origem dos valores │
-│ commands/     saldo, extrato (simples, completo, pdf), auth, config                       │
+│ commands/     saldo, extrato (simples, completo, pdf), pix enviar, auth, config           │
 │ token_store   cache de tokens em arquivo (600, gravação atômica)                          │
+│ confirmacao   resumo + [s/N] antes de mover dinheiro (só com stdin em terminal)           │
+│ valor.rs      valores em reais digitados (150,00 / 1.500,00) e por extenso                │
 │ tabela.rs     tabelas em texto alinhado e CSV (RFC 4180, modo Excel pt-BR)                │
 │ output.rs     R$ no formato brasileiro, JSON, escrita em stdout                           │
 │ files.rs      gravação de arquivos sensíveis com permissão 600                            │
@@ -67,6 +69,14 @@ Tudo o que pode ser conferido antes de mover dinheiro é conferido localmente, s
 - `PagamentoPix::validar` recusa valores não positivos ou com mais de 2 casas decimais, descrição com mais de 140 caracteres e dados bancários malformados, e `enviar_pix` chama a validação antes de enviar.
 
 Cada envio leva um `x-id-idempotente` (UUID v4 gerado com o gerador aleatório do aws-lc-rs, já presente pelo TLS). Com a mesma chave, a API não paga duas vezes: quando a resposta se perde (tempo esgotado, conexão caída), o mesmo pagamento pode ser reenviado com segurança. O destinatário é um enum marcado por `tipo` (`CHAVE`, `DADOS_BANCARIOS`, `PIX_COPIA_E_COLA`), como o discriminador da especificação; o teste de contrato reproduz, campo a campo, os três exemplos de requisição da documentação.
+
+### Confirmação antes de mover dinheiro
+
+Comandos que movimentam dinheiro validam tudo localmente, mostram um resumo em `stderr` (destino, valor em reais e por extenso, data, ambiente e chave de idempotência) e só enviam depois de um `s` ou `sim`. A resposta só é lida quando o `stdin` é um terminal: `yes | inter-pj pix enviar ...` não paga nada, e scripts precisam dizer `--sim` explicitamente. O limite por operação do perfil vale mesmo com `--sim`.
+
+A pergunta passa pelo trait `Terminal`. Os testes rodam o comando de verdade contra a API simulada com um terminal falso, para provar que uma resposta negativa não faz nenhuma requisição. Os testes E2E do binário cobrem `--simular`, a falta de terminal e o limite.
+
+Quando o envio falha depois de possivelmente ter chegado à API (tempo esgotado, `5xx`, resposta ilegível), o erro vem com a chave de idempotência e a instrução para repetir com `--id-idempotente`, sem risco de pagar duas vezes.
 
 ### Extrato completo: paginação e scroll
 
