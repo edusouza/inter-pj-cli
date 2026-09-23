@@ -31,7 +31,12 @@ async fn rate_limited_get_is_retried_until_it_succeeds() {
     let server = MockServer::start().await;
     mount_token(&server, "tok", "extrato.read", 1).await;
     mount_saldo(&server, ResponseTemplate::new(429), 2).await;
-    mount_saldo(&server, ResponseTemplate::new(200).set_body_json(saldo_body()), 1).await;
+    mount_saldo(
+        &server,
+        ResponseTemplate::new(200).set_body_json(saldo_body()),
+        1,
+    )
+    .await;
 
     let saldo = client(&server).banking().saldo(None).await.unwrap();
     assert!(saldo.disponivel.is_some());
@@ -43,7 +48,12 @@ async fn transient_server_errors_are_retried() {
     mount_token(&server, "tok", "extrato.read", 1).await;
     mount_saldo(&server, ResponseTemplate::new(503), 1).await;
     mount_saldo(&server, ResponseTemplate::new(502), 1).await;
-    mount_saldo(&server, ResponseTemplate::new(200).set_body_json(saldo_body()), 1).await;
+    mount_saldo(
+        &server,
+        ResponseTemplate::new(200).set_body_json(saldo_body()),
+        1,
+    )
+    .await;
 
     client(&server).banking().saldo(None).await.unwrap();
 }
@@ -54,7 +64,10 @@ async fn gives_up_after_the_last_attempt() {
     mount_token(&server, "tok", "extrato.read", 1).await;
     mount_saldo(&server, ResponseTemplate::new(503), 4).await;
 
-    let client = builder(&server).retry_policy(fast_retries(4)).build().unwrap();
+    let client = builder(&server)
+        .retry_policy(fast_retries(4))
+        .build()
+        .unwrap();
     let err = client.banking().saldo(None).await.unwrap_err();
     assert_eq!(api_status(&err), 503);
 }
@@ -98,7 +111,12 @@ async fn retry_after_is_honoured() {
         1,
     )
     .await;
-    mount_saldo(&server, ResponseTemplate::new(200).set_body_json(saldo_body()), 1).await;
+    mount_saldo(
+        &server,
+        ResponseTemplate::new(200).set_body_json(saldo_body()),
+        1,
+    )
+    .await;
 
     let client = builder(&server)
         .retry_policy(
@@ -110,7 +128,11 @@ async fn retry_after_is_honoured() {
         .unwrap();
     let started = Instant::now();
     client.banking().saldo(None).await.unwrap();
-    assert!(started.elapsed() >= Duration::from_secs(1), "{:?}", started.elapsed());
+    assert!(
+        started.elapsed() >= Duration::from_secs(1),
+        "{:?}",
+        started.elapsed()
+    );
 }
 
 #[tokio::test]
@@ -145,7 +167,12 @@ async fn token_request_is_retried() {
         .mount(&server)
         .await;
     mount_token(&server, "tok", "extrato.read", 1).await;
-    mount_saldo(&server, ResponseTemplate::new(200).set_body_json(saldo_body()), 1).await;
+    mount_saldo(
+        &server,
+        ResponseTemplate::new(200).set_body_json(saldo_body()),
+        1,
+    )
+    .await;
 
     client(&server).banking().saldo(None).await.unwrap();
 }
@@ -187,5 +214,9 @@ async fn connection_failures_are_retried() {
     let err = client.banking().saldo(None).await.unwrap_err();
     assert!(matches!(err, Error::Transport(_)), "{err:?}");
     // Two retries, each waiting at least half of the 40 ms delay.
-    assert!(started.elapsed() >= Duration::from_millis(40), "{:?}", started.elapsed());
+    assert!(
+        started.elapsed() >= Duration::from_millis(40),
+        "{:?}",
+        started.elapsed()
+    );
 }

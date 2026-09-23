@@ -176,7 +176,9 @@ pub(crate) fn retry_after(headers: &HeaderMap, now: DateTime<Utc>) -> Option<Dur
             .then(|| Duration::try_from_secs_f64(seconds).ok())
             .flatten();
     }
-    let date = DateTime::parse_from_rfc2822(value).ok()?.with_timezone(&Utc);
+    let date = DateTime::parse_from_rfc2822(value)
+        .ok()?
+        .with_timezone(&Utc);
     Some((date - now).to_std().unwrap_or(Duration::ZERO))
 }
 
@@ -246,11 +248,17 @@ mod tests {
             assert!(!RetryMode::Never.retries_status(status(code)), "{code}");
         }
         for code in [200, 400, 401, 403, 404, 409, 422, 501] {
-            assert!(!RetryMode::Idempotent.retries_status(status(code)), "{code}");
+            assert!(
+                !RetryMode::Idempotent.retries_status(status(code)),
+                "{code}"
+            );
         }
         assert!(RetryMode::WhenNotProcessed.retries_status(status(429)));
         for code in [500, 502, 503, 504] {
-            assert!(!RetryMode::WhenNotProcessed.retries_status(status(code)), "{code}");
+            assert!(
+                !RetryMode::WhenNotProcessed.retries_status(status(code)),
+                "{code}"
+            );
         }
     }
 
@@ -267,7 +275,10 @@ mod tests {
         assert_eq!(header("7"), Some(S * 7));
         assert_eq!(header(" 1.5 "), Some(Duration::from_millis(1500)));
         assert_eq!(header("Fri, 02 Jan 2026 10:00:30 GMT"), Some(S * 30));
-        assert_eq!(header("Fri, 02 Jan 2026 09:00:00 GMT"), Some(Duration::ZERO));
+        assert_eq!(
+            header("Fri, 02 Jan 2026 09:00:00 GMT"),
+            Some(Duration::ZERO)
+        );
         assert_eq!(header("-3"), None);
         assert_eq!(header("amanhã"), None);
         assert_eq!(retry_after(&HeaderMap::new(), now), None);

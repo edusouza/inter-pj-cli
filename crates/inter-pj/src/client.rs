@@ -344,7 +344,10 @@ impl ApiRequest {
         self
     }
 
-    pub(crate) fn queries(mut self, pairs: impl IntoIterator<Item = (&'static str, String)>) -> Self {
+    pub(crate) fn queries(
+        mut self,
+        pairs: impl IntoIterator<Item = (&'static str, String)>,
+    ) -> Self {
         self.query.extend(pairs);
         self
     }
@@ -757,7 +760,10 @@ mod tests {
             .execute::<serde_json::Value>(ApiRequest::new(PAGAR_BOLETO))
             .await
             .unwrap_err();
-        assert!(matches!(&err, Error::Api(api) if api.status == 503), "{err:?}");
+        assert!(
+            matches!(&err, Error::Api(api) if api.status == 503),
+            "{err:?}"
+        );
     }
 
     #[test]
