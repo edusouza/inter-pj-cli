@@ -23,6 +23,8 @@
 │ scope.rs      os 36 escopos documentados                                                  │
 │ problem.rs    parser tolerante de erros (RFC 7807 e variações)                            │
 │ banking/      saldo, extrato, extrato completo (paginação e scroll), PDF, Periodo         │
+│ documento.rs  CPF e CNPJ (inclusive o alfanumérico) com dígitos verificadores             │
+│ pix/          chave Pix (formatos do DICT) e leitura do copia e cola (BR Code, CRC16)     │
 └───────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
