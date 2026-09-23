@@ -12,8 +12,9 @@ use chrono::NaiveDate;
 use clap::{ArgAction, ArgGroup, Args, Parser, Subcommand, ValueEnum};
 use inter_pj::RetryPolicy;
 use inter_pj::banking::{
-    IdIdempotente, TAMANHO_PAGINA_MAXIMO, TipoConta, TipoOperacao, TipoTransacao,
+    DataDoPagamento, IdIdempotente, TAMANHO_PAGINA_MAXIMO, TipoConta, TipoOperacao, TipoTransacao,
 };
+use inter_pj::boleto::CodigoBarras;
 use inter_pj::documento::Documento;
 use inter_pj::pix::{BrCode, ChavePix};
 use rust_decimal::Decimal;
@@ -285,6 +286,13 @@ pub(crate) enum Command {
         subcommand_value_name = "COMANDO"
     )]
     Pix(PixCommand),
+    /// Pagamentos: boletos, contas de consumo e tributos com código de barras
+    #[command(
+        subcommand,
+        subcommand_help_heading = "Comandos",
+        subcommand_value_name = "COMANDO"
+    )]
+    Pagamento(PagamentoCommand),
     /// Tokens de acesso OAuth
     #[command(
         subcommand,
@@ -305,9 +313,10 @@ impl Command {
     /// Whether the command lists data that makes sense as CSV.
     pub(crate) fn aceita_csv(&self) -> bool {
         match self {
-            Self::Saldo(_) => true,
+            Self::Saldo(_)
+            | Self::Pagamento(PagamentoCommand::Boleto(BoletoCommand::Listar(_))) => true,
             Self::Extrato(args) => !matches!(args.comando, Some(ExtratoCommand::Pdf(_))),
-            Self::Pix(_) | Self::Auth(_) | Self::Config(_) => false,
+            Self::Pix(_) | Self::Pagamento(_) | Self::Auth(_) | Self::Config(_) => false,
         }
     }
 }
@@ -617,6 +626,84 @@ pub(crate) struct PixEnviarArgs {
     pub(crate) id_idempotente: Option<IdIdempotente>,
 }
 
+#[derive(Debug, Subcommand)]
+pub(crate) enum PagamentoCommand {
+    /// Boletos, contas de consumo e tributos com código de barras
+    #[command(
+        subcommand,
+        subcommand_help_heading = "Comandos",
+        subcommand_value_name = "COMANDO"
+    )]
+    Boleto(BoletoCommand),
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum BoletoCommand {
+    /// Lista os pagamentos por código de barras de um período (até 90 dias; padrão: incluídos nos últimos 30 dias)
+    Listar(BoletoListarArgs),
+    /// Cancela um pagamento agendado, após mostrá-lo e pedir confirmação
+    Cancelar(BoletoCancelarArgs),
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct BoletoListarArgs {
+    #[command(flatten)]
+    pub(crate) periodo: PeriodoArgs,
+
+    /// Data a que o período se refere: inclusao (padrão), pagamento ou vencimento
+    #[arg(
+        long,
+        value_enum,
+        ignore_case = true,
+        value_name = "DATA",
+        hide_possible_values = true
+    )]
+    pub(crate) filtrar_por: Option<DataDoPagamentoArg>,
+
+    /// Apenas os pagamentos deste boleto ou conta (linha digitável ou código de barras)
+    #[arg(long, value_name = "CODIGO", value_parser = parse_codigo_barras)]
+    pub(crate) codigo: Option<CodigoBarras>,
+
+    /// Apenas o pagamento com este código de transação
+    #[arg(long, value_name = "UUID", value_parser = parse_uuid)]
+    pub(crate) codigo_transacao: Option<String>,
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct BoletoCancelarArgs {
+    /// Código da transação do agendamento, mostrado por `pagamento boleto listar`
+    #[arg(value_name = "CODIGO_TRANSACAO", value_parser = parse_uuid)]
+    pub(crate) codigo_transacao: String,
+
+    /// Confirma sem perguntar (para scripts)
+    #[arg(long, help_heading = "Segurança")]
+    pub(crate) sim: bool,
+}
+
+/// `--filtrar-por`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum DataDoPagamentoArg {
+    /// Data em que o pagamento foi incluído (padrão)
+    #[value(name = "inclusao", alias = "inclusão")]
+    Inclusao,
+    /// Data em que foi pago
+    Pagamento,
+    /// Data de vencimento
+    Vencimento,
+}
+
+impl From<DataDoPagamentoArg> for DataDoPagamento {
+    fn from(arg: DataDoPagamentoArg) -> Self {
+        match arg {
+            DataDoPagamentoArg::Inclusao => Self::Inclusao,
+            DataDoPagamentoArg::Pagamento => Self::Pagamento,
+            DataDoPagamentoArg::Vencimento => Self::Vencimento,
+        }
+    }
+}
+
 /// A copia e cola code, as given and decoded.
 #[derive(Debug, Clone)]
 pub(crate) struct CopiaECola {
@@ -727,6 +814,29 @@ fn parse_conta(value: &str) -> Result<String, String> {
 
 fn parse_documento(value: &str) -> Result<Documento, String> {
     Documento::parse(value).map_err(|err| err.to_string())
+}
+
+fn parse_codigo_barras(value: &str) -> Result<CodigoBarras, String> {
+    CodigoBarras::parse(value).map_err(|err| err.to_string())
+}
+
+/// 8-4-4-4-12 hexadecimal digits, as the API's request and transaction
+/// codes; in lower case.
+fn parse_uuid(value: &str) -> Result<String, String> {
+    let codigo = value.trim();
+    let valido = codigo.len() == 36
+        && codigo.char_indices().all(|(i, c)| match i {
+            8 | 13 | 18 | 23 => c == '-',
+            _ => c.is_ascii_hexdigit(),
+        });
+    if valido {
+        Ok(codigo.to_ascii_lowercase())
+    } else {
+        Err(
+            "esperado um UUID, com 8-4-4-4-12 dígitos hexadecimais (ex.: 3414f226-36fb-4d87-811e-cfd99911d845)"
+                .to_owned(),
+        )
+    }
 }
 
 fn parse_id_idempotente(value: &str) -> Result<IdIdempotente, String> {
@@ -1082,6 +1192,62 @@ mod tests {
             Cli::try_parse_from(["inter-pj", "pix", "consultar", "x", "--timeout", "5s"]).is_err()
         );
         assert!(Cli::try_parse_from(["inter-pj", "pix", "consultar"]).is_err());
+    }
+
+    #[test]
+    fn payment_listing_and_cancel_arguments() {
+        let parse = |args: &[&str]| {
+            let mut full = vec!["inter-pj", "pagamento", "boleto"];
+            full.extend_from_slice(args);
+            Cli::try_parse_from(full)
+        };
+        let cli = parse(&[
+            "listar",
+            "--inicio",
+            "2026-09-01",
+            "--filtrar-por",
+            "Vencimento",
+            "--codigo",
+            "07797.77705 11678.471159 90071.126347 1 92950000003010",
+            "--codigo-transacao",
+            " 3414F226-36FB-4D87-811E-CFD99911D845 ",
+        ])
+        .unwrap();
+        assert!(cli.command.aceita_csv());
+        let Command::Pagamento(PagamentoCommand::Boleto(BoletoCommand::Listar(args))) = cli.command
+        else {
+            panic!("comando inesperado");
+        };
+        assert_eq!(args.periodo.inicio, NaiveDate::from_ymd_opt(2026, 9, 1));
+        assert_eq!(args.filtrar_por, Some(DataDoPagamentoArg::Vencimento));
+        assert_eq!(
+            args.codigo.unwrap().codigo_barras(),
+            "07791929500000030107777011678471159007112634"
+        );
+        assert_eq!(
+            args.codigo_transacao.as_deref(),
+            Some("3414f226-36fb-4d87-811e-cfd99911d845")
+        );
+
+        let cli = parse(&["cancelar", "3414f226-36fb-4d87-811e-cfd99911d845", "--sim"]).unwrap();
+        assert!(!cli.command.aceita_csv());
+        let Command::Pagamento(PagamentoCommand::Boleto(BoletoCommand::Cancelar(args))) =
+            cli.command
+        else {
+            panic!("comando inesperado");
+        };
+        assert!(args.sim);
+
+        for args in [
+            &["listar", "--codigo", "123"][..],
+            &["listar", "--codigo-transacao", "../pix"],
+            &["listar", "--filtrar-por", "hoje"],
+            &["cancelar"],
+            &["cancelar", "3414f226-36fb-4d87-811e-cfd99911d84"],
+            &["cancelar", "3414f226_36fb-4d87-811e-cfd99911d845"],
+        ] {
+            assert!(parse(args).is_err(), "{args:?}");
+        }
     }
 
     #[test]

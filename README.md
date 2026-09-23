@@ -196,13 +196,33 @@ $ inter-pj pix consultar c42f0787-02cb-4b31-827e-459ec9d7ece1 --aguardar --timeo
 
 Com `--aguardar`, a CLI consulta a cada 6 segundos (dentro do limite de requisições da API) até o Pix ser pago, agendado ou terminar sem pagamento, e sai com o código 0 (pago ou agendado), 5 (terminou sem ser pago: reprovado, expirado, cancelado, falha...) ou 8 (o tempo acabou antes de um status final; padrão: 60 s). A consulta precisa do escopo `pagamento-pix.read`.
 
+### Pagamentos
+
+Boletos, contas de consumo e tributos com código de barras:
+
+```console
+$ inter-pj pagamento boleto listar --inicio 2026-09-01 --fim 2026-09-30
+Pagamentos incluídos de 01/09/2026 a 30/09/2026
+
+Vencimento  Pagamento   Beneficiário        Status        Valor  Código da transação
+10/10/2026  09/10/2026  Fornecedor Exemplo  agendado   R$ 30,10  3414f226-36fb-4d87-811e-cfd99911d845
+
+1 pagamento
+
+$ inter-pj pagamento boleto listar --filtrar-por vencimento --inicio 2026-12-01 --fim 2026-12-31
+$ inter-pj pagamento boleto listar --codigo '07797.77705 11678.471159 90071.126347 1 92950000003010'
+$ inter-pj pagamento boleto cancelar 3414f226-36fb-4d87-811e-cfd99911d845   # mostra o agendamento e pede confirmação
+```
+
+A listagem cobre até 90 dias por consulta; sem datas, mostra os pagamentos incluídos nos últimos 30 dias. `--filtrar-por` escolhe a data a que o período se refere (`inclusao`, `pagamento` ou `vencimento`), e o código (linha digitável ou código de barras) tem os dígitos verificadores conferidos antes da consulta. O cancelamento vale para agendamentos: a CLI mostra o pagamento (beneficiário, valor, data e status) e pede confirmação `[s/N]`, ou `--sim` em scripts. A listagem precisa do escopo `pagamento-boleto.read`; o cancelamento, também de `pagamento-boleto.write`.
+
 ### Formatos de saída
 
 | Formato | Para quê |
 | --- | --- |
 | `texto` (padrão) | leitura: tabelas alinhadas, valores em `R$ 1.234,56`, datas `DD/MM/AAAA` |
 | `json` (ou `--json`) | automação: os nomes de campo da API e valores numéricos exatos |
-| `csv` | planilhas e scripts (`saldo` e `extrato`): RFC 4180, datas `AAAA-MM-DD`, ponto decimal, saídas com valor negativo |
+| `csv` | planilhas e scripts (`saldo`, `extrato` e `pagamento boleto listar`): RFC 4180, datas `AAAA-MM-DD`, ponto decimal, saídas do extrato com valor negativo |
 
 Para o Excel em português, use `--formato csv --separador ';'`: ponto e vírgula, vírgula decimal e UTF-8 com BOM. Textos vindos de terceiros que começam com `=`, `+`, `-` ou `@` (ex.: a mensagem de um Pix) recebem um apóstrofo no CSV, para não serem executados como fórmula pela planilha.
 

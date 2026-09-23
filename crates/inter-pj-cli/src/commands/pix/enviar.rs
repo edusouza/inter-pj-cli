@@ -16,7 +16,7 @@ use serde_json::{Map, json};
 use crate::cli::{Formato, PixEnviarArgs};
 use crate::commands::Context;
 use crate::config::Settings;
-use crate::confirmacao::{Terminal, confirmar};
+use crate::confirmacao::{Terminal, confirmar, descrever_ambiente};
 use crate::error::CliError;
 use crate::output;
 use crate::valor::por_extenso;
@@ -186,14 +186,7 @@ fn resumo(
     id: &IdIdempotente,
 ) -> String {
     let producao = ambiente.is_some_and(Environment::is_production);
-    let mut linhas = vec![(
-        "Ambiente",
-        match ambiente {
-            Some(_) if producao => "PRODUÇÃO (conta real)".to_owned(),
-            Some(_) => "sandbox (dados fictícios)".to_owned(),
-            None => "não definido".to_owned(),
-        },
-    )];
+    let mut linhas = vec![("Ambiente", descrever_ambiente(ambiente))];
     let mut avisos = Vec::new();
     match &pagamento.destinatario {
         Destinatario::Chave { chave } => {

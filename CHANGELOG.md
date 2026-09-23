@@ -8,6 +8,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ### Adicionado
 
+- `inter-pj pagamento boleto listar`: pagamentos por código de barras de um período (até 90 dias; padrão: incluídos nos últimos 30 dias), por data de inclusão, pagamento ou vencimento (`--filtrar-por`), código (`--codigo`) ou transação (`--codigo-transacao`), em texto, JSON ou CSV (#24).
+- `inter-pj pagamento boleto cancelar <codigo-transacao>`: cancela um agendamento depois de mostrá-lo (beneficiário, valor, data e status) e pedir confirmação; sem terminal, exige `--sim` e não faz nenhuma requisição (#24).
 - Biblioteca: `boleto::CodigoBarras` valida e decodifica localmente a linha digitável (47 dígitos para boletos, 48 para contas e tributos) e o código de barras (44 dígitos): dígitos verificadores (módulos 10 e 11), conversão entre linha e código, banco, segmento, valor e vencimento, considerando o reinício do fator de vencimento em 22/02/2025 (#23).
 - Biblioteca: `Banking::pagar_boleto` (boletos, contas e tributos com código de barras, com validação local do valor), `Banking::pagamentos` (filtros por período, tipo de data, código e transação) e `Banking::cancelar_pagamento` (agendamentos) (#23, #24).
 - Biblioteca: `Banking::pagar_darf` (DARF sem código de barras, com validação local do código da receita, da referência, dos textos e dos valores) e `Banking::darfs` (filtros por período, código da receita e solicitação) (#25).
