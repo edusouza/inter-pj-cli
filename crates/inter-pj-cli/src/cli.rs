@@ -10,9 +10,12 @@ use std::path::PathBuf;
 use chrono::NaiveDate;
 use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 use inter_pj::RetryPolicy;
-use inter_pj::banking::{TAMANHO_PAGINA_MAXIMO, TipoOperacao, TipoTransacao};
+use inter_pj::banking::{IdIdempotente, TAMANHO_PAGINA_MAXIMO, TipoOperacao, TipoTransacao};
+use inter_pj::pix::ChavePix;
+use rust_decimal::Decimal;
 
 use crate::tabela::Separador;
+use crate::valor::parse_valor;
 
 const AFTER_HELP: &str = "\
 Credenciais:
@@ -271,6 +274,13 @@ pub(crate) enum Command {
         subcommand_value_name = "COMANDO"
     )]
     Extrato(ExtratoArgs),
+    /// Pix: envio de pagamentos
+    #[command(
+        subcommand,
+        subcommand_help_heading = "Comandos",
+        subcommand_value_name = "COMANDO"
+    )]
+    Pix(PixCommand),
     /// Tokens de acesso OAuth
     #[command(
         subcommand,
@@ -293,7 +303,7 @@ impl Command {
         match self {
             Self::Saldo(_) => true,
             Self::Extrato(args) => !matches!(args.comando, Some(ExtratoCommand::Pdf(_))),
-            Self::Auth(_) | Self::Config(_) => false,
+            Self::Pix(_) | Self::Auth(_) | Self::Config(_) => false,
         }
     }
 }
@@ -446,6 +456,63 @@ pub(crate) struct ExtratoPdfArgs {
     pub(crate) sobrescrever: bool,
 }
 
+#[derive(Debug, Subcommand)]
+pub(crate) enum PixCommand {
+    /// Envia um Pix por chave, após mostrar um resumo e pedir confirmação
+    Enviar(PixEnviarArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct PixEnviarArgs {
+    /// Chave Pix: CPF, CNPJ, e-mail, celular (+55DD9NNNNNNNN) ou chave aleatória
+    #[arg(
+        long,
+        value_name = "CHAVE",
+        value_parser = parse_chave,
+        help_heading = "Destino"
+    )]
+    pub(crate) chave: ChavePix,
+
+    /// Valor em reais: 150,00, 1.500,00 ou 150.00
+    #[arg(
+        long,
+        value_name = "VALOR",
+        value_parser = parse_valor,
+        help_heading = "Pagamento"
+    )]
+    pub(crate) valor: Decimal,
+
+    /// Mensagem ao recebedor (até 140 caracteres)
+    #[arg(long, value_name = "TEXTO", help_heading = "Pagamento")]
+    pub(crate) descricao: Option<String>,
+
+    /// Agenda o Pix para o dia (AAAA-MM-DD). Padrão: agora
+    #[arg(
+        long,
+        value_name = "AAAA-MM-DD",
+        value_parser = parse_data,
+        help_heading = "Pagamento"
+    )]
+    pub(crate) data: Option<NaiveDate>,
+
+    /// Confirma sem perguntar (para scripts)
+    #[arg(long, conflicts_with = "simular", help_heading = "Segurança")]
+    pub(crate) sim: bool,
+
+    /// Mostra a requisição que seria enviada, sem enviar nada
+    #[arg(long, help_heading = "Segurança")]
+    pub(crate) simular: bool,
+
+    /// Chave de idempotência (UUID) de um envio anterior: repete-o sem pagar duas vezes
+    #[arg(
+        long,
+        value_name = "UUID",
+        value_parser = parse_id_idempotente,
+        help_heading = "Segurança"
+    )]
+    pub(crate) id_idempotente: Option<IdIdempotente>,
+}
+
 /// `--tipo-operacao`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub(crate) enum OperacaoArg {
@@ -469,6 +536,16 @@ impl From<OperacaoArg> for TipoOperacao {
 fn parse_data(value: &str) -> Result<NaiveDate, String> {
     NaiveDate::parse_from_str(value, "%Y-%m-%d")
         .map_err(|_| format!("data inválida \"{value}\": use o formato AAAA-MM-DD"))
+}
+
+fn parse_chave(value: &str) -> Result<ChavePix, String> {
+    ChavePix::parse(value).map_err(|err| err.to_string())
+}
+
+fn parse_id_idempotente(value: &str) -> Result<IdIdempotente, String> {
+    value
+        .parse()
+        .map_err(|err: inter_pj::banking::IdIdempotenteError| err.to_string())
 }
 
 fn parse_separador(value: &str) -> Result<Separador, String> {
@@ -664,6 +741,65 @@ mod tests {
         assert!(command(&["inter-pj", "extrato", "completo"]).aceita_csv());
         assert!(!command(&["inter-pj", "extrato", "pdf"]).aceita_csv());
         assert!(!command(&["inter-pj", "config", "mostrar"]).aceita_csv());
+    }
+
+    #[test]
+    fn pix_arguments_are_parsed_and_validated() {
+        let parse = |args: &[&str]| {
+            let mut full = vec!["inter-pj", "pix", "enviar"];
+            full.extend_from_slice(args);
+            Cli::try_parse_from(full)
+        };
+        let cli = parse(&[
+            "--chave",
+            "Fornecedor@Exemplo.com",
+            "--valor",
+            "1.500,00",
+            "--data",
+            "2026-10-01",
+            "--id-idempotente",
+            "123E4567-E89B-42D3-A456-426614174000",
+            "--sim",
+        ])
+        .unwrap();
+        let Command::Pix(PixCommand::Enviar(args)) = cli.command else {
+            panic!("comando inesperado");
+        };
+        assert_eq!(args.chave.as_str(), "fornecedor@exemplo.com");
+        assert_eq!(args.valor, "1500.00".parse::<Decimal>().unwrap());
+        assert_eq!(args.data, NaiveDate::from_ymd_opt(2026, 10, 1));
+        assert_eq!(
+            args.id_idempotente.unwrap().as_str(),
+            "123e4567-e89b-42d3-a456-426614174000"
+        );
+        assert!(args.sim && !args.simular);
+
+        for args in [
+            &["--valor", "10"][..],
+            &["--chave", "fornecedor@exemplo.com"],
+            &["--chave", "11912345678", "--valor", "10"],
+            &["--chave", "fornecedor@exemplo.com", "--valor", "1.500"],
+            &[
+                "--chave",
+                "fornecedor@exemplo.com",
+                "--valor",
+                "10",
+                "--sim",
+                "--simular",
+            ],
+            &[
+                "--chave",
+                "fornecedor@exemplo.com",
+                "--valor",
+                "10",
+                "--id-idempotente",
+                "x",
+            ],
+        ] {
+            assert!(parse(args).is_err(), "{args:?}");
+        }
+        let err = parse(&["--chave", "11912345678", "--valor", "10"]).unwrap_err();
+        assert!(err.to_string().contains("+55"), "{err}");
     }
 
     #[test]

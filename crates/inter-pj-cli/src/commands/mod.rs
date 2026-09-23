@@ -3,6 +3,7 @@
 mod auth;
 mod config;
 mod extrato;
+mod pix;
 mod saldo;
 
 use std::path::PathBuf;
@@ -52,6 +53,7 @@ pub(crate) async fn run(cli: Cli, matches: &ArgMatches) -> Result<(), CliError> 
     match cli.command {
         Command::Saldo(args) => saldo::run(&context, &args).await,
         Command::Extrato(args) => extrato::run(&context, args).await,
+        Command::Pix(command) => pix::run(&context, command).await,
         Command::Auth(command) => auth::run(&context, command).await,
         Command::Config(command) => config::run(&context, &command),
     }

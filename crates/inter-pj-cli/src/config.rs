@@ -9,11 +9,13 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use inter_pj::{Environment, ScopeSet};
+use rust_decimal::Decimal;
 use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 
 use crate::error::CliError;
 use crate::paths;
+use crate::valor::parse_valor;
 
 /// Profile used when none is selected.
 pub(crate) const DEFAULT_PROFILE: &str = "padrao";
@@ -53,6 +55,10 @@ chave_privada = ""
 # Escopos pedidos em todo token, além dos exigidos por cada comando (opcional).
 # Todos precisam estar habilitados na integração.
 # escopos = ["extrato.read"]
+
+# Valor máximo de cada Pix enviado pela CLI (opcional). Acima dele a operação é
+# recusada, mesmo com --sim.
+# limite_por_operacao = "1.000,00"
 "#;
 
 /// Contents of the configuration file.
@@ -75,6 +81,38 @@ pub(crate) struct Profile {
     pub(crate) chave_privada: Option<PathBuf>,
     pub(crate) conta_corrente: Option<String>,
     pub(crate) escopos: Option<Vec<String>>,
+    pub(crate) limite_por_operacao: Option<ValorArquivo>,
+}
+
+/// An amount in the configuration file: `"1.000,00"`, `"1000.00"`, `1000`
+/// or `1000.5`.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(untagged)]
+pub(crate) enum ValorArquivo {
+    Texto(String),
+    Inteiro(i64),
+    Real(f64),
+}
+
+impl ValorArquivo {
+    /// Positive, with at most two decimal places.
+    fn decimal(&self) -> Result<Decimal, String> {
+        let exato = |texto: String| {
+            texto
+                .parse::<Decimal>()
+                .ok()
+                .filter(|v| v.is_sign_positive() && !v.is_zero() && v.normalize().scale() <= 2)
+                .ok_or_else(|| {
+                    format!("{texto}: use um valor maior que zero, com até 2 casas decimais")
+                })
+        };
+        match self {
+            Self::Texto(texto) => parse_valor(texto),
+            Self::Inteiro(inteiro) => exato(inteiro.to_string()),
+            // Shortest representation that round-trips: 1000.5 stays 1000.5.
+            Self::Real(real) => exato(real.to_string()),
+        }
+    }
 }
 
 /// The configuration file as loaded from disk.
@@ -190,6 +228,7 @@ pub(crate) struct Settings {
     pub(crate) chave_privada: Option<Setting<PathBuf>>,
     pub(crate) conta_corrente: Option<Setting<String>>,
     pub(crate) escopos: Option<Setting<ScopeSet>>,
+    pub(crate) limite_por_operacao: Option<Setting<Decimal>>,
     pub(crate) base_url: Option<Setting<String>>,
     pub(crate) warnings: Vec<String>,
 }
@@ -244,6 +283,8 @@ impl Settings {
             None => Profile::default(),
         };
 
+        let limite_por_operacao = limite(&profile, &perfil.value)?;
+        let escopos = escopos(&profile, &perfil.value)?;
         let ambiente = pick(inputs.ambiente, non_empty(profile.ambiente))
             .map(|setting| {
                 setting.value.parse::<Environment>().map(|value| Setting {
@@ -270,23 +311,6 @@ impl Settings {
         let certificado = pick_path(inputs.certificado, profile.certificado, base_dir);
         let chave_privada = pick_path(inputs.chave_privada, profile.chave_privada, base_dir);
         let conta_corrente = pick(inputs.conta_corrente, non_empty(profile.conta_corrente));
-
-        let escopos = match profile.escopos {
-            Some(names) => {
-                let set = names
-                    .iter()
-                    .map(|name| name.parse())
-                    .collect::<Result<ScopeSet, _>>()
-                    .map_err(|err| {
-                        CliError::Config(format!("{err} no perfil \"{}\"", perfil.value))
-                    })?;
-                Some(Setting {
-                    value: set,
-                    source: Source::File,
-                })
-            }
-            None => None,
-        };
 
         let base_url = non_empty(inputs.base_url).map(|value| Setting {
             value,
@@ -315,6 +339,7 @@ impl Settings {
             chave_privada,
             conta_corrente,
             escopos,
+            limite_por_operacao,
             base_url,
             warnings,
         })
@@ -392,6 +417,38 @@ impl Settings {
         );
         message
     }
+}
+
+/// `escopos` of the profile.
+fn escopos(profile: &Profile, perfil: &str) -> Result<Option<Setting<ScopeSet>>, CliError> {
+    let Some(names) = &profile.escopos else {
+        return Ok(None);
+    };
+    let value = names
+        .iter()
+        .map(|name| name.parse())
+        .collect::<Result<ScopeSet, _>>()
+        .map_err(|err| CliError::Config(format!("{err} no perfil \"{perfil}\"")))?;
+    Ok(Some(Setting {
+        value,
+        source: Source::File,
+    }))
+}
+
+/// `limite_por_operacao` of the profile.
+fn limite(profile: &Profile, perfil: &str) -> Result<Option<Setting<Decimal>>, CliError> {
+    let Some(valor) = &profile.limite_por_operacao else {
+        return Ok(None);
+    };
+    let value = valor.decimal().map_err(|err| {
+        CliError::Config(format!(
+            "limite_por_operacao inválido no perfil \"{perfil}\": {err}"
+        ))
+    })?;
+    Ok(Some(Setting {
+        value,
+        source: Source::File,
+    }))
 }
 
 /// Warnings about secret files readable by other users.
@@ -629,6 +686,38 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(err.contains("banana.read"), "{err}");
+    }
+
+    #[test]
+    fn operation_limit_accepts_text_and_numbers() {
+        for (valor, esperado) in [
+            ("\"1.000,00\"", "1000.00"),
+            ("\"1000.50\"", "1000.50"),
+            ("1000", "1000"),
+            ("1000.5", "1000.5"),
+        ] {
+            let config = format!("[perfis.padrao]\nlimite_por_operacao = {valor}");
+            let settings = Settings::resolve(&loaded(&config), Inputs::default()).unwrap();
+            let limite = settings.limite_por_operacao.unwrap();
+            assert_eq!(
+                limite.value,
+                esperado.parse::<Decimal>().unwrap(),
+                "{valor}"
+            );
+            assert_eq!(limite.source, Source::File);
+        }
+        for valor in ["\"1.000\"", "0", "-5", "10.555", "\"dez\""] {
+            let config = format!("[perfis.padrao]\nlimite_por_operacao = {valor}");
+            let err = Settings::resolve(&loaded(&config), Inputs::default())
+                .unwrap_err()
+                .to_string();
+            assert!(
+                err.contains("limite_por_operacao inválido"),
+                "{valor}: {err}"
+            );
+        }
+        let settings = Settings::resolve(&loaded(FULL), Inputs::default()).unwrap();
+        assert!(settings.limite_por_operacao.is_none());
     }
 
     #[test]

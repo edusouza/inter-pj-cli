@@ -175,6 +175,12 @@ fn describe(settings: &Settings) -> Vec<Row> {
             ToString::to_string,
         ),
         row(
+            "limitePorOperacao",
+            "Limite por operação",
+            settings.limite_por_operacao.as_ref(),
+            |valor| output::brl(*valor),
+        ),
+        row(
             "urlBase",
             "URL base",
             settings.base_url.as_ref(),
