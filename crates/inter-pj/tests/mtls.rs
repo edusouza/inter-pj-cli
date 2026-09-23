@@ -63,9 +63,17 @@ impl Ca {
     }
 }
 
+/// Counters kept by the test server.
+#[derive(Default)]
+struct Counters {
+    /// TCP connections accepted.
+    connections: AtomicUsize,
+    /// Requests served over a handshake that presented a client certificate.
+    served: AtomicUsize,
+}
+
 /// HTTPS server requiring client certificates signed by `client_ca`.
-/// Returns its port and a counter of requests served with a client certificate.
-async fn start_server(server_ca: &Ca, client_ca: &Ca) -> (u16, Arc<AtomicUsize>) {
+async fn start_server(server_ca: &Ca, client_ca: &Ca) -> (u16, Arc<Counters>) {
     let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
     let mut roots = RootCertStore::empty();
     roots.add(client_ca.der()).unwrap();
@@ -86,14 +94,15 @@ async fn start_server(server_ca: &Ca, client_ca: &Ca) -> (u16, Arc<AtomicUsize>)
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
-    let served = Arc::new(AtomicUsize::new(0));
-    let counter = served.clone();
+    let counters = Arc::new(Counters::default());
+    let counter = counters.clone();
 
     tokio::spawn(async move {
         loop {
             let Ok((tcp, _)) = listener.accept().await else {
                 return;
             };
+            counter.connections.fetch_add(1, Ordering::SeqCst);
             let acceptor = acceptor.clone();
             let counter = counter.clone();
             tokio::spawn(async move {
@@ -106,7 +115,7 @@ async fn start_server(server_ca: &Ca, client_ca: &Ca) -> (u16, Arc<AtomicUsize>)
                     .peer_certificates()
                     .is_some_and(|c| !c.is_empty())
                 {
-                    counter.fetch_add(1, Ordering::SeqCst);
+                    counter.served.fetch_add(1, Ordering::SeqCst);
                 }
                 let request = read_request(&mut tls).await;
                 let body = if request.starts_with("POST /oauth/v2/token") {
@@ -123,7 +132,7 @@ async fn start_server(server_ca: &Ca, client_ca: &Ca) -> (u16, Arc<AtomicUsize>)
             });
         }
     });
-    (port, served)
+    (port, counters)
 }
 
 /// Reads headers and body (by `content-length`) of one HTTP/1.1 request.
@@ -166,7 +175,7 @@ fn client(port: u16, trusted_server_ca: &Ca, identity: ClientIdentity) -> InterC
 #[tokio::test]
 async fn completes_mutual_tls_with_trusted_client_certificate() {
     let ca = Ca::new("CA de teste");
-    let (port, served) = start_server(&ca, &ca).await;
+    let (port, counters) = start_server(&ca, &ca).await;
 
     let (cert_pem, _, key) = ca.issue(&["cliente.teste"], ExtendedKeyUsagePurpose::ClientAuth);
     let identity =
@@ -179,13 +188,17 @@ async fn completes_mutual_tls_with_trusted_client_certificate() {
         .unwrap();
 
     assert_eq!(saldo.disponivel.unwrap().to_string(), "42.1");
-    assert_eq!(served.load(Ordering::SeqCst), 2, "token e saldo via mTLS");
+    assert_eq!(
+        counters.served.load(Ordering::SeqCst),
+        2,
+        "token e saldo via mTLS"
+    );
 }
 
 #[tokio::test]
 async fn server_rejects_client_certificate_from_unknown_ca() {
     let ca = Ca::new("CA de teste");
-    let (port, served) = start_server(&ca, &ca).await;
+    let (port, counters) = start_server(&ca, &ca).await;
 
     let other = Ca::new("CA desconhecida");
     let (cert_pem, _, key) = other.issue(&["intruso.teste"], ExtendedKeyUsagePurpose::ClientAuth);
@@ -199,13 +212,18 @@ async fn server_rejects_client_certificate_from_unknown_ca() {
         .unwrap_err();
 
     assert!(matches!(err, Error::Transport(_)), "{err:?}");
-    assert_eq!(served.load(Ordering::SeqCst), 0);
+    assert_eq!(counters.served.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        counters.connections.load(Ordering::SeqCst),
+        1,
+        "falhas de TLS não são repetidas"
+    );
 }
 
 #[tokio::test]
 async fn client_rejects_server_certificate_from_untrusted_ca() {
     let server_ca = Ca::new("CA do servidor");
-    let (port, served) = start_server(&server_ca, &server_ca).await;
+    let (port, counters) = start_server(&server_ca, &server_ca).await;
 
     let (cert_pem, _, key) =
         server_ca.issue(&["cliente.teste"], ExtendedKeyUsagePurpose::ClientAuth);
@@ -220,5 +238,10 @@ async fn client_rejects_server_certificate_from_untrusted_ca() {
         .unwrap_err();
 
     assert!(matches!(err, Error::Transport(_)), "{err:?}");
-    assert_eq!(served.load(Ordering::SeqCst), 0);
+    assert_eq!(counters.served.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        counters.connections.load(Ordering::SeqCst),
+        1,
+        "falhas de TLS não são repetidas"
+    );
 }

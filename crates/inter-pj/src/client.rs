@@ -13,10 +13,11 @@ use url::{Host, Url};
 use crate::auth::{self, AccessToken, TokenManager, TokenStore};
 use crate::banking::Banking;
 use crate::credentials::Credentials;
-use crate::endpoint::{self, Endpoint};
+use crate::endpoint::{self, Endpoint, Method};
 use crate::environment::Environment;
 use crate::error::{ApiError, Error, Result};
 use crate::identity::{ClientIdentity, IdentityError};
+use crate::retry::{self, RetryMode, RetryPolicy};
 use crate::scope::ScopeSet;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -39,6 +40,7 @@ struct Inner {
     credentials: Credentials,
     conta_corrente: Option<HeaderValue>,
     tokens: TokenManager,
+    retry: RetryPolicy,
 }
 
 impl InterClient {
@@ -110,18 +112,18 @@ impl InterClient {
             ("scope", scope.as_str()),
         ];
 
-        let started = Instant::now();
+        // Asking for a token has no side effects, so it is always safe to retry.
         let response = self
-            .inner
-            .http
-            .post(url)
-            .header(ACCEPT, "application/json")
-            .form(&form)
-            .send()
+            .send(&operation, RetryMode::Idempotent, || {
+                self.inner
+                    .http
+                    .post(url.clone())
+                    .header(ACCEPT, "application/json")
+                    .form(&form)
+            })
             .await?;
         let status = response.status();
         let body = response.bytes().await?;
-        log_response(&operation, status, started);
 
         if !status.is_success() {
             return Err(Error::Auth(Box::new(ApiError::new(
@@ -168,26 +170,27 @@ impl InterClient {
         let mut token = self.access_token(&required).await?;
         let mut renewed = false;
         loop {
-            let started = Instant::now();
-            let mut builder = self
-                .inner
-                .http
-                .request(request.endpoint.method.to_reqwest(), url.clone())
-                .bearer_auth(token.secret().expose_secret())
-                .header(ACCEPT, "application/json");
-            if let Some(conta) = &self.inner.conta_corrente {
-                builder = builder.header("x-conta-corrente", conta.clone());
-            }
-            if !request.query.is_empty() {
-                builder = builder.query(&request.query);
-            }
-            if let Some(body) = &request.body {
-                builder = builder.json(body);
-            }
-
-            let response = builder.send().await?;
+            let response = self
+                .send(&operation, request.retry, || {
+                    let mut builder = self
+                        .inner
+                        .http
+                        .request(request.endpoint.method.to_reqwest(), url.clone())
+                        .bearer_auth(token.secret().expose_secret())
+                        .header(ACCEPT, "application/json");
+                    if let Some(conta) = &self.inner.conta_corrente {
+                        builder = builder.header("x-conta-corrente", conta.clone());
+                    }
+                    if !request.query.is_empty() {
+                        builder = builder.query(&request.query);
+                    }
+                    if let Some(body) = &request.body {
+                        builder = builder.json(body);
+                    }
+                    builder
+                })
+                .await?;
             let status = response.status();
-            log_response(&operation, status, started);
 
             if status == reqwest::StatusCode::UNAUTHORIZED && !renewed {
                 tracing::debug!(
@@ -211,6 +214,59 @@ impl InterClient {
                 operation,
                 message: err.to_string(),
             });
+        }
+    }
+
+    /// Sends the request built by `build`, retrying transient failures as
+    /// `mode` allows and the client's [`RetryPolicy`] says. Returns the last
+    /// response, whatever its status.
+    async fn send(
+        &self,
+        operation: &str,
+        mode: RetryMode,
+        build: impl Fn() -> reqwest::RequestBuilder,
+    ) -> Result<reqwest::Response> {
+        let policy = &self.inner.retry;
+        let mut attempt = 1;
+        loop {
+            let started = Instant::now();
+            let (delay, reason) = match build().send().await {
+                Ok(response) => {
+                    let status = response.status();
+                    log_response(operation, status, started);
+                    if !mode.retries_status(status) {
+                        return Ok(response);
+                    }
+                    let asked = retry::retry_after(response.headers(), Utc::now());
+                    match policy.delay(attempt, asked, retry::jitter()) {
+                        Some(delay) => (delay, format!("resposta {}", status.as_u16())),
+                        None => return Ok(response),
+                    }
+                }
+                Err(err) => {
+                    if !mode.retries_transport(&err) {
+                        return Err(err.into());
+                    }
+                    match policy.delay(attempt, None, retry::jitter()) {
+                        Some(delay) => (
+                            delay,
+                            if err.is_timeout() {
+                                "tempo esgotado".to_owned()
+                            } else {
+                                "falha de conexão".to_owned()
+                            },
+                        ),
+                        None => return Err(err.into()),
+                    }
+                }
+            };
+            attempt += 1;
+            tracing::info!(
+                "{operation}: {reason}; tentativa {attempt} de {} em {:.1} s",
+                policy.max_attempts(),
+                delay.as_secs_f64()
+            );
+            tokio::time::sleep(delay).await;
         }
     }
 
@@ -264,20 +320,38 @@ pub(crate) struct ApiRequest {
     path_params: Vec<(&'static str, String)>,
     query: Vec<(&'static str, String)>,
     body: Option<serde_json::Value>,
+    retry: RetryMode,
 }
 
 impl ApiRequest {
+    /// A request without parameters; only `GET` requests are retried.
     pub(crate) fn new(endpoint: Endpoint) -> Self {
         Self {
             endpoint,
             path_params: Vec::new(),
             query: Vec::new(),
             body: None,
+            retry: if endpoint.method == Method::Get {
+                RetryMode::Idempotent
+            } else {
+                RetryMode::Never
+            },
         }
     }
 
     pub(crate) fn query(mut self, name: &'static str, value: String) -> Self {
         self.query.push((name, value));
+        self
+    }
+
+    pub(crate) fn queries(mut self, pairs: impl IntoIterator<Item = (&'static str, String)>) -> Self {
+        self.query.extend(pairs);
+        self
+    }
+
+    /// Overrides when the request may be repeated.
+    pub(crate) fn retry(mut self, mode: RetryMode) -> Self {
+        self.retry = mode;
         self
     }
 }
@@ -323,6 +397,7 @@ pub struct InterClientBuilder {
     timeout: Duration,
     connect_timeout: Duration,
     user_agent: String,
+    retry: RetryPolicy,
 }
 
 impl Default for InterClientBuilder {
@@ -339,6 +414,7 @@ impl Default for InterClientBuilder {
             timeout: DEFAULT_TIMEOUT,
             connect_timeout: DEFAULT_CONNECT_TIMEOUT,
             user_agent: concat!("inter-pj/", env!("CARGO_PKG_VERSION")).to_owned(),
+            retry: RetryPolicy::default(),
         }
     }
 }
@@ -424,6 +500,14 @@ impl InterClientBuilder {
         self
     }
 
+    /// How transient failures of idempotent requests are retried (default:
+    /// [`RetryPolicy::default`], three attempts).
+    #[must_use]
+    pub fn retry_policy(mut self, policy: RetryPolicy) -> Self {
+        self.retry = policy;
+        self
+    }
+
     /// Validates the configuration and builds the client.
     ///
     /// # Errors
@@ -495,6 +579,7 @@ impl InterClientBuilder {
                 credentials,
                 conta_corrente,
                 tokens: TokenManager::new(key, self.token_store, self.additional_scopes),
+                retry: self.retry,
             }),
         })
     }
@@ -607,6 +692,72 @@ mod tests {
                 "{err}"
             );
         }
+    }
+
+    #[test]
+    fn only_get_requests_are_idempotent_by_default() {
+        let request = |method| {
+            ApiRequest::new(Endpoint {
+                method,
+                path: "/x",
+                scopes: &[],
+            })
+        };
+        assert_eq!(request(Method::Get).retry, RetryMode::Idempotent);
+        for method in [Method::Post, Method::Put, Method::Patch, Method::Delete] {
+            assert_eq!(request(method).retry, RetryMode::Never, "{method}");
+        }
+    }
+
+    /// A payment must never be sent twice because of a transient error.
+    #[tokio::test]
+    async fn requests_with_side_effects_are_never_retried() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        const PAGAR_BOLETO: Endpoint = Endpoint {
+            method: Method::Post,
+            path: "/banking/v2/pagamento",
+            scopes: &[crate::Scope::PagamentoBoletoWrite],
+        };
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/oauth/v2/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "tok",
+                "expires_in": 3600,
+                "scope": "pagamento-boleto.write",
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/banking/v2/pagamento"))
+            .respond_with(ResponseTemplate::new(503))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let rcgen::CertifiedKey { cert, signing_key } =
+            rcgen::generate_simple_self_signed(vec!["cliente.teste".to_owned()]).unwrap();
+        let identity = ClientIdentity::from_pem(
+            cert.pem().as_bytes(),
+            signing_key.serialize_pem().as_bytes(),
+        )
+        .unwrap();
+        let client = InterClient::builder()
+            .base_url(server.uri())
+            .credentials(Credentials::new("id", "segredo"))
+            .identity(identity)
+            .retry_policy(RetryPolicy::new(5).initial_delay(Duration::from_millis(1)))
+            .build()
+            .unwrap();
+
+        let err = client
+            .execute::<serde_json::Value>(ApiRequest::new(PAGAR_BOLETO))
+            .await
+            .unwrap_err();
+        assert!(matches!(&err, Error::Api(api) if api.status == 503), "{err:?}");
     }
 
     #[test]
