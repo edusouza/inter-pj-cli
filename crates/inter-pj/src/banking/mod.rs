@@ -1,9 +1,11 @@
-//! Banking API (`/banking/v2`): balance, statements, outbound Pix and
-//! payments by barcode.
+//! Banking API (`/banking/v2`): balance, statements, outbound Pix,
+//! payments by barcode, DARFs and batches of payments.
 
 mod consulta_pix;
+mod darf;
 mod detalhe;
 mod extrato;
+mod lote;
 mod pagamento;
 mod pagamento_pix;
 mod periodo;
@@ -15,6 +17,9 @@ use chrono::NaiveDate;
 use serde::Deserialize;
 
 pub use consulta_pix::{ConsultaPix, ErroPix, EventoPix, RecebedorPix, StatusPix, TransacaoPix};
+pub use darf::{
+    Darf, FiltroDarf, PagamentoDarf, PagamentoDarfError, SolicitacaoDarf, TipoRetornoDarf,
+};
 pub use detalhe::{
     Detalhe, DetalheBoletoCobranca, DetalheCashback, DetalheCheque, DetalheCompraDebito,
     DetalheDepositoBoleto, DetalhePagamento, DetalhePix, DetalheTarifa, DetalheTransferencia,
@@ -22,6 +27,11 @@ pub use detalhe::{
 pub use extrato::{
     FiltroExtrato, LoteScroll, PaginaExtrato, TipoOperacao, TipoTransacao, TransacaoCompleta,
     TransacaoSimples,
+};
+pub use lote::{
+    BoletoDoLote, DarfDoLote, ItemLote, ItemLoteError, Lote, LotePagamentos, LotePagamentosError,
+    MAX_MEU_IDENTIFICADOR, MAX_PAGAMENTOS_LOTE, MIN_PAGAMENTOS_LOTE, PagamentoDoLote,
+    SolicitacaoLote, StatusBoletoDoLote, StatusDarfDoLote, StatusLote,
 };
 pub use pagamento::{
     DataDoPagamento, FiltroPagamentos, Pagamento, PagamentoBoleto, PagamentoBoletoError,
@@ -377,6 +387,107 @@ impl<'a> Banking<'a> {
             .path_param("codigoTransacao", codigo)
             .retry(RetryMode::WhenNotProcessed);
         self.client.execute_empty(request).await
+    }
+
+    /// Pays a DARF without a barcode (`POST /banking/v2/pagamento/darf`,
+    /// scope `pagamento-darf.write`).
+    ///
+    /// The DARF is checked with [`PagamentoDarf::validar`] before anything is
+    /// sent. Like [`pagar_boleto`](Self::pagar_boleto), this API has no
+    /// idempotency key: the request is repeated automatically only when it
+    /// surely was not processed, and after an unknown outcome the payment
+    /// should be looked up with [`darfs`](Self::darfs) before trying again.
+    /// Depending on the account settings, it waits for approval in the
+    /// Internet Banking ([`TipoRetornoDarf::AprovacaoPagamento`]).
+    ///
+    /// # Errors
+    ///
+    /// [`Error::InvalidInput`] with a [`PagamentoDarfError`] when the DARF is
+    /// invalid (nothing is sent); otherwise the same as [`saldo`](Self::saldo).
+    pub async fn pagar_darf(&self, darf: &PagamentoDarf) -> Result<SolicitacaoDarf> {
+        darf.validar()
+            .map_err(|err| Error::InvalidInput(Box::new(err)))?;
+        let body = serde_json::to_value(darf).map_err(|err| Error::InvalidInput(Box::new(err)))?;
+        let request = ApiRequest::new(endpoint::banking::PAGAMENTO_DARF_INCLUIR)
+            .json(body)
+            .retry(RetryMode::WhenNotProcessed);
+        self.client.execute(request).await
+    }
+
+    /// DARF payments (`GET /banking/v2/pagamento/darf`, scope
+    /// `pagamento-boleto.read`): by default, the ones requested in the last
+    /// 30 days; with a period, the ones paid in it.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::InvalidInput`] when the period ends before it starts or the
+    /// request code is not a UUID; otherwise the same as
+    /// [`saldo`](Self::saldo).
+    pub async fn darfs(&self, filtro: &FiltroDarf) -> Result<Vec<Darf>> {
+        if let Some((inicio, fim)) = filtro.periodo
+            && inicio > fim
+        {
+            return Err(Error::InvalidInput(
+                "o período dos pagamentos termina antes de começar".into(),
+            ));
+        }
+        if let Some(codigo) = &filtro.codigo_solicitacao
+            && !is_uuid(codigo.trim())
+        {
+            return Err(Error::InvalidInput(
+                "código da solicitação inválido: esperado um UUID (8-4-4-4-12 dígitos hexadecimais)"
+                    .into(),
+            ));
+        }
+        let request =
+            ApiRequest::new(endpoint::banking::PAGAMENTO_DARF_BUSCAR).queries(filtro.query());
+        let lista: Option<Vec<Darf>> = self.client.execute(request).await?;
+        Ok(lista.unwrap_or_default())
+    }
+
+    /// Sends a batch of payments by barcode and DARFs (`POST
+    /// /banking/v2/pagamento/lote`, scope `pagamento-lote.write`).
+    ///
+    /// The batch is checked with [`LotePagamentos::validar`] before anything
+    /// is sent. The API accepts it (`202`) and pays it afterwards: follow it
+    /// with [`consultar_lote`](Self::consultar_lote). There is no idempotency
+    /// key, so the request is repeated automatically only when it surely was
+    /// not processed.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::InvalidInput`] with a [`LotePagamentosError`] when the batch
+    /// is invalid (nothing is sent); otherwise the same as
+    /// [`saldo`](Self::saldo).
+    pub async fn enviar_lote(&self, lote: &LotePagamentos) -> Result<SolicitacaoLote> {
+        lote.validar()
+            .map_err(|err| Error::InvalidInput(Box::new(err)))?;
+        let body = serde_json::to_value(lote).map_err(|err| Error::InvalidInput(Box::new(err)))?;
+        let request = ApiRequest::new(endpoint::banking::PAGAMENTO_LOTE_INCLUIR)
+            .json(body)
+            .retry(RetryMode::WhenNotProcessed);
+        self.client.execute(request).await
+    }
+
+    /// A batch sent with [`enviar_lote`](Self::enviar_lote) and the status of
+    /// its payments (`GET /banking/v2/pagamento/lote/{idLote}`, scope
+    /// `pagamento-lote.read`).
+    ///
+    /// # Errors
+    ///
+    /// [`Error::InvalidInput`] when `id_lote` is not 24 letters or digits,
+    /// the format of [`SolicitacaoLote::id_lote`]; otherwise the same as
+    /// [`saldo`](Self::saldo). Unknown batches fail with status `404`.
+    pub async fn consultar_lote(&self, id_lote: &str) -> Result<Lote> {
+        let id = id_lote.trim();
+        if !lote::is_id_lote(id) {
+            return Err(Error::InvalidInput(
+                "identificador do lote inválido: esperados 24 letras ou dígitos".into(),
+            ));
+        }
+        let request = ApiRequest::new(endpoint::banking::PAGAMENTO_LOTE_CONSULTAR)
+            .path_param("idLote", id.to_owned());
+        self.client.execute(request).await
     }
 
     /// Status and history of a Pix sent with [`enviar_pix`](Self::enviar_pix)
