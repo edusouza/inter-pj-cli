@@ -7,8 +7,9 @@ use std::sync::OnceLock;
 
 use chrono::NaiveDate;
 use inter_pj::banking::{
-    ConsultaPix, DadosBancarios, Destinatario, Detalhe, IdIdempotente, InstituicaoFinanceira,
-    LoteScroll, MAX_DESCRICAO, PagamentoPix, PaginaExtrato, Saldo, SolicitacaoPix, StatusPix,
+    ConsultaPix, DadosBancarios, DataDoPagamento, Destinatario, Detalhe, IdIdempotente,
+    InstituicaoFinanceira, LoteScroll, MAX_DESCRICAO, Pagamento, PagamentoBoleto, PagamentoPix,
+    PaginaExtrato, Saldo, SolicitacaoPagamento, SolicitacaoPix, StatusPagamento, StatusPix,
     TipoConta, TipoOperacao, TipoRetornoPix, TipoTransacao, TransacaoCompleta, TransacaoSimples,
 };
 use inter_pj::endpoint::{self, Endpoint};
@@ -489,6 +490,85 @@ fn pix_statuses_match_the_documented_list() {
             .collect();
         assert_eq!(ours, documented, "{name}");
     }
+}
+
+/// The documented example of `EfetuarPagamento` has an invalid barcode and
+/// beneficiary: a valid boleto line of the same documentation and a
+/// synthetic CNPJ stand in for them.
+#[test]
+fn boleto_payment_body_matches_the_request_schema() {
+    let example = example_for_schema("EfetuarPagamento");
+    let mut pagamento = PagamentoBoleto::new(
+        "07797777051167847115990071126347192950000003010"
+            .parse()
+            .unwrap(),
+        "26.80".parse().unwrap(),
+        NaiveDate::from_ymd_opt(2021, 7, 27).unwrap(),
+    );
+    pagamento.data_pagamento = NaiveDate::from_ymd_opt(2023, 8, 18);
+    pagamento.cpf_cnpj_beneficiario = Some("12345678000195".parse().unwrap());
+    let body = serde_json::to_value(&pagamento).unwrap();
+    assert_eq!(keys(&body), property_names("EfetuarPagamento"));
+    for campo in ["valorPagar", "dataPagamento", "dataVencimento"] {
+        assert_eq!(body[campo], example[campo], "{campo}");
+    }
+    for required in schema("EfetuarPagamento")["required"].as_array().unwrap() {
+        assert!(body.get(required.as_str().unwrap()).is_some(), "{required}");
+    }
+    let pattern = schema("EfetuarPagamento")["properties"]["cpfCnpjBeneficiario"]["pattern"]
+        .as_str()
+        .unwrap();
+    assert_eq!(pattern, "^[0-9]{11}$|^[0-9]{14}$");
+}
+
+#[test]
+fn boleto_payment_models_map_every_documented_field() {
+    let example = example_for_schema("EfetuarPagamentoResponse");
+    let resposta: SolicitacaoPagamento = serde_json::from_value(example.clone()).unwrap();
+    assert_same_keys(
+        "EfetuarPagamentoResponse",
+        &serde_json::to_value(&resposta).unwrap(),
+    );
+
+    let example = example_for_schema("InformacoesPagamento");
+    let pagamento: Pagamento = serde_json::from_value(example).unwrap();
+    assert_same_keys(
+        "InformacoesPagamento",
+        &serde_json::to_value(&pagamento).unwrap(),
+    );
+
+    let ours: BTreeSet<&str> = StatusPagamento::DOCUMENTADOS
+        .iter()
+        .map(StatusPagamento::as_str)
+        .collect();
+    assert_eq!(ours, enum_values("SituacaoPagamento"));
+}
+
+#[test]
+fn boleto_payment_endpoints_document_the_parameters_we_send() {
+    let buscar = parameters(&endpoint::banking::PAGAMENTO_BUSCAR);
+    for name in [
+        "codBarraLinhaDigitavel",
+        "codigoTransacao",
+        "dataInicio",
+        "dataFim",
+        "filtrarDataPor",
+        "x-conta-corrente",
+    ] {
+        assert!(buscar.contains_key(name), "{name}");
+    }
+    let documented: BTreeSet<&str> = buscar["filtrarDataPor"]["schema"]["enum"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    let ours: BTreeSet<&str> = DataDoPagamento::TODAS.iter().map(|d| d.as_str()).collect();
+    assert_eq!(ours, documented);
+
+    let cancelar = parameters(&endpoint::banking::PAGAMENTO_CANCELAR);
+    assert_eq!(cancelar["codigoTransacao"]["in"], json!("path"));
+    assert!(parameters(&endpoint::banking::PAGAMENTO_INCLUIR).contains_key("x-conta-corrente"));
 }
 
 /// The portal's examples carried real-looking CPFs, phone numbers and bank
