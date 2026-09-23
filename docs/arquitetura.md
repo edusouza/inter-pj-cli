@@ -56,7 +56,7 @@ Os endpoints ficam em um só lugar (`endpoint.rs`) e são usados tanto para mont
 
 ### Retentativas só quando repetir é seguro
 
-Cada requisição tem um modo de repetição. Consultas (`GET`) e o pedido de token são repetidas em `429`, `500`, `502`, `503`, `504`, falhas de conexão e tempo esgotado. As requisições do modo *scroll* do extrato mudam estado no servidor (avançam o cursor): repeti-las depois de um `504` poderia pular um lote inteiro, então elas só são repetidas quando certamente não foram processadas (`429` ou conexão recusada). O envio de Pix também só é repetido nesses dois casos, e sempre com a mesma chave de idempotência; depois de um `5xx` ou de tempo esgotado o resultado é incerto e a decisão fica com quem chamou. Outras operações com efeitos (pagamentos) nunca são repetidas. Falhas de TLS (certificado recusado, CA desconhecida) também não, porque repetir não resolve.
+Cada requisição tem um modo de repetição. Consultas (`GET`) e o pedido de token são repetidas em `429`, `500`, `502`, `503`, `504`, falhas de conexão e tempo esgotado. As requisições do modo *scroll* do extrato mudam estado no servidor (avançam o cursor): repeti-las depois de um `504` poderia pular um lote inteiro, então elas só são repetidas quando certamente não foram processadas (`429` ou conexão recusada). O envio de Pix também só é repetido nesses dois casos, e sempre com a mesma chave de idempotência; depois de um `5xx` ou de tempo esgotado o resultado é incerto e a decisão fica com quem chamou. Pagamentos por código de barras, DARFs, lotes e cancelamentos seguem a mesma regra, mas não têm chave de idempotência: depois de um resultado incerto, o pagamento deve ser consultado antes de uma nova tentativa. Nenhuma outra operação com efeitos é repetida. Falhas de TLS (certificado recusado, CA desconhecida) também não, porque repetir não resolve.
 
 A espera cresce exponencialmente a partir de 1 s, com *jitter* (entre metade e o total do intervalo) e teto de 60 s; um `Retry-After` maior que o teto faz a CLI desistir na hora, com a dica de aguardar.
 
@@ -80,6 +80,12 @@ O fator de vencimento chegou a 9999 em 21/02/2025 e recomeçou em 1000 no dia se
 O padrão tem um ponto cego conhecido: no boleto, os restos 0, 1 e 10 do módulo 11 viram todos o DV 1, então um dígito errado no valor ou no vencimento pode passar despercebido. Por isso a CLI mostra os dois, decodificados, antes da confirmação. Um teste documenta esse limite.
 
 As implementações foram conferidas com uma implementação de referência independente, usando os exemplos da documentação oficial como vetores de teste.
+
+### DARF e lotes
+
+`PagamentoDarf::validar` confere o que a documentação define (código da receita de 4 dígitos, referência só com dígitos, tamanhos dos textos, valores com até 2 casas) e o CPF/CNPJ do contribuinte já chega validado como `Documento`.
+
+Um lote reúne de 2 a 150 pagamentos (`ItemLote::Boleto` ou `ItemLote::Darf`), serializados com o discriminador `tipoPagamento` da especificação. Os itens são os mesmos modelos dos pagamentos avulsos, com uma diferença documentada: no lote, `valorPagar` do boleto é número, e não texto. `LotePagamentos::validar` aponta o primeiro item inválido; `ItemLote::validar` permite relatar todos. A API aceita o lote (`202`) e o processa depois: `consultar_lote` traz o status do lote e de cada pagamento, lidos pelo `tipoPagamento`; itens de tipos desconhecidos ou fora do formato ficam em `PagamentoDoLote::Outro`, como os detalhes do extrato.
 
 ### Confirmação antes de mover dinheiro
 
