@@ -1,6 +1,7 @@
 //! `inter-pj config init|caminho|mostrar`
 
 use std::fs;
+use std::io;
 
 use serde_json::{Value, json};
 
@@ -9,7 +10,7 @@ use crate::cli::{ConfigCommand, Formato, InitArgs};
 use crate::config::{Setting, Settings, TEMPLATE};
 use crate::confirmacao::Stdio;
 use crate::error::CliError;
-use crate::files::write_private;
+use crate::files::{create_private, write_private};
 use crate::output;
 
 pub(super) fn run(context: &Context, command: &ConfigCommand) -> Result<(), CliError> {
@@ -25,18 +26,27 @@ fn init(context: &Context, args: &InitArgs) -> Result<(), CliError> {
         return super::assistente::run(context, args, &mut Stdio);
     }
     let path = context.config_path();
-    if path.exists() && !args.forcar {
-        return Err(CliError::Config(format!(
-            "o arquivo {} já existe; use --forcar para sobrescrevê-lo",
-            path.display()
-        )));
-    }
     if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
         fs::create_dir_all(parent)
             .map_err(|err| CliError::io(format!("falha ao criar {}", parent.display()), err))?;
     }
-    write_private(path, TEMPLATE.as_bytes())
-        .map_err(|err| CliError::io(format!("falha ao gravar {}", path.display()), err))?;
+    // Without --forcar, the file is created only if nothing is there, which
+    // the OS checks when creating it (a link included).
+    let gravado = if args.forcar {
+        write_private(path, TEMPLATE.as_bytes())
+    } else {
+        create_private(path, TEMPLATE.as_bytes())
+    };
+    gravado.map_err(|err| {
+        if err.kind() == io::ErrorKind::AlreadyExists {
+            CliError::Config(format!(
+                "o arquivo {} já existe; use --forcar para sobrescrevê-lo",
+                path.display()
+            ))
+        } else {
+            CliError::io(format!("falha ao gravar {}", path.display()), err)
+        }
+    })?;
     output::print(&format!(
         "Arquivo de configuração criado em {}\n\
          Próximos passos:\n  \

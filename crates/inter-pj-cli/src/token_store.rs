@@ -1,5 +1,6 @@
 //! File-based [`TokenStore`]: one JSON file per integration, readable only by
-//! the current user, written atomically.
+//! the current user (in a directory only they can read), written
+//! atomically.
 
 use std::fs;
 use std::io;
@@ -43,7 +44,9 @@ impl FileTokenStore {
         }
     }
 
-    /// Removes every cached token file; returns how many were removed.
+    /// Removes every cached token file; returns how many were removed. The
+    /// temporary files a crash may have left, which also hold tokens, go
+    /// too (uncounted).
     pub(crate) fn remove_all(&self) -> io::Result<usize> {
         let entries = match fs::read_dir(&self.dir) {
             Ok(entries) => entries,
@@ -53,22 +56,30 @@ impl FileTokenStore {
         let mut removed = 0;
         for entry in entries {
             let path = entry?.path();
-            if path.extension().is_some_and(|ext| ext == "json") {
-                fs::remove_file(path)?;
-                removed += 1;
+            match path.extension().and_then(|ext| ext.to_str()) {
+                Some("json") => {
+                    fs::remove_file(path)?;
+                    removed += 1;
+                }
+                Some("tmp") => fs::remove_file(path)?,
+                _ => {}
             }
         }
         Ok(removed)
     }
 
+    /// The directory, readable by the owner only: created so, and fixed
+    /// when it already existed with other permissions. When another user
+    /// owns it, fixing fails, and the cache is not written there.
     fn create_dir(&self) -> io::Result<()> {
         #[cfg(unix)]
         {
-            use std::os::unix::fs::DirBuilderExt;
+            use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
             fs::DirBuilder::new()
                 .recursive(true)
                 .mode(0o700)
-                .create(&self.dir)
+                .create(&self.dir)?;
+            fs::set_permissions(&self.dir, fs::Permissions::from_mode(0o700))
         }
         #[cfg(not(unix))]
         {
@@ -105,14 +116,8 @@ impl TokenStore for FileTokenStore {
         })
         .map_err(io::Error::other)?;
 
-        let target = self.path_for(key);
-        let temporary = self.dir.join(format!(".{key}.{}.tmp", std::process::id()));
-        let result =
-            write_private(&temporary, &json).and_then(|()| fs::rename(&temporary, &target));
-        if result.is_err() {
-            let _ = fs::remove_file(&temporary);
-        }
-        result
+        // Atomic: a new file renamed over the old one.
+        write_private(&self.path_for(key), &json)
     }
 }
 
@@ -164,6 +169,16 @@ mod tests {
             & 0o777;
         assert_eq!(file_mode, 0o600);
         assert_eq!(dir_mode, 0o700);
+
+        // A directory that already existed, open to others, is closed.
+        fs::set_permissions(dir.path().join("tokens"), fs::Permissions::from_mode(0o777)).unwrap();
+        store.save("chave", &[token("b")]).unwrap();
+        let dir_mode = fs::metadata(dir.path().join("tokens"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(dir_mode, 0o700);
     }
 
     #[test]
@@ -184,7 +199,11 @@ mod tests {
         store.save("b", &[token("2")]).unwrap();
         assert!(store.remove("a").unwrap());
         assert!(!store.remove("a").unwrap());
+        // What a crash left while saving also holds tokens.
+        let temporario = dir.path().join("tokens").join(".b.json.4242.0.tmp");
+        fs::write(&temporario, "{}").unwrap();
         assert_eq!(store.remove_all().unwrap(), 1);
+        assert!(!temporario.exists());
     }
 
     #[test]

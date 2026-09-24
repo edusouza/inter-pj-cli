@@ -28,10 +28,16 @@ pub(crate) fn config_file(explicit: Option<&Path>) -> Result<PathBuf, CliError> 
     }
 }
 
-/// Cache directory: the explicit one (`INTER_CACHE_DIR`), or the platform default.
+/// Cache directory: the explicit one (`INTER_CACHE_DIR`), or the platform
+/// default. The explicit one must be absolute: a relative one would put the
+/// tokens in whatever directory the command runs from, a repository
+/// included.
 pub(crate) fn cache_dir(explicit: Option<&str>) -> Result<PathBuf, CliError> {
     match explicit {
-        Some(dir) => Ok(PathBuf::from(dir)),
+        Some(dir) if Path::new(dir).is_absolute() => Ok(PathBuf::from(dir)),
+        Some(_) => Err(CliError::Config(
+            "INTER_CACHE_DIR precisa ser um caminho absoluto (os tokens ficam nele)".to_owned(),
+        )),
         None => Ok(strategy()?.cache_dir().join(APP_DIR)),
     }
 }
@@ -61,9 +67,15 @@ mod tests {
             config_file(Some(Path::new("/tmp/x.toml"))).unwrap(),
             PathBuf::from("/tmp/x.toml")
         );
+        let absoluto = std::env::temp_dir().join("cache");
         assert_eq!(
-            cache_dir(Some("/tmp/cache")).unwrap(),
-            PathBuf::from("/tmp/cache")
+            cache_dir(Some(absoluto.to_str().unwrap())).unwrap(),
+            absoluto
+        );
+        let err = cache_dir(Some("cache")).unwrap_err().to_string();
+        assert!(
+            err.contains("INTER_CACHE_DIR precisa ser um caminho absoluto"),
+            "{err}"
         );
     }
 

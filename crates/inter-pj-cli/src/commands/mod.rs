@@ -23,7 +23,7 @@ use chrono::{DateTime, Days, FixedOffset, NaiveDate, Utc};
 use clap::ArgMatches;
 use clap::parser::ValueSource;
 use inter_pj::{ClientIdentity, Credentials, InterClient};
-use secrecy::ExposeSecret;
+use secrecy::{ExposeSecret, SecretString};
 
 use crate::cli::{Cli, Command, Formato, GlobalArgs, PeriodoArgs};
 use crate::config::{self as settings, Given, Inputs, Settings, Source};
@@ -90,7 +90,7 @@ pub(crate) struct Context {
     sources: Sources,
     config_path: PathBuf,
     cache_dir: PathBuf,
-    client_secret: Option<String>,
+    client_secret: Option<SecretString>,
     base_url: Option<String>,
 }
 
@@ -122,7 +122,7 @@ impl Context {
             sources,
             config_path,
             cache_dir,
-            client_secret: env.var(settings::ENV_CLIENT_SECRET),
+            client_secret: env.var(settings::ENV_CLIENT_SECRET).map(SecretString::from),
             base_url: env.var(settings::ENV_BASE_URL),
         })
     }

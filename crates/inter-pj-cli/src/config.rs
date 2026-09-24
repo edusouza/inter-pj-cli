@@ -10,8 +10,11 @@ use std::path::{Path, PathBuf};
 
 use inter_pj::{Environment, ScopeSet};
 use rust_decimal::Decimal;
-use secrecy::SecretString;
+use secrecy::zeroize::Zeroizing;
+use secrecy::{ExposeSecret, SecretString};
+use serde::de::{self, Deserializer};
 use serde::{Deserialize, Serialize};
+use url::{Host, Url};
 
 use crate::error::CliError;
 use crate::paths;
@@ -62,7 +65,7 @@ chave_privada = ""
 "#;
 
 /// Contents of the configuration file.
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ConfigFile {
     pub(crate) perfil_padrao: Option<String>,
@@ -71,12 +74,13 @@ pub(crate) struct ConfigFile {
 }
 
 /// A profile of the configuration file.
-#[derive(Debug, Default, Clone, Deserialize, Serialize)]
+#[derive(Debug, Default, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Profile {
     pub(crate) ambiente: Option<String>,
     pub(crate) client_id: Option<String>,
-    pub(crate) client_secret: Option<String>,
+    #[serde(default, deserialize_with = "segredo")]
+    pub(crate) client_secret: Option<SecretString>,
     pub(crate) certificado: Option<PathBuf>,
     pub(crate) chave_privada: Option<PathBuf>,
     pub(crate) conta_corrente: Option<String>,
@@ -115,6 +119,18 @@ impl ValorArquivo {
     }
 }
 
+/// The `client_secret` of a profile, kept from the start in a type that
+/// hides it and clears its memory. A value that is not text is refused
+/// without being quoted: serde's message would repeat it.
+fn segredo<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<SecretString>, D::Error> {
+    match toml::Value::deserialize(deserializer)? {
+        toml::Value::String(texto) => Ok(Some(SecretString::from(texto))),
+        _ => Err(de::Error::custom(
+            "client_secret precisa ser um texto entre aspas",
+        )),
+    }
+}
+
 /// The configuration file as loaded from disk.
 #[derive(Debug)]
 pub(crate) struct LoadedConfig {
@@ -125,8 +141,9 @@ pub(crate) struct LoadedConfig {
 
 /// Loads the configuration file; a missing file is an empty configuration.
 pub(crate) fn load(path: &Path) -> Result<LoadedConfig, CliError> {
+    // The text may hold the client_secret: cleared when dropped.
     let text = match fs::read_to_string(path) {
-        Ok(text) => text,
+        Ok(text) => Zeroizing::new(text),
         Err(err) if err.kind() == io::ErrorKind::NotFound => {
             return Ok(LoadedConfig {
                 path: path.to_path_buf(),
@@ -211,7 +228,7 @@ pub(crate) struct Inputs {
     pub(crate) certificado: Given<PathBuf>,
     pub(crate) chave_privada: Given<PathBuf>,
     pub(crate) conta_corrente: Given<String>,
-    pub(crate) client_secret: Option<String>,
+    pub(crate) client_secret: Option<SecretString>,
     pub(crate) base_url: Option<String>,
 }
 
@@ -297,13 +314,13 @@ impl Settings {
 
         let client_id = pick(inputs.client_id, non_empty(profile.client_id));
 
-        let client_secret = match non_empty(inputs.client_secret) {
+        let client_secret = match segredo_nao_vazio(inputs.client_secret) {
             Some(secret) => Some(Setting {
-                value: SecretString::from(secret),
+                value: secret,
                 source: Source::Env(ENV_CLIENT_SECRET),
             }),
-            None => non_empty(profile.client_secret.clone()).map(|secret| Setting {
-                value: SecretString::from(secret),
+            None => segredo_nao_vazio(profile.client_secret.clone()).map(|secret| Setting {
+                value: secret,
                 source: Source::File,
             }),
         };
@@ -312,17 +329,22 @@ impl Settings {
         let chave_privada = pick_path(inputs.chave_privada, profile.chave_privada, base_dir);
         let conta_corrente = pick(inputs.conta_corrente, non_empty(profile.conta_corrente));
 
-        let base_url = non_empty(inputs.base_url).map(|value| Setting {
-            value,
-            source: Source::Env(ENV_BASE_URL),
-        });
+        let base_url = non_empty(inputs.base_url)
+            .map(|value| {
+                servidor_local(&value)?;
+                Ok::<_, CliError>(Setting {
+                    value,
+                    source: Source::Env(ENV_BASE_URL),
+                })
+            })
+            .transpose()?;
 
         // Any profile with a secret makes the file sensitive, even when the
         // environment overrides it for this run.
         let secret_in_file = file
             .perfis
             .values()
-            .any(|p| non_empty(p.client_secret.clone()).is_some());
+            .any(|p| segredo_nao_vazio(p.client_secret.clone()).is_some());
         let warnings = permission_warnings(
             secret_in_file.then_some(loaded.path.as_path()),
             chave_privada.as_ref().map(|key| key.value.as_path()),
@@ -465,19 +487,47 @@ fn permission_warnings(
             path.display()
         ));
     }
-    if let Some(path) = private_key
-        && let Some(mode) = world_accessible(path)
-    {
-        warnings.push(format!(
+    warnings.extend(private_key.and_then(aviso_de_permissao_da_chave));
+    warnings
+}
+
+/// `INTER_BASE_URL` exists for the tests and a local mock of the API, so
+/// it takes only a server on this machine. Any other host would receive the
+/// `client_secret`, the tokens and every request, while the summaries still
+/// named the environment of the profile ("sandbox") and the sandbox-only
+/// commands still ran.
+fn servidor_local(raw: &str) -> Result<(), CliError> {
+    let local = Url::parse(raw.trim()).is_ok_and(|url| match url.host() {
+        Some(Host::Domain(dominio)) => dominio.eq_ignore_ascii_case("localhost"),
+        Some(Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(Host::Ipv6(ip)) => ip.is_loopback(),
+        None => false,
+    });
+    if local {
+        Ok(())
+    } else {
+        Err(CliError::Config(format!(
+            "{ENV_BASE_URL} só aceita um servidor desta máquina (localhost, 127.0.0.1 ou [::1]), para testes; para usar o Inter, retire a variável e escolha o ambiente (sandbox ou producao)"
+        )))
+    }
+}
+
+/// A warning when other users can read the private key.
+pub(crate) fn aviso_de_permissao_da_chave(path: &Path) -> Option<String> {
+    world_accessible(path).map(|mode| {
+        format!(
             "a chave privada pode ser lida por outros usuários (permissão {mode:o}); execute: chmod 600 {}",
             path.display()
-        ));
-    }
-    warnings
+        )
+    })
 }
 
 fn non_empty(value: Option<String>) -> Option<String> {
     value.filter(|v| !v.trim().is_empty())
+}
+
+fn segredo_nao_vazio(value: Option<SecretString>) -> Option<SecretString> {
+    value.filter(|v| !v.expose_secret().trim().is_empty())
 }
 
 fn pick(given: Given<String>, file: Option<String>) -> Option<Setting<String>> {
@@ -738,6 +788,53 @@ mod tests {
         let err = load(&path).unwrap_err().to_string();
         assert!(err.contains("linha 2"), "{err}");
         assert!(!err.contains("segredo-sem-aspas"), "{err}");
+
+        // A value TOML reads as another type is not quoted either.
+        for valor in ["987654321", "true", "1979-05-27", "[\"a1b2\"]"] {
+            fs::write(&path, format!("[perfis.padrao]\nclient_secret = {valor}\n")).unwrap();
+            let err = load(&path).unwrap_err().to_string();
+            assert!(
+                err.contains("client_secret precisa ser um texto entre aspas"),
+                "{err}"
+            );
+            for pedaco in ["987654321", "true", "1979", "a1b2"] {
+                assert!(!err.contains(pedaco), "{pedaco}: {err}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_secret_of_the_file_never_shows_in_debug() {
+        let arquivo: ConfigFile = toml::from_str(FULL).unwrap();
+        let texto = format!("{arquivo:?}");
+        assert!(!texto.contains("segredo-do-arquivo"), "{texto}");
+        let settings = Settings::resolve(&loaded(FULL), Inputs::default()).unwrap();
+        assert!(!format!("{settings:?}").contains("segredo-do-arquivo"));
+    }
+
+    #[test]
+    fn base_url_takes_only_a_local_server() {
+        for local in [
+            "http://127.0.0.1:9999",
+            "http://localhost:8080/api",
+            "https://LOCALHOST",
+            "http://[::1]:3000",
+            "http://127.8.9.10",
+        ] {
+            assert!(servidor_local(local).is_ok(), "{local}");
+        }
+        for externo in [
+            "https://cdpj.partners.bancointer.com.br",
+            "https://api.empresa.example",
+            "http://127.0.0.1.empresa.example",
+            "http://localhost.empresa.example",
+            "http://0.0.0.0",
+            "http://[::ffff:127.0.0.1]",
+            "localhost:8080",
+            "",
+        ] {
+            assert!(servidor_local(externo).is_err(), "{externo}");
+        }
     }
 
     #[test]

@@ -148,7 +148,7 @@ Vários perfis (ex.: `sandbox` e `producao`) podem conviver no mesmo arquivo; es
 | Chave privada (`.key`) | `--chave-privada` | `INTER_CHAVE_PRIVADA` |
 | Conta corrente | `--conta-corrente` | `INTER_CONTA_CORRENTE` |
 | Tentativas por requisição | `--tentativas` | `INTER_TENTATIVAS` |
-| Diretório de cache | — | `INTER_CACHE_DIR` |
+| Diretório de cache (caminho absoluto) | — | `INTER_CACHE_DIR` |
 
 Locais padrão: configuração em `~/.config/inter-pj/config.toml` (Windows: `%APPDATA%\inter-pj\config.toml`) e cache em `~/.cache/inter-pj` (Windows: `%LOCALAPPDATA%\inter-pj`). Veja com `inter-pj config caminho`.
 
