@@ -22,6 +22,11 @@ pub(crate) fn brl(value: Decimal) -> String {
     format!("{sign}R$ {},{cents}", group_thousands(integer))
 }
 
+/// A percentage the Brazilian way: `2,5%`.
+pub(crate) fn percentual(taxa: Decimal) -> String {
+    format!("{}%", taxa.normalize()).replace('.', ",")
+}
+
 fn group_thousands(integer: &str) -> String {
     let mut out = String::with_capacity(integer.len() + integer.len() / 3);
     for (i, ch) in integer.chars().enumerate() {

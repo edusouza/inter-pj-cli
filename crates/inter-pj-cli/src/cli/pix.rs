@@ -6,11 +6,14 @@ use std::path::PathBuf;
 
 use chrono::{DateTime, FixedOffset, NaiveDate};
 use clap::{ArgAction, ArgGroup, Args, Subcommand, ValueEnum};
+use inter_pj::cobranca::Uf;
 use inter_pj::documento::Documento;
 use inter_pj::pix::{ChavePix, InfoAdicional, Txid, TxidError};
 use rust_decimal::Decimal;
 
-use super::{parse_chave, parse_data, parse_documento};
+use super::{
+    TaxaOuValor, parse_cep, parse_chave, parse_data, parse_documento, parse_taxa_ou_valor, parse_uf,
+};
 use crate::valor::parse_valor;
 
 #[derive(Debug, Subcommand)]
@@ -115,7 +118,13 @@ pub(crate) struct PixCobRevisarArgs {
     pub(crate) valor: Option<Decimal>,
 
     /// Se o pagador pode alterar o valor: sim ou nao
-    #[arg(long, value_name = "SIM|NAO", value_enum, ignore_case = true)]
+    #[arg(
+        long,
+        value_name = "SIM|NAO",
+        value_enum,
+        ignore_case = true,
+        hide_possible_values = true
+    )]
     pub(crate) valor_alteravel: Option<SimNao>,
 
     /// Novo tempo até expirar, contado da criação: 3600s, 30m, 2h, 7d
@@ -203,6 +212,333 @@ pub(crate) struct PixCobListarArgs {
     pub(crate) itens_por_pagina: Option<u32>,
 }
 
+#[derive(Debug, Subcommand)]
+pub(crate) enum PixCobvCommand {
+    /// Cria uma cobrança com vencimento (pelas opções ou por --arquivo), após mostrar um resumo e pedir confirmação
+    Criar(Box<PixCobvCriarArgs>),
+    /// Imprime um arquivo JSON de exemplo para `pix cobv criar --arquivo`, com dados fictícios
+    Modelo(PixCobvModeloArgs),
+    /// Altera ou remove uma cobrança com vencimento, após mostrar o antes e o depois
+    Revisar(Box<PixCobvRevisarArgs>),
+    /// Mostra uma cobrança com vencimento, seus encargos e os Pix que a pagaram (com o QR Code, se pedido)
+    Consultar(PixCobvConsultarArgs),
+    /// Cobranças com vencimento criadas em um período (padrão: últimos 30 dias), com filtros
+    Listar(PixCobvListarArgs),
+}
+
+/// The options of a charge with a due date, which `--arquivo` replaces.
+const OPCOES_COBV: [&str; 21] = [
+    "chave",
+    "valor",
+    "vencimento",
+    "validade_apos_vencimento",
+    "devedor_documento",
+    "devedor_nome",
+    "devedor_email",
+    "devedor_endereco",
+    "devedor_cidade",
+    "devedor_uf",
+    "devedor_cep",
+    "multa",
+    "juros",
+    "juros_periodo",
+    "abatimento",
+    "desconto",
+    "desconto_por_dia",
+    "dias_uteis",
+    "solicitacao",
+    "info",
+    "loc",
+];
+
+/// Where the charge comes from: a file, or the options.
+#[derive(Debug, Args)]
+#[command(group(
+    ArgGroup::new("origem")
+        .required(true)
+        .args(["arquivo", "chave"])
+))]
+pub(crate) struct PixCobvCriarArgs {
+    /// Arquivo JSON com a cobrança, nos campos da API ("-" para a entrada padrão); veja `pix cobv modelo`
+    #[arg(
+        long,
+        value_name = "ARQUIVO",
+        conflicts_with_all = OPCOES_COBV,
+        help_heading = "Origem (escolha uma)"
+    )]
+    pub(crate) arquivo: Option<PathBuf>,
+
+    /// Chave Pix da conta que recebe: e-mail, telefone com +55, CPF/CNPJ ou chave aleatória
+    #[arg(
+        long,
+        value_name = "CHAVE",
+        value_parser = parse_chave,
+        requires_all = ["valor", "vencimento", "devedor_documento"],
+        help_heading = "Origem (escolha uma)"
+    )]
+    pub(crate) chave: Option<ChavePix>,
+
+    /// Valor: 150,00, 1.500,00 ou 150.00
+    #[arg(long, value_name = "VALOR", value_parser = parse_valor, help_heading = "Cobrança")]
+    pub(crate) valor: Option<Decimal>,
+
+    /// Vencimento (AAAA-MM-DD), hoje ou depois: até esse dia, a cobrança é paga sem multa nem juros
+    #[arg(long, value_name = "AAAA-MM-DD", value_parser = parse_data, help_heading = "Cobrança")]
+    pub(crate) vencimento: Option<NaiveDate>,
+
+    /// Dias corridos após o vencimento em que a cobrança ainda pode ser paga, com multa e juros [padrão da API: 30]
+    #[arg(long, value_name = "DIAS", help_heading = "Cobrança")]
+    pub(crate) validade_apos_vencimento: Option<u32>,
+
+    /// Texto mostrado ao pagador, até 140 caracteres
+    #[arg(long, value_name = "TEXTO", help_heading = "Cobrança")]
+    pub(crate) solicitacao: Option<String>,
+
+    /// Informação mostrada ao pagador, como NOME=VALOR; repita para até 50
+    #[arg(
+        long,
+        value_name = "NOME=VALOR",
+        value_parser = parse_info,
+        action = ArgAction::Append,
+        help_heading = "Cobrança"
+    )]
+    pub(crate) info: Vec<InfoAdicional>,
+
+    /// Location criada antes, para usar nesta cobrança
+    #[arg(long, value_name = "ID", help_heading = "Cobrança")]
+    pub(crate) loc: Option<u64>,
+
+    /// txid, de 26 a 35 letras e dígitos [padrão: gerado]; repetir o comando com o mesmo txid não cria outra cobrança
+    #[arg(long, value_name = "TXID", value_parser = parse_txid, help_heading = "Cobrança")]
+    pub(crate) txid: Option<Txid>,
+
+    #[command(flatten)]
+    pub(crate) devedor: DevedorCobvArgs,
+
+    #[command(flatten)]
+    pub(crate) encargos: EncargosCobvArgs,
+
+    #[command(flatten)]
+    pub(crate) qr: QrCodeArgs,
+
+    /// Confirma sem perguntar (para scripts)
+    #[arg(long, conflicts_with = "simular", help_heading = "Segurança")]
+    pub(crate) sim: bool,
+
+    /// Mostra a requisição que seria enviada, sem enviar nada
+    #[arg(long, conflicts_with_all = ["qrcode", "qrcode_png"], help_heading = "Segurança")]
+    pub(crate) simular: bool,
+}
+
+/// Who pays a charge with a due date.
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Devedor")]
+#[allow(clippy::struct_field_names)] // the fields are the options, --devedor-*
+pub(crate) struct DevedorCobvArgs {
+    /// CPF ou CNPJ de quem paga
+    #[arg(long, value_name = "CPF/CNPJ", value_parser = parse_documento, requires = "devedor_nome")]
+    pub(crate) devedor_documento: Option<Documento>,
+
+    /// Nome de quem paga, até 200 caracteres
+    #[arg(long, value_name = "NOME", requires = "devedor_documento")]
+    pub(crate) devedor_nome: Option<String>,
+
+    /// E-mail de quem paga
+    #[arg(long, value_name = "EMAIL", requires = "devedor_documento")]
+    pub(crate) devedor_email: Option<String>,
+
+    /// Endereço de quem paga: rua, número e complemento, até 200 caracteres
+    #[arg(long, value_name = "ENDERECO", requires = "devedor_documento")]
+    pub(crate) devedor_endereco: Option<String>,
+
+    /// Cidade
+    #[arg(long, value_name = "CIDADE", requires = "devedor_documento")]
+    pub(crate) devedor_cidade: Option<String>,
+
+    /// UF (sigla do estado)
+    #[arg(long, value_name = "UF", value_parser = parse_uf, requires = "devedor_documento")]
+    pub(crate) devedor_uf: Option<Uf>,
+
+    /// CEP: 30110-000 ou 30110000
+    #[arg(long, value_name = "CEP", value_parser = parse_cep, requires = "devedor_documento")]
+    pub(crate) devedor_cep: Option<String>,
+}
+
+/// Fine, interest, rebate and discount of a charge with a due date.
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Encargos")]
+#[command(group(
+    ArgGroup::new("por_dia")
+        .multiple(true)
+        .args(["juros", "desconto_por_dia"])
+))]
+pub(crate) struct EncargosCobvArgs {
+    /// Multa por pagar depois do vencimento: percentual (2%) ou valor (4,00)
+    #[arg(long, value_name = "TAXA|VALOR", value_parser = parse_taxa_ou_valor)]
+    pub(crate) multa: Option<TaxaOuValor>,
+
+    /// Juros por pagar depois do vencimento: percentual (1%, ao mês; veja --juros-periodo) ou valor por dia (0,50)
+    #[arg(long, value_name = "TAXA|VALOR", value_parser = parse_taxa_ou_valor)]
+    pub(crate) juros: Option<TaxaOuValor>,
+
+    /// Período do percentual de --juros: dia, mes ou ano [padrão: mes]
+    #[arg(
+        long,
+        value_name = "PERIODO",
+        value_enum,
+        ignore_case = true,
+        hide_possible_values = true,
+        requires = "juros"
+    )]
+    pub(crate) juros_periodo: Option<PeriodoJuros>,
+
+    /// Abatimento, qualquer que seja o dia do pagamento: percentual (5%) ou valor (10,00)
+    #[arg(long, value_name = "TAXA|VALOR", value_parser = parse_taxa_ou_valor)]
+    pub(crate) abatimento: Option<TaxaOuValor>,
+
+    /// Desconto por pagar até uma data: 2% ou 10,00 até o vencimento, ou até a data depois do @ (2%@2026-10-15); repita para até 3 datas
+    #[arg(
+        long,
+        value_name = "TAXA|VALOR[@DATA]",
+        value_parser = parse_desconto,
+        action = ArgAction::Append,
+        conflicts_with = "desconto_por_dia"
+    )]
+    pub(crate) desconto: Vec<DescontoAte>,
+
+    /// Desconto por dia pago antes do vencimento: percentual (0,5%) ou valor (0,10)
+    #[arg(long, value_name = "TAXA|VALOR", value_parser = parse_taxa_ou_valor)]
+    pub(crate) desconto_por_dia: Option<TaxaOuValor>,
+
+    /// Juros e desconto por dia contam só os dias úteis [padrão: dias corridos]
+    #[arg(long, requires = "por_dia")]
+    pub(crate) dias_uteis: bool,
+}
+
+/// `--juros-periodo`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum PeriodoJuros {
+    Dia,
+    #[value(alias = "mês")]
+    Mes,
+    Ano,
+}
+
+/// `--desconto`: a percentage or an amount, until a date (by default, the
+/// due date).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct DescontoAte {
+    pub(crate) valor: TaxaOuValor,
+    pub(crate) ate: Option<NaiveDate>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct PixCobvModeloArgs {}
+
+/// What changes in a charge with a due date.
+#[derive(Debug, Args)]
+#[command(next_help_heading = "O que muda")]
+#[command(group(
+    ArgGroup::new("mudanca")
+        .required(true)
+        .multiple(true)
+        .args(MUDANCAS_COBV)
+        .arg("remover")
+))]
+pub(crate) struct PixCobvRevisarArgs {
+    /// txid da cobrança
+    #[arg(value_name = "TXID", value_parser = parse_txid)]
+    pub(crate) txid: Txid,
+
+    /// Novo valor
+    #[arg(long, value_name = "VALOR", value_parser = parse_valor, help_heading = "O que muda")]
+    pub(crate) valor: Option<Decimal>,
+
+    /// Novo vencimento (AAAA-MM-DD), hoje ou depois
+    #[arg(long, value_name = "AAAA-MM-DD", value_parser = parse_data, help_heading = "O que muda")]
+    pub(crate) vencimento: Option<NaiveDate>,
+
+    /// Novos dias corridos após o vencimento em que a cobrança ainda pode ser paga
+    #[arg(long, value_name = "DIAS", help_heading = "O que muda")]
+    pub(crate) validade_apos_vencimento: Option<u32>,
+
+    /// Novo texto mostrado ao pagador
+    #[arg(long, value_name = "TEXTO", help_heading = "O que muda")]
+    pub(crate) solicitacao: Option<String>,
+
+    /// Novas informações ao pagador, como NOME=VALOR, no lugar das atuais; repita para até 50
+    #[arg(
+        long,
+        value_name = "NOME=VALOR",
+        value_parser = parse_info,
+        action = ArgAction::Append,
+        help_heading = "O que muda"
+    )]
+    pub(crate) info: Vec<InfoAdicional>,
+
+    /// Nova location
+    #[arg(long, value_name = "ID", help_heading = "O que muda")]
+    pub(crate) loc: Option<u64>,
+
+    /// Nova chave Pix da conta que recebe
+    #[arg(long, value_name = "CHAVE", value_parser = parse_chave, help_heading = "O que muda")]
+    pub(crate) chave: Option<ChavePix>,
+
+    /// Remove a cobrança: ela deixa de poder ser paga
+    #[arg(long, conflicts_with_all = MUDANCAS_COBV, help_heading = "O que muda")]
+    pub(crate) remover: bool,
+
+    // The payer given replaces the current one, e-mail and address included.
+    #[command(flatten)]
+    pub(crate) devedor: DevedorCobvArgs,
+
+    #[command(flatten)]
+    pub(crate) encargos: EncargosCobvArgs,
+
+    /// Confirma sem perguntar (para scripts)
+    #[arg(long, help_heading = "Segurança")]
+    pub(crate) sim: bool,
+}
+
+/// What a revision can change, besides removing the charge.
+const MUDANCAS_COBV: [&str; 13] = [
+    "valor",
+    "vencimento",
+    "validade_apos_vencimento",
+    "devedor_documento",
+    "multa",
+    "juros",
+    "abatimento",
+    "desconto",
+    "desconto_por_dia",
+    "solicitacao",
+    "info",
+    "loc",
+    "chave",
+];
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct PixCobvConsultarArgs {
+    /// txid da cobrança, mostrado por `pix cobv criar` e `pix cobv listar`
+    #[arg(value_name = "TXID", value_parser = parse_txid)]
+    pub(crate) txid: Txid,
+
+    #[command(flatten)]
+    pub(crate) qr: QrCodeArgs,
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct PixCobvListarArgs {
+    #[command(flatten)]
+    pub(crate) filtros: PixCobListarArgs,
+
+    /// Apenas as cobranças deste lote
+    #[arg(long, value_name = "ID")]
+    pub(crate) lote: Option<u32>,
+}
+
 /// `--inicio` and `--fim` of the Pix listings.
 #[derive(Debug, Clone, Copy, Args)]
 pub(crate) struct PeriodoPixArgs {
@@ -284,5 +620,17 @@ fn parse_momento(value: &str) -> Result<Momento, String> {
     }
     parse_data(texto).map(Momento::Dia).map_err(|_| {
         format!("data inválida \"{texto}\": use AAAA-MM-DD ou data e hora com fuso, como 2026-09-01T08:00:00-03:00")
+    })
+}
+
+/// `2%`, `10,00` or `2%@2026-10-15`.
+fn parse_desconto(value: &str) -> Result<DescontoAte, String> {
+    let (valor, ate) = match value.split_once('@') {
+        Some((valor, data)) => (valor, Some(parse_data(data.trim())?)),
+        None => (value, None),
+    };
+    Ok(DescontoAte {
+        valor: parse_taxa_ou_valor(valor)?,
+        ate,
     })
 }

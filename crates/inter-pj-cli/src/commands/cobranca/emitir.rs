@@ -11,14 +11,14 @@ use inter_pj::cobranca::{
 use inter_pj::{Environment, Error as InterError, InterClient, endpoint};
 
 use super::consultar::mostrar;
-use super::{argumento, descrever_situacao, percentual};
+use super::{argumento, descrever_situacao};
 use crate::arquivo;
 use crate::cli::{CobrancaEmitirArgs, FormaArg, Formato, TaxaOuValor};
 use crate::commands::qrcode::OpcoesQr;
 use crate::commands::{Context, hoje, simulacao};
 use crate::confirmacao::{Terminal, confirmar, descrever_ambiente};
 use crate::error::{CliError, resultado_incerto};
-use crate::output;
+use crate::output::{self, percentual};
 use crate::valor::por_extenso;
 
 /// Between two queries with `--aguardar`: 10 per minute, the rate limit of

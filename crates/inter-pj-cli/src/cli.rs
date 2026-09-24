@@ -26,8 +26,10 @@ use crate::valor::{parse_valor, parse_valor_ou_zero};
 mod pix;
 
 pub(crate) use pix::{
-    Momento, PeriodoPixArgs, PixCobCommand, PixCobConsultarArgs, PixCobCriarArgs, PixCobListarArgs,
-    PixCobRevisarArgs, SimNao, StatusCobArg,
+    DescontoAte, DevedorCobvArgs, EncargosCobvArgs, Momento, PeriodoJuros, PeriodoPixArgs,
+    PixCobCommand, PixCobConsultarArgs, PixCobCriarArgs, PixCobListarArgs, PixCobRevisarArgs,
+    PixCobvCommand, PixCobvConsultarArgs, PixCobvCriarArgs, PixCobvListarArgs, PixCobvRevisarArgs,
+    SimNao, StatusCobArg,
 };
 
 const AFTER_HELP: &str = "\
@@ -334,7 +336,10 @@ impl Command {
                 | PagamentoCommand::Darf(DarfCommand::Listar(_)),
             )
             | Self::Cobranca(CobrancaCommand::Listar(_) | CobrancaCommand::Sumario(_))
-            | Self::Pix(PixCommand::Cob(PixCobCommand::Listar(_))) => true,
+            | Self::Pix(
+                PixCommand::Cob(PixCobCommand::Listar(_))
+                | PixCommand::Cobv(PixCobvCommand::Listar(_)),
+            ) => true,
             Self::Extrato(args) => !matches!(args.comando, Some(ExtratoCommand::Pdf(_))),
             Self::Pix(_)
             | Self::Pagamento(_)
@@ -506,6 +511,13 @@ pub(crate) enum PixCommand {
         subcommand_value_name = "COMANDO"
     )]
     Cob(PixCobCommand),
+    /// Cobranças com vencimento: QR Code para pagar até uma data, com multa, juros, abatimento e desconto
+    #[command(
+        subcommand,
+        subcommand_help_heading = "Comandos",
+        subcommand_value_name = "COMANDO"
+    )]
+    Cobv(PixCobvCommand),
 }
 
 #[derive(Debug, Args)]
