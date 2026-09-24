@@ -17,6 +17,7 @@ use rust_decimal::Decimal;
 use serde_json::json;
 
 use super::{descrever_politica, descrever_status, encerramento};
+use crate::chamada::chamada;
 use crate::cli::{
     CobrCancelarArgs, CobrCommand, CobrConsultarArgs, CobrCriarArgs, CobrListarArgs,
     CobrRetentativaArgs, ContatoDevedorArgs, Formato,
@@ -95,8 +96,9 @@ async fn criar(
         Formato::Json => output::print_json(&criada),
         // `commands::run` refuses csv for this command.
         Formato::Texto | Formato::Csv => output::print(&format!(
-            "Cobrança recorrente criada: o banco do pagador agenda o débito para o vencimento.\n\n{}\n\nAcompanhe com: inter-pj pix-automatico cobr consultar {txid}",
-            render_cobr(&criada)
+            "Cobrança recorrente criada: o banco do pagador agenda o débito para o vencimento.\n\n{}\n\nAcompanhe com: {} pix-automatico cobr consultar {txid}",
+            render_cobr(&criada),
+            chamada()
         )),
     }
 }
@@ -996,7 +998,7 @@ fn retentativa_incerta(err: InterError, txid: &Txid) -> CliError {
         CliError::CriacaoIncerta {
             source: err,
             situacao: "a nova tentativa pode ter sido pedida",
-            consulta: format!("inter-pj pix-automatico cobr consultar {txid}"),
+            consulta: format!("{} pix-automatico cobr consultar {txid}", chamada()),
         }
     } else {
         err.into()

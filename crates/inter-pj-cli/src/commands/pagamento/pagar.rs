@@ -8,6 +8,7 @@ use inter_pj::boleto::{CodigoBarras, Segmento, TipoCodigo};
 use inter_pj::{Environment, endpoint};
 
 use super::{data_br, descrever_status};
+use crate::chamada::chamada;
 use crate::cli::{BoletoPagarArgs, Formato};
 use crate::commands::{Context, hoje, simulacao};
 use crate::confirmacao::{Terminal, confirmar, descrever_ambiente, verificar_limite};
@@ -53,7 +54,8 @@ pub(super) async fn run(
                     source: err,
                     situacao: "o pagamento pode ter sido feito",
                     consulta: format!(
-                        "inter-pj pagamento boleto listar --codigo {}",
+                        "{} pagamento boleto listar --codigo {}",
+                        chamada(),
                         pagamento.codigo.codigo_barras()
                     ),
                 }
@@ -261,12 +263,14 @@ fn render(solicitacao: &SolicitacaoPagamento) -> String {
     if let Some(codigo) = &solicitacao.codigo_transacao {
         let _ = write!(
             texto,
-            "\n\nAcompanhe com: inter-pj pagamento boleto listar --codigo-transacao {codigo}"
+            "\n\nAcompanhe com: {} pagamento boleto listar --codigo-transacao {codigo}",
+            chamada()
         );
         if solicitacao.status_pagamento == Some(StatusPagamento::Agendado) {
             let _ = write!(
                 texto,
-                "\nPara cancelar: inter-pj pagamento boleto cancelar {codigo}"
+                "\nPara cancelar: {} pagamento boleto cancelar {codigo}",
+                chamada()
             );
         }
     }

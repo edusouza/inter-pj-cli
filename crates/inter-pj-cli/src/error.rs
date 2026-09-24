@@ -5,6 +5,7 @@ use std::io;
 use inter_pj::banking::PeriodoError;
 use inter_pj::{ApiError, ApiErrorKind, Error as InterError};
 
+use crate::chamada::chamada;
 use crate::output;
 
 /// Documented exit codes.
@@ -263,7 +264,7 @@ impl CliError {
                 vec![
                     "a cobrança pode ter sido criada; com o mesmo txid, a API não cria outra"
                         .to_owned(),
-                    format!("confira com: inter-pj {comando} consultar {txid}"),
+                    format!("confira com: {} {comando} consultar {txid}", chamada()),
                     format!("ou repita o comando com --txid {txid}"),
                 ]
             }
@@ -271,14 +272,18 @@ impl CliError {
                 vec![
                     "a devolução pode ter sido feita; com o mesmo id, a API não devolve de novo"
                         .to_owned(),
-                    format!("confira com: inter-pj pix devolucao consultar {e2e} {id}"),
+                    format!(
+                        "confira com: {} pix devolucao consultar {e2e} {id}",
+                        chamada()
+                    ),
                     format!("ou repita o comando com --id {id}"),
                 ]
             }
             Self::LoteCobvIncerto { id, .. } => {
                 vec![
                     format!(
-                        "o lote pode ter sido recebido: confira com inter-pj pix lote-cobv consultar {id} antes de repetir"
+                        "o lote pode ter sido recebido: confira com {} pix lote-cobv consultar {id} antes de repetir",
+                        chamada()
                     ),
                     "repetir o comando não duplica cobranças: com o mesmo txid, a API não cria outra"
                         .to_owned(),
@@ -325,7 +330,10 @@ fn dicas_da_api(err: &InterError) -> Vec<String> {
         ],
         InterError::Api(api) => match api.kind() {
             ApiErrorKind::Unauthorized => {
-                vec!["o token foi recusado; tente `inter-pj auth limpar` e repita o comando"]
+                return vec![format!(
+                    "o token foi recusado; tente `{} auth limpar` e repita o comando",
+                    chamada()
+                )];
             }
             ApiErrorKind::Forbidden => vec![
                 "confira se a integração tem os escopos necessários habilitados no Internet Banking PJ",

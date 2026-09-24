@@ -19,6 +19,7 @@ use super::{
     descrever_valor, encerrada, encerramento,
 };
 use crate::arquivo;
+use crate::chamada::chamada;
 use crate::cli::{
     Formato, RecCancelarArgs, RecCommand, RecConsultarArgs, RecCriarArgs, RecListarArgs,
     RecRevisarArgs,
@@ -93,17 +94,20 @@ async fn criar(
 fn criada_em_texto(criada: &Rec, rec: &RecSolicitada) -> String {
     let id = criada.id_rec.as_deref().unwrap_or_default();
     let mut texto = format!(
-        "Recorrência criada: aguarda a aprovação do pagador.\n\n{}\n\nAcompanhe com: inter-pj pix-automatico rec consultar {id}",
-        render_rec(criada)
+        "Recorrência criada: aguarda a aprovação do pagador.\n\n{}\n\nAcompanhe com: {} pix-automatico rec consultar {id}",
+        render_rec(criada),
+        chamada()
     );
     let _ = write!(
         texto,
-        "\nO pagador aprova no banco dele: peça com inter-pj pix-automatico solicitacao criar --rec {id}"
+        "\nO pagador aprova no banco dele: peça com {} pix-automatico solicitacao criar --rec {id}",
+        chamada()
     );
     if rec.loc.is_some() {
         let _ = write!(
             texto,
-            ", ou mostre o QR Code de inter-pj pix-automatico rec consultar {id} --qrcode"
+            ", ou mostre o QR Code de {} pix-automatico rec consultar {id} --qrcode",
+            chamada()
         );
     }
     texto
@@ -182,7 +186,8 @@ fn incerta(err: InterError, rec: &RecSolicitada) -> CliError {
             source: err,
             situacao: "a recorrência pode ter sido criada",
             consulta: format!(
-                "inter-pj pix-automatico rec listar --documento {}",
+                "{} pix-automatico rec listar --documento {}",
+                chamada(),
                 rec.vinculo.devedor.documento.as_str()
             ),
         }

@@ -9,6 +9,7 @@ use rust_decimal::Decimal;
 use serde_json::{Value, json};
 
 use super::{celula_status_devolucao, devolvido, disponivel, em_devolucao, paginacao, periodo};
+use crate::chamada::chamada;
 use crate::cli::{Formato, PixRecebidoConsultarArgs, PixRecebidosCommand, PixRecebidosListarArgs};
 use crate::commands::Context;
 use crate::error::CliError;
@@ -239,7 +240,8 @@ where
     if restante.is_none_or(|restante| restante > Decimal::ZERO) {
         let _ = write!(
             texto,
-            "\n\nPara devolver: inter-pj pix devolucao solicitar {id} --valor VALOR (ou --tudo)"
+            "\n\nPara devolver: {} pix devolucao solicitar {id} --valor VALOR (ou --tudo)",
+            chamada()
         );
     }
     texto

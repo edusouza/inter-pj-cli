@@ -12,6 +12,7 @@ use inter_pj::{Environment, Error as InterError, InterClient, endpoint};
 use rust_decimal::Decimal;
 
 use super::{descrever_status_devolucao, devolvido, disponivel, em_devolucao};
+use crate::chamada::chamada;
 use crate::cli::{
     Formato, PixDevolucaoCommand, PixDevolucaoConsultarArgs, PixDevolucaoSolicitarArgs,
 };
@@ -127,7 +128,8 @@ async fn solicitar(
             if !terminou {
                 let _ = write!(
                     texto,
-                    "\n\nAcompanhe com: inter-pj pix devolucao consultar {} {id} --aguardar",
+                    "\n\nAcompanhe com: {} pix devolucao consultar {} {id} --aguardar",
+                    chamada(),
                     args.e2e
                 );
             }
