@@ -39,8 +39,9 @@ pub(crate) use pix::{
     StatusCobArg,
 };
 pub(crate) use pix_automatico::{
-    PixAutomaticoCommand, RecCancelarArgs, RecCommand, RecConsultarArgs, RecCriarArgs,
-    RecListarArgs, RecRevisarArgs,
+    PixAutomaticoCommand, Prazo, RecCancelarArgs, RecCommand, RecConsultarArgs, RecCriarArgs,
+    RecListarArgs, RecRevisarArgs, SolicitacaoCancelarArgs, SolicitacaoCommand,
+    SolicitacaoConsultarArgs, SolicitacaoCriarArgs,
 };
 pub(crate) use webhook::{
     CallbacksArgs, WebhookBankingCommand, WebhookCadastroArgs, WebhookCobrancaCommand,

@@ -857,6 +857,27 @@ O pagador aprova no banco dele: peça com inter-pj pix-automatico solicitacao cr
 
 `pix-automatico rec listar` mostra as recorrências criadas em um período (padrão: últimos 30 dias), com filtros de status (`--status criada|aprovada|rejeitada|expirada|cancelada`), devedor (`--documento`), location (`--com-location`, `--sem-location`) e `--convenio`, em texto, JSON ou CSV com os nomes da API. `rec consultar <idRec>` mostra a recorrência, o pagador que a aprovou, o histórico e, se houver, o QR Code (`--qrcode`, `--qrcode-png`); com `--txid` de uma cobrança imediata ou com vencimento, traz o QR Code composto, que paga a cobrança e aprova a recorrência. `rec revisar <idRec>` muda o nome do devedor e a location e, antes da aprovação, a data do primeiro pagamento (`--data-inicial`) e a cobrança de ativação (`--txid-ativacao`), mostrando o antes e o depois; `rec cancelar <idRec>` cancela a recorrência depois de mostrá-la e pedir confirmação. Recorrências rejeitadas, expiradas ou canceladas são recusadas sem nenhuma alteração. Os escopos são `rec.write` e `rec.read`.
 
+O pagador aprova a recorrência no banco dele. Para que o banco lhe peça isso, envie uma **solicitação de confirmação** com a conta do pagador:
+
+```console
+$ inter-pj pix-automatico solicitacao criar --rec RR1234567820260924abcdefghijk \
+    --documento 123.456.789-09 --ispb 12345678 --agencia 0001 --conta 1234567 --expiracao 3d
+Solicitação de confirmação a enviar
+  Ambiente          sandbox (dados fictícios)
+  Recorrência       RR1234567820260924abcdefghijk
+  Devedor           Cliente Exemplo (123.456.789-09)
+  Contrato          contrato-001
+  Objeto            Mensalidade
+  Periodicidade     mensal, a partir de 10/10/2026, sem fim
+  Valor             R$ 149,90 em cada pagamento
+  Conta do pagador  123.456.789-09, banco com ISPB 12345678, agência 0001, conta 1234567
+  Expira em         27/09/2026 10:00:00
+Enviar a solicitação ao banco do pagador? [s/N] s
+Solicitação criada: o banco do pagador vai pedir que ele aprove a recorrência.
+```
+
+A CLI consulta a recorrência antes e mostra o que o pagador vai aprovar; recorrências já aprovadas ou encerradas são recusadas sem enviar nada. `--ispb` é o código de 8 dígitos do banco do pagador, `--conta` vai com o dígito verificador e `--expiracao` é o prazo para ele responder (`2h`, `7d`, uma data, até o fim do dia, ou data e hora com fuso; padrão: 7 dias). Como na recorrência, não há chave de idempotência: um resultado incerto vem com o comando que confere se a solicitação foi enviada. `solicitacao consultar <idSolicRec>` mostra em que pé ela está (enviada, recebida, aceita, rejeitada, expirada), e `solicitacao cancelar <idSolicRec>` a cancela enquanto não tiver resposta. A resposta do pagador aparece também em `rec consultar`, no status da recorrência e na lista das suas solicitações. Os escopos são `solicrec.write` e `solicrec.read`, além de `rec.read` para a consulta da recorrência.
+
 ### Webhooks
 
 Webhooks são os endereços que o Inter chama quando algo acontece na conta. Cada API tem os seus:
