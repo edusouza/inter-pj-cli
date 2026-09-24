@@ -656,6 +656,14 @@ pub(crate) enum CobrancaCommand {
     Consultar(CobrancaConsultarArgs),
     /// Grava o PDF de uma cobrança, com o boleto e o QR Code do Pix
     Pdf(CobrancaPdfArgs),
+    /// Cancela uma cobrança, após mostrá-la e pedir confirmação
+    Cancelar(CobrancaCancelarArgs),
+    /// Altera o valor ou o vencimento de uma cobrança, após mostrar o antes e o depois
+    Editar(CobrancaEditarArgs),
+    /// Mostra em que pé está uma alteração feita com `cobranca editar`
+    Edicao(CobrancaEdicaoArgs),
+    /// Sandbox: paga uma cobrança, para testar o fluxo completo (recusado em produção)
+    Pagar(CobrancaPagarArgs),
 }
 
 /// Where the charge comes from: a file, or the options.
@@ -1066,6 +1074,99 @@ pub(crate) struct CobrancaPdfArgs {
     /// Sobrescreve o arquivo se ele já existir
     #[arg(long)]
     pub(crate) sobrescrever: bool,
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct CobrancaCancelarArgs {
+    /// Código da cobrança (codigoSolicitacao)
+    #[arg(value_name = "CODIGO")]
+    pub(crate) codigo: String,
+
+    /// Motivo do cancelamento, até 50 caracteres
+    #[arg(long, value_name = "TEXTO", value_parser = parse_motivo)]
+    pub(crate) motivo: String,
+
+    /// Confirma sem perguntar (para scripts)
+    #[arg(long, help_heading = "Segurança")]
+    pub(crate) sim: bool,
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+#[command(group(
+    ArgGroup::new("alteracao")
+        .required(true)
+        .multiple(true)
+        .args(["valor", "vencimento"])
+))]
+pub(crate) struct CobrancaEditarArgs {
+    /// Código da cobrança (codigoSolicitacao)
+    #[arg(value_name = "CODIGO")]
+    pub(crate) codigo: String,
+
+    /// Novo valor: 150,00, 1.500,00 ou 150.00 (de R$ 2,50 a R$ 99.999.999,99)
+    #[arg(long, value_name = "VALOR", value_parser = parse_valor)]
+    pub(crate) valor: Option<Decimal>,
+
+    /// Novo vencimento (AAAA-MM-DD), hoje ou depois
+    #[arg(long, value_name = "AAAA-MM-DD", value_parser = parse_data)]
+    pub(crate) vencimento: Option<NaiveDate>,
+
+    #[command(flatten)]
+    pub(crate) espera: EsperaEdicaoArgs,
+
+    /// Confirma sem perguntar (para scripts)
+    #[arg(long, help_heading = "Segurança")]
+    pub(crate) sim: bool,
+}
+
+/// `--aguardar` of `cobranca editar` and `cobranca edicao`.
+#[derive(Debug, Clone, Copy, Args)]
+pub(crate) struct EsperaEdicaoArgs {
+    /// Espera o fim da alteração (consulta a cada 6 segundos)
+    #[arg(long)]
+    pub(crate) aguardar: bool,
+
+    /// Tempo máximo de espera com --aguardar: 60s, 5m [padrão: 60s]
+    #[arg(
+        long,
+        value_name = "DURACAO",
+        value_parser = parse_duracao,
+        default_value = "60s",
+        hide_default_value = true,
+        requires = "aguardar"
+    )]
+    pub(crate) timeout: Duration,
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct CobrancaEdicaoArgs {
+    /// Código da alteração (codigoEdicao), mostrado por `cobranca editar`
+    #[arg(value_name = "CODIGO_EDICAO")]
+    pub(crate) codigo_edicao: String,
+
+    #[command(flatten)]
+    pub(crate) espera: EsperaEdicaoArgs,
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct CobrancaPagarArgs {
+    /// Código da cobrança (codigoSolicitacao)
+    #[arg(value_name = "CODIGO")]
+    pub(crate) codigo: String,
+
+    /// Como pagar: boleto (código de barras) ou pix (QR Code)
+    #[arg(
+        long,
+        value_enum,
+        ignore_case = true,
+        value_name = "FORMA",
+        hide_possible_values = true
+    )]
+    pub(crate) com: FormaArg,
 }
 
 #[derive(Debug, Subcommand)]
@@ -1558,6 +1659,10 @@ fn parse_uf(value: &str) -> Result<Uf, String> {
     value
         .parse()
         .map_err(|err: inter_pj::cobranca::UfError| err.to_string())
+}
+
+fn parse_motivo(value: &str) -> Result<String, String> {
+    inter_pj::cobranca::motivo_cancelamento(value).map_err(str::to_owned)
 }
 
 /// 8 digits, with or without punctuation.

@@ -64,6 +64,9 @@ pub(crate) enum CliError {
     /// `cobranca emitir --aguardar`: the API could not issue the charge.
     #[error("a cobrança não foi emitida: {situacao}")]
     CobrancaNaoEmitida { situacao: String },
+    /// `cobranca editar`, or `cobranca edicao --aguardar`: the change failed.
+    #[error("a alteração da cobrança não foi feita: {motivo}")]
+    EdicaoNaoFeita { motivo: String },
     /// The user did not confirm the operation.
     #[error("operação cancelada: nada foi enviado")]
     Cancelado,
@@ -107,7 +110,8 @@ impl CliError {
             Self::Cancelado => exit::CANCELLED,
             Self::PixNaoPago { .. }
             | Self::LoteComErro { .. }
-            | Self::CobrancaNaoEmitida { .. } => exit::REJECTED,
+            | Self::CobrancaNaoEmitida { .. }
+            | Self::EdicaoNaoFeita { .. } => exit::REJECTED,
             Self::TempoEsgotado { .. } => exit::WAIT_TIMEOUT,
             Self::Inter(err)
             | Self::ResultadoIncerto { source: err, .. }

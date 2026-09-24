@@ -11,7 +11,7 @@ use inter_pj::cobranca::{
 use inter_pj::{Environment, Error as InterError, InterClient, endpoint};
 
 use super::consultar::{OpcoesQr, mostrar};
-use super::{descrever_situacao, percentual};
+use super::{argumento, descrever_situacao, percentual};
 use crate::arquivo;
 use crate::cli::{CobrancaEmitirArgs, FormaArg, Formato, TaxaOuValor};
 use crate::commands::{Context, hoje, simulacao};
@@ -130,16 +130,6 @@ fn procurar(cobranca: &EmissaoCobranca) -> String {
         "inter-pj cobranca listar --filtrar-por emissao --seu-numero {}",
         argumento(&cobranca.seu_numero)
     )
-}
-
-/// `texto` as one argument of a shell command: quoted when it has to be.
-fn argumento(texto: &str) -> String {
-    let simples = |c: char| c.is_ascii_alphanumeric() || "-_./:,+=@%".contains(c);
-    if !texto.is_empty() && texto.chars().all(simples) {
-        texto.to_owned()
-    } else {
-        format!("'{}'", texto.replace('\'', r"'\''"))
-    }
 }
 
 /// The charge of the options. clap requires the mandatory ones together
@@ -472,17 +462,14 @@ pub(super) fn modelo() -> Result<(), CliError> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-    use std::fs;
-
     use clap::{CommandFactory, FromArgMatches};
     use serde_json::json;
     use wiremock::matchers::{any, method, path};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
+    use wiremock::{Mock, ResponseTemplate};
 
+    use super::super::testes::{self, Cenario};
     use super::*;
     use crate::cli::{Cli, CobrancaCommand, Command};
-    use crate::commands::Env;
     use crate::confirmacao::testes::TerminalFalso;
 
     const CODIGO: &str = "0b7e4c1a-5d3f-4a2b-9c8d-7e6f5a4b3c2d";
@@ -656,85 +643,26 @@ Cobrança a emitir
 
     // --- the command against a mock API -------------------------------------
 
-    struct EnvFalso(HashMap<&'static str, String>);
-
-    impl Env for EnvFalso {
-        fn var(&self, name: &str) -> Option<String> {
-            self.0.get(name).cloned()
-        }
-    }
-
-    struct Cenario {
-        server: MockServer,
-        _dir: tempfile::TempDir,
-        context: Context,
-        args: CobrancaEmitirArgs,
-    }
-
-    async fn cenario(extra: &[&str]) -> Cenario {
-        let server = MockServer::start().await;
-        let dir = tempfile::tempdir().unwrap();
-        let rcgen::CertifiedKey { cert, signing_key } =
-            rcgen::generate_simple_self_signed(vec!["cliente.teste".to_owned()]).unwrap();
-        let certificado = dir.path().join("certificado.crt");
-        let chave = dir.path().join("chave.key");
-        fs::write(&certificado, cert.pem()).unwrap();
-        fs::write(&chave, signing_key.serialize_pem()).unwrap();
-        let config = dir.path().join("config.toml");
-        fs::write(
-            &config,
-            format!(
-                "[perfis.padrao]\nambiente = \"sandbox\"\nclient_id = \"id-de-teste\"\ncertificado = '{}'\nchave_privada = '{}'\n",
-                certificado.display(),
-                chave.display()
-            ),
-        )
-        .unwrap();
-        let config = config.display().to_string();
-        let mut full = vec!["inter-pj", "--config", &config, "cobranca", "emitir"];
-        full.extend_from_slice(&OPCOES);
-        full.extend_from_slice(extra);
-        let matches = Cli::command().try_get_matches_from(&full).unwrap();
-        let cli = Cli::from_arg_matches(&matches).unwrap();
-        let env = EnvFalso(HashMap::from([
-            ("INTER_CLIENT_SECRET", "segredo-de-teste".to_owned()),
-            ("INTER_BASE_URL", server.uri()),
-            (
-                "INTER_CACHE_DIR",
-                dir.path().join("cache").display().to_string(),
-            ),
-        ]));
-        let context = Context::new(cli.global, &matches, &env).unwrap();
-        let Command::Cobranca(CobrancaCommand::Emitir(args)) = cli.command else {
-            unreachable!("cobranca emitir");
-        };
-        Mock::given(method("POST"))
-            .and(path("/oauth/v2/token"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "access_token": "tok",
-                "expires_in": 3600,
-                "scope": "boleto-cobranca.write boleto-cobranca.read"
-            })))
-            .mount(&server)
-            .await;
-        Cenario {
-            server,
-            _dir: dir,
-            context,
-            args: *args,
+    async fn cenario(extra: &[&str]) -> (Cenario, CobrancaEmitirArgs) {
+        let mut todos = vec!["emitir"];
+        todos.extend_from_slice(&OPCOES);
+        todos.extend_from_slice(extra);
+        match testes::cenario(&todos).await {
+            (cenario, CobrancaCommand::Emitir(args)) => (cenario, *args),
+            (_, outro) => panic!("{outro:?}"),
         }
     }
 
     #[tokio::test]
     async fn declined_confirmation_sends_nothing() {
-        let cenario = cenario(&[]).await;
+        let (cenario, args) = cenario(&[]).await;
         Mock::given(any())
             .respond_with(ResponseTemplate::new(500))
             .expect(0)
             .mount(&cenario.server)
             .await;
         let mut terminal = TerminalFalso::respondendo("n\n");
-        let err = emitir(&cenario.context, &cenario.args, &mut terminal)
+        let err = emitir(&cenario.context, &args, &mut terminal)
             .await
             .unwrap_err();
         assert!(matches!(err, CliError::Cancelado), "{err}");
@@ -743,7 +671,7 @@ Cobrança a emitir
 
     #[tokio::test]
     async fn waits_while_the_charge_is_issued() {
-        let cenario = cenario(&["--aguardar", "--timeout", "10s"]).await;
+        let (cenario, args) = cenario(&["--aguardar", "--timeout", "10s"]).await;
         Mock::given(method("POST"))
             .and(path("/cobranca/v3/cobrancas"))
             .respond_with(
@@ -781,7 +709,7 @@ Cobrança a emitir
         let mut terminal = TerminalFalso::respondendo("s\n");
         emitir_com(
             &cenario.context,
-            &cenario.args,
+            &args,
             &mut terminal,
             Duration::from_millis(10),
         )
@@ -795,7 +723,7 @@ Cobrança a emitir
         let dir = tempfile::tempdir().unwrap();
         let png = dir.path().join("pix.png");
         let png_arg = png.display().to_string();
-        let cenario = cenario(&["--aguardar", "--sim", "--qrcode-png", &png_arg]).await;
+        let (cenario, args) = cenario(&["--aguardar", "--sim", "--qrcode-png", &png_arg]).await;
         Mock::given(method("POST"))
             .and(path("/cobranca/v3/cobrancas"))
             .respond_with(
@@ -810,13 +738,9 @@ Cobrança a emitir
             })))
             .mount(&cenario.server)
             .await;
-        let err = emitir(
-            &cenario.context,
-            &cenario.args,
-            &mut TerminalFalso::default(),
-        )
-        .await
-        .unwrap_err();
+        let err = emitir(&cenario.context, &args, &mut TerminalFalso::default())
+            .await
+            .unwrap_err();
         assert_eq!(
             err.to_string(),
             "a cobrança não foi emitida: falha na emissão"
@@ -830,7 +754,7 @@ Cobrança a emitir
         let dir = tempfile::tempdir().unwrap();
         let png = dir.path().join("pix.png");
         let png_arg = png.display().to_string();
-        let cenario = cenario(&[
+        let (cenario, args) = cenario(&[
             "--aguardar",
             "--sim",
             "--timeout",
@@ -855,7 +779,7 @@ Cobrança a emitir
             .await;
         let err = emitir_com(
             &cenario.context,
-            &cenario.args,
+            &args,
             &mut TerminalFalso::default(),
             Duration::from_millis(300),
         )
