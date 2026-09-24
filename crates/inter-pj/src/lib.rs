@@ -49,6 +49,7 @@ pub mod problem;
 mod retry;
 mod scope;
 mod serde_util;
+pub mod webhook;
 
 pub use auth::{AccessToken, TokenStore};
 pub use client::{InterClient, InterClientBuilder};
