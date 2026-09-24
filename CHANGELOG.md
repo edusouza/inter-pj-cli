@@ -6,6 +6,10 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+## [0.7.0] - 2026-09-24
+
+Webhooks e callbacks: os endereços que o Inter chama quando algo acontece na conta, nas APIs Banking, de Cobrança e Pix, com o histórico das tentativas de envio e o reenvio dos callbacks.
+
 ### Adicionado
 
 - `inter-pj webhook banking cadastrar pix-pagamento|boleto-pagamento --url`, `inter-pj webhook cobranca cadastrar --url` e `inter-pj webhook pix cadastrar <chave> --url`: cadastram ou trocam o webhook que o Inter chama quando a conta envia um Pix ou paga um boleto, quando uma cobrança é recebida, cancelada ou expira, e quando uma cobrança Pix é paga. A URL é conferida antes de qualquer requisição (`https://`, sem espaços, com um servidor), com um aviso quando aponta para um endereço local ou de rede privada. O resumo mostra o webhook atual e o novo, com a confirmação (ou `--sim`) antes do envio; cadastrar a mesma URL não muda nada (#41, #42, #43).

@@ -6,7 +6,7 @@
 ┌──────────────────────── crates/inter-pj-cli (binário `inter-pj`) ─────────────────────────┐
 │ cli.rs, cli/  definição dos comandos (clap) e ajuda em português                          │
 │ config.rs     arquivo TOML, perfis, precedência flag > env > arquivo, origem dos valores  │
-│ commands/     saldo, extrato, pix, pagamento, cobranca, auth, config                      │
+│ commands/     saldo, extrato, pix, pagamento, cobranca, webhook, auth, config             │
 │ token_store   cache de tokens em arquivo (600, gravação atômica)                          │
 │ confirmacao   resumo + [s/N] antes de mover dinheiro (só com stdin em terminal)           │
 │ arquivo/      pagamentos e cobranças em arquivo: JSON da API e CSV (Excel pt-BR)          │
@@ -33,6 +33,7 @@
 │ documento.rs  CPF e CNPJ (inclusive o alfanumérico) com dígitos verificadores             │
 │ pix/          API Pix: cobranças, recebidos, devoluções, locations, lotes e sandbox       │
 │               chave Pix (formatos do DICT) e leitura do copia e cola (BR Code, CRC16)     │
+│ webhook.rs    webhooks das três APIs: URL conferida, callbacks e reenvio                  │
 └───────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -61,7 +62,7 @@ Os endpoints ficam em um só lugar (`endpoint.rs`) e são usados tanto para mont
 
 ### Retentativas só quando repetir é seguro
 
-Cada requisição tem um modo de repetição. Consultas (`GET`) e o pedido de token são repetidas em `429`, `500`, `502`, `503`, `504`, falhas de conexão e tempo esgotado. As requisições do modo *scroll* do extrato mudam estado no servidor (avançam o cursor): repeti-las depois de um `504` poderia pular um lote inteiro, então elas só são repetidas quando certamente não foram processadas (`429` ou conexão recusada). O envio de Pix também só é repetido nesses dois casos, e sempre com a mesma chave de idempotência; depois de um `5xx` ou de tempo esgotado o resultado é incerto e a decisão fica com quem chamou. As cobranças Pix e as devoluções seguem a mesma regra e, como levam o txid ou o id da devolução no caminho, quem chamou pode repeti-las com segurança. Pagamentos por código de barras, DARFs, lotes, cancelamentos e as operações da API de Cobrança seguem a mesma regra, mas não têm chave de idempotência: depois de um resultado incerto, o pagamento ou a cobrança deve ser consultado antes de uma nova tentativa. Nenhuma outra operação com efeitos é repetida. Falhas de TLS (certificado recusado, CA desconhecida) também não, porque repetir não resolve.
+Cada requisição tem um modo de repetição. Consultas (`GET`) e o pedido de token são repetidas em `429`, `500`, `502`, `503`, `504`, falhas de conexão e tempo esgotado. As requisições do modo *scroll* do extrato mudam estado no servidor (avançam o cursor): repeti-las depois de um `504` poderia pular um lote inteiro, então elas só são repetidas quando certamente não foram processadas (`429` ou conexão recusada). O envio de Pix também só é repetido nesses dois casos, e sempre com a mesma chave de idempotência; depois de um `5xx` ou de tempo esgotado o resultado é incerto e a decisão fica com quem chamou. As cobranças Pix e as devoluções seguem a mesma regra e, como levam o txid ou o id da devolução no caminho, quem chamou pode repeti-las com segurança. Pagamentos por código de barras, DARFs, lotes, cancelamentos e as operações da API de Cobrança seguem a mesma regra, mas não têm chave de idempotência: depois de um resultado incerto, o pagamento ou a cobrança deve ser consultado antes de uma nova tentativa. Os cadastros, as exclusões e os reenvios de webhooks também só são repetidos nesses dois casos, e uma alteração incerta vem com o comando que mostra o webhook. Nenhuma outra operação com efeitos é repetida. Falhas de TLS (certificado recusado, CA desconhecida) também não, porque repetir não resolve.
 
 A espera cresce exponencialmente a partir de 1 s, com *jitter* (entre metade e o total do intervalo) e teto de 60 s; um `Retry-After` maior que o teto faz a CLI desistir na hora, com a dica de aguardar.
 
@@ -129,6 +130,16 @@ Uma devolução é um envio de dinheiro e tem os trilhos do Pix: consulta do Pix
 A revisão de uma cobrança com vencimento muda só o que foi informado, então ela é conferida depois da consulta, com a cobrança como ficará: um novo vencimento anterior à data de um desconto atual, por exemplo, é recusado antes do envio. Cobranças pagas ou removidas são recusadas sem nenhuma alteração.
 
 O CSV dos lotes de cobranças tem os caminhos dos campos da API como colunas (`valor.multa.valorPerc`, `valor.desconto.descontoDataFixa[0].data`), e cada linha vira o mesmo objeto do JSON, conferido pela mesma validação da criação avulsa. As posições das listas ficam como nas colunas, para que as mensagens apontem a coluna certa, e colunas desconhecidas são recusadas. Como no lote de pagamentos, os estragos do Excel (txid, CPF, CNPJ e location em notação científica; CPF, CNPJ e CEP sem os zeros à esquerda) são reconhecidos e explicados, e txids repetidos são apontados antes do envio.
+
+### Webhooks e callbacks
+
+Cada API tem os seus webhooks: um por tipo no Banking (`pix-pagamento`, `boleto-pagamento`), um na API de Cobrança e um por chave na API Pix. `WebhookUrl` confere o que a documentação define (começa com `https://`, sem espaços) e que a URL tem um servidor, e a CLI avisa quando ele é local ou de rede privada, que o Inter não alcança. Como a nova URL passa a receber as notificações dos pagamentos da conta, cadastrar e excluir seguem os trilhos das operações sensíveis: consulta do webhook atual, o antes e o depois, e confirmação só de um terminal, ou `--sim`; cadastrar a mesma URL não muda nada. A consulta de uma conta sem webhook (`404`) devolve `None`. Chaves Pix de telefone vão no caminho sem o `+`, como a documentação pede, e no corpo do reenvio como o DICT as guarda.
+
+A especificação se contradiz no reenvio de callbacks de cobranças: a chave da operação é `/cobranca/v3/webhook/callbacks/retry`, mas a sua descrição mostra `/cobranca/v3/cobrancas/webhook/callbacks/retry`, o padrão dos reenvios das outras APIs (o caminho do histórico mais `/retry`). A biblioteca usa o segundo. Os testes de contrato o associam à chave da especificação (`spec::DIVERGENCIAS`), conferem escopos e modelos e falham se a especificação passar a ter o caminho, para que a exceção não dure mais que o erro.
+
+O histórico dos callbacks guarda o conteúdo enviado como veio, porque os schemas não o descrevem bem: o do Pix repete o da Cobrança, e o exemplo documentado traz `{}` onde o schema diz uma lista. `Callback::valores` procura um campo onde quer que ele esteja, para mostrar o código da operação que o reenvio recebe. No Banking, esse código não é o do filtro: o histórico de `pix-pagamento` filtra pelo `endToEnd`, e o reenvio pede o `codigoSolicitacao`. O comando sugerido para reenviar considera todas as tentativas do período, então uma operação entregue numa tentativa automática posterior fica de fora.
+
+O reenvio aceita até 50 operações por pedido e 5 pedidos por minuto, em produção. A CLI confere todos os códigos antes do primeiro pedido, para que um código inválido no segundo bloco não deixe o primeiro enviado, tira as repetições e divide o resto em blocos de 50; com mais de 5 blocos, espera 12 segundos entre eles, porque uma retentativa depois de um `429` não cobre o minuto inteiro. Se um bloco falha depois de outros, a dica diz quantos já foram pedidos e traz o comando para os restantes.
 
 ### Extrato completo: paginação e scroll
 

@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/inter-pj", "crates/inter-pj-cli"]
 
 [workspace.package]
-version = "0.6.0"
+version = "0.7.0"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT OR Apache-2.0"
@@ -12,7 +12,7 @@ homepage = "https://github.com/edusouza/inter-pj-cli"
 publish = false
 
 [workspace.dependencies]
-inter-pj = { path = "crates/inter-pj", version = "0.6.0" }
+inter-pj = { path = "crates/inter-pj", version = "0.7.0" }
 
 # Already in the tree through reqwest: decodes the PDF statement.
 base64 = "0.23"
