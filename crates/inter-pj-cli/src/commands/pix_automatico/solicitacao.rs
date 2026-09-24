@@ -12,6 +12,7 @@ use inter_pj::pix_automatico::{
 use inter_pj::{Environment, Error as InterError, endpoint};
 
 use super::{descrever_calendario, descrever_status, descrever_valor, encerrada};
+use crate::chamada::chamada;
 use crate::cli::{
     Formato, Momento, Prazo, SolicitacaoCancelarArgs, SolicitacaoCommand, SolicitacaoConsultarArgs,
     SolicitacaoCriarArgs,
@@ -94,9 +95,10 @@ async fn criar(
         Formato::Texto | Formato::Csv => {
             let id = criada.id_solic_rec.as_deref().unwrap_or_default();
             output::print(&format!(
-                "Solicitação criada: o banco do pagador vai pedir que ele aprove a recorrência.\n\n{}\n\nAcompanhe com: inter-pj pix-automatico solicitacao consultar {id}\nou pela recorrência: inter-pj pix-automatico rec consultar {}",
+                "Solicitação criada: o banco do pagador vai pedir que ele aprove a recorrência.\n\n{}\n\nAcompanhe com: {chamada} pix-automatico solicitacao consultar {id}\nou pela recorrência: {chamada} pix-automatico rec consultar {}",
                 render_solicitacao(&criada),
-                args.rec
+                args.rec,
+                chamada = chamada()
             ))
         }
     }
@@ -160,7 +162,8 @@ fn incerta(err: InterError, solicitacao: &SolicRecSolicitada) -> CliError {
             source: err,
             situacao: "a solicitação pode ter sido enviada ao pagador",
             consulta: format!(
-                "inter-pj pix-automatico rec consultar {}",
+                "{} pix-automatico rec consultar {}",
+                chamada(),
                 solicitacao.id_rec
             ),
         }

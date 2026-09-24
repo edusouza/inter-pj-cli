@@ -9,6 +9,7 @@ use inter_pj::pix::{FiltroLocs, LocationPix, TipoCob};
 use serde_json::json;
 
 use super::{paginacao, periodo};
+use crate::chamada::chamada;
 use crate::cli::{
     Formato, PixLocCommand, PixLocConsultarArgs, PixLocCriarArgs, PixLocDesvincularArgs,
     PixLocListarArgs,
@@ -58,7 +59,8 @@ async fn criar(context: &Context, args: &PixLocCriarArgs) -> Result<(), CliError
             if let Some(id) = loc.id {
                 let _ = write!(
                     texto,
-                    "\n\nUse com: inter-pj pix {} criar ... --loc {id}",
+                    "\n\nUse com: {} pix {} criar ... --loc {id}",
+                    chamada(),
                     comando(loc.tipo_cob.as_ref().or(Some(&tipo)))
                 );
             }

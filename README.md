@@ -157,6 +157,8 @@ Vários perfis (ex.: `sandbox` e `producao`) podem conviver no mesmo arquivo; es
 
 Locais padrão: configuração em `~/.config/inter-pj/config.toml` (Windows: `%APPDATA%\inter-pj\config.toml`) e cache em `~/.cache/inter-pj` (Windows: `%LOCALAPPDATA%\inter-pj`). Veja com `inter-pj config caminho`.
 
+Os comandos que a saída sugere, como `Acompanhe com: inter-pj -p sandbox pix consultar ...`, levam as flags que escolheram a conta (o perfil, o arquivo, o ambiente, as credenciais e a conta corrente), para rodar na mesma conta; as variáveis de ambiente continuam valendo no mesmo shell.
+
 ## Uso
 
 Os [guias](docs/guias/README.md) mostram cada assunto com exemplos de terminal, que os testes executam contra uma simulação da API e conferem a cada mudança. Um resumo:

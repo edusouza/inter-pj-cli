@@ -16,6 +16,7 @@ use serde_json::json;
 
 use super::{paginacao, periodo};
 use crate::arquivo;
+use crate::chamada::chamada;
 use crate::cli::{
     Formato, PixLoteCobvArquivoArgs, PixLoteCobvCommand, PixLoteCobvConsultarArgs,
     PixLoteCobvIdArgs, PixLoteCobvListarArgs, PixLoteCobvSituacaoArgs, TipoArquivo,
@@ -179,7 +180,8 @@ fn recebido(context: &Context, id: u64, depois: &str) -> Result<(), CliError> {
         Formato::Json => output::print_json(&json!({ "id": id })),
         // `commands::run` refuses csv for these commands.
         Formato::Texto | Formato::Csv => output::print(&format!(
-            "Lote {id} recebido: {depois}.\n\nAcompanhe com: inter-pj pix lote-cobv consultar {id} --aguardar"
+            "Lote {id} recebido: {depois}.\n\nAcompanhe com: {} pix lote-cobv consultar {id} --aguardar",
+            chamada()
         )),
     }
 }
@@ -719,7 +721,8 @@ fn render_sumario(sumario: &SumarioLoteCobv, id: u64) -> String {
     {
         let _ = write!(
             texto,
-            "\n\nVeja por quê: inter-pj pix lote-cobv situacao {id} negada"
+            "\n\nVeja por quê: {} pix lote-cobv situacao {id} negada",
+            chamada()
         );
     }
     texto

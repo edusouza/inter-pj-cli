@@ -36,16 +36,6 @@ pub(super) async fn run(context: &Context, command: CobrancaCommand) -> Result<(
     }
 }
 
-/// `texto` as one argument of a shell command: quoted when it has to be.
-pub(super) fn argumento(texto: &str) -> String {
-    let simples = |c: char| c.is_ascii_alphanumeric() || "-_./:,+=@%".contains(c);
-    if !texto.is_empty() && texto.chars().all(simples) {
-        texto.to_owned()
-    } else {
-        format!("'{}'", texto.replace('\'', r"'\''"))
-    }
-}
-
 /// A situation in words: `A_RECEBER` -> `a receber`.
 pub(crate) fn descrever_situacao(situacao: &SituacaoCobranca) -> String {
     match situacao {

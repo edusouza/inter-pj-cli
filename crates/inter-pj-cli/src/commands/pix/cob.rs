@@ -14,6 +14,7 @@ use super::{
     Filtros, alteravel, antes_e_depois, celula_status, copia_e_cola_ativa, descrever_status,
     incerta, paginacao, pessoa, tabela_pix,
 };
+use crate::chamada::chamada;
 use crate::cli::{
     Formato, PixCobCommand, PixCobConsultarArgs, PixCobCriarArgs, PixCobListarArgs,
     PixCobRevisarArgs, SimNao,
@@ -79,8 +80,9 @@ async fn criar(
         .await
         .map_err(|err| incerta(err, "pix cob", &txid))?;
     let texto = format!(
-        "Cobrança Pix criada.\n\n{}\n\nAcompanhe com: inter-pj pix cob consultar {txid}",
-        render_cob(&criada)
+        "Cobrança Pix criada.\n\n{}\n\nAcompanhe com: {} pix cob consultar {txid}",
+        render_cob(&criada),
+        chamada()
     );
     opcoes.mostrar(context, &settings, &texto, &criada, &copia_e_cola(&criada))
 }

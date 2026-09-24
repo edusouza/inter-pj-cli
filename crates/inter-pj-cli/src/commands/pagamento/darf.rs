@@ -11,6 +11,7 @@ use serde_json::json;
 
 use super::{celula_status, data, data_br};
 use crate::arquivo::{self, CAMPOS_DARF, Campos};
+use crate::chamada::chamada;
 use crate::cli::{DarfCommand, DarfListarArgs, DarfPagarArgs, Formato, PeriodoArgs};
 use crate::commands::{Context, hoje, intervalo, simulacao};
 use crate::confirmacao::{Terminal, confirmar, descrever_ambiente, verificar_limite};
@@ -65,7 +66,8 @@ async fn pagar(
                 source: err,
                 situacao: "o pagamento pode ter sido feito",
                 consulta: format!(
-                    "inter-pj pagamento darf listar --codigo-receita {}",
+                    "{} pagamento darf listar --codigo-receita {}",
+                    chamada(),
                     darf.codigo_receita
                 ),
             }
@@ -220,7 +222,8 @@ fn render(solicitacao: &SolicitacaoDarf) -> String {
     if let Some(codigo) = &solicitacao.codigo_solicitacao {
         let _ = write!(
             texto,
-            "\n\nAcompanhe com: inter-pj pagamento darf listar --codigo-solicitacao {codigo}"
+            "\n\nAcompanhe com: {} pagamento darf listar --codigo-solicitacao {codigo}",
+            chamada()
         );
     }
     texto

@@ -13,6 +13,7 @@ use inter_pj::{Environment, endpoint};
 use rust_decimal::Decimal;
 use serde_json::json;
 
+use crate::chamada::chamada;
 use crate::cli::{Formato, PixEnviarArgs};
 use crate::commands::{Context, hoje, simulacao};
 use crate::config::Settings;
@@ -377,7 +378,8 @@ fn render(solicitacao: &SolicitacaoPix, id: &IdIdempotente) -> String {
     if let Some(codigo) = &solicitacao.codigo_solicitacao {
         let _ = write!(
             texto,
-            "\n\nAcompanhe com: inter-pj pix consultar {} --aguardar",
+            "\n\nAcompanhe com: {} pix consultar {} --aguardar",
+            chamada(),
             limpo(codigo)
         );
     }

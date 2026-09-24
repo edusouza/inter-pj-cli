@@ -9,6 +9,7 @@
 //! operation that may have been processed (check before repeating it).
 
 mod arquivo;
+mod chamada;
 mod cli;
 mod commands;
 mod config;
@@ -37,6 +38,7 @@ fn main() -> ExitCode {
         .try_get_matches()
         .unwrap_or_else(|err| sair(err));
     let cli = cli::Cli::from_arg_matches(&matches).unwrap_or_else(|err| sair(err));
+    chamada::definir(&cli.global, &matches);
     logging::init(cli.global.verbose);
 
     let result = tokio::runtime::Builder::new_current_thread()
