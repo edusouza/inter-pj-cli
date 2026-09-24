@@ -812,6 +812,51 @@ erro: a devolução de R$ 260,00 passa do que resta do Pix: R$ 250,00 de R$ 300,
 
 `--natureza retirada` devolve o dinheiro de um Pix Saque ou o troco de um Pix Troco (o padrão, `original`, é o do Pix comum), e `--descricao` (até 140 caracteres) vai para o pagador. A devolução é processada depois do pedido: `pix devolucao consultar` mostra em que pé ela está e, com `--aguardar` (aceito também por `solicitar`), consulta a cada 6 segundos até o fim, saindo com o código 0 (devolvida), 5 (não realizada, com o motivo) ou 8 (o tempo acabou; padrão: 60s). Devolver precisa do escopo `pix.write`, além de `pix.read` para a consulta.
 
+### Pix Automático
+
+No Pix Automático, o pagador autoriza uma vez, no banco dele, as cobranças de um contrato (uma mensalidade, uma assinatura), que depois são feitas a cada vencimento sem que ele precise pagá-las. A autorização é a **recorrência**: o devedor e o contrato, a periodicidade, o valor (fixo, um mínimo para o limite que o pagador define, ou o de cada cobrança) e se as cobranças não pagas podem ser tentadas de novo. A API é só para CNPJs com pelo menos 6 meses de atividade.
+
+```console
+$ inter-pj pix-automatico rec criar --devedor-documento 123.456.789-09 --devedor-nome "Cliente Exemplo" \
+    --contrato contrato-001 --objeto Mensalidade --data-inicial 2026-10-10 --periodicidade mensal \
+    --valor 149,90 --retentativas
+Recorrência a criar
+  Ambiente       sandbox (dados fictícios)
+  Devedor        Cliente Exemplo (123.456.789-09)
+  Contrato       contrato-001
+  Objeto         Mensalidade
+  Periodicidade  mensal, a partir de 10/10/2026, sem fim
+  Valor          R$ 149,90 (cento e quarenta e nove reais e noventa centavos) em cada pagamento
+  Retentativas   até 3 novas tentativas, em 7 dias
+Criar a recorrência? [s/N] s
+Recorrência criada: aguarda a aprovação do pagador.
+
+Recorrência RR1234567820260924abcdefghijk
+  Status         criada (aguarda a aprovação do pagador)
+  Devedor        Cliente Exemplo (123.456.789-09)
+  Contrato       contrato-001
+  Objeto         Mensalidade
+  Periodicidade  mensal, a partir de 10/10/2026, sem fim
+  Valor          R$ 149,90 em cada pagamento
+  Retentativas   até 3 novas tentativas, em 7 dias
+  Recebedor      Empresa Exemplo Ltda (12.345.678/0001-95)
+
+Histórico
+  24/09/2026 10:00:00  criada
+
+Acompanhe com: inter-pj pix-automatico rec consultar RR1234567820260924abcdefghijk
+O pagador aprova no banco dele: peça com inter-pj pix-automatico solicitacao criar --rec RR1234567820260924abcdefghijk
+```
+
+- **Opções ou arquivo**: `--arquivo rec.json` lê a recorrência nos campos da API (`-` para a entrada padrão; `pix-automatico rec modelo` imprime um exemplo com dados fictícios), com os campos desconhecidos recusados e as mensagens apontando o campo.
+- **Valor**: `--valor` fixa o valor de cada pagamento; `--valor-minimo`, quando o valor muda a cada cobrança, é o menor limite que o pagador pode definir; sem nenhum dos dois, vale o de cada cobrança.
+- **Período**: `--data-inicial` é a data do primeiro pagamento (não pode ter passado) e `--data-final`, a do último; sem ela, a recorrência não tem fim. `--periodicidade` é `semanal`, `mensal`, `trimestral`, `semestral` ou `anual`.
+- **Aprovação**: `--loc` usa uma location criada antes, para o QR Code da recorrência, e `--txid-ativacao`, uma cobrança imediata cujo QR Code composto paga a cobrança e aprova a recorrência ao mesmo tempo.
+- **Conferência, resumo e confirmação**: tamanhos, datas e valores são conferidos antes de qualquer requisição; o resumo destaca a produção, e `[s/N]` vem só de um terminal (ou `--sim`). `--simular` mostra a requisição sem enviar nada.
+- **Resultado incerto**: esta API não tem chave de idempotência. Se o resultado ficar incerto (tempo esgotado, erro 5xx), a recorrência pode ter sido criada, e o erro traz o `rec listar --documento` que confere isso antes de uma nova tentativa.
+
+`pix-automatico rec listar` mostra as recorrências criadas em um período (padrão: últimos 30 dias), com filtros de status (`--status criada|aprovada|rejeitada|expirada|cancelada`), devedor (`--documento`), location (`--com-location`, `--sem-location`) e `--convenio`, em texto, JSON ou CSV com os nomes da API. `rec consultar <idRec>` mostra a recorrência, o pagador que a aprovou, o histórico e, se houver, o QR Code (`--qrcode`, `--qrcode-png`); com `--txid` de uma cobrança imediata ou com vencimento, traz o QR Code composto, que paga a cobrança e aprova a recorrência. `rec revisar <idRec>` muda o nome do devedor e a location e, antes da aprovação, a data do primeiro pagamento (`--data-inicial`) e a cobrança de ativação (`--txid-ativacao`), mostrando o antes e o depois; `rec cancelar <idRec>` cancela a recorrência depois de mostrá-la e pedir confirmação. Recorrências rejeitadas, expiradas ou canceladas são recusadas sem nenhuma alteração. Os escopos são `rec.write` e `rec.read`.
+
 ### Webhooks
 
 Webhooks são os endereços que o Inter chama quando algo acontece na conta. Cada API tem os seus:

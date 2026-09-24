@@ -3,7 +3,6 @@
 
 use chrono::{Days, NaiveDate};
 use inter_pj::cobranca::Uf;
-use inter_pj::documento::Documento;
 use inter_pj::pix::{
     AbatimentoCobv, CalendarioCobv, ChavePix, CobrancaPixError, CobvRevisada, CobvSolicitada,
     DescontoCobv, DescontoData, DevedorCobv, InfoAdicional, JurosCobv, LocCob, ModalidadeJuros,
@@ -210,18 +209,7 @@ fn erro(campos: &Campos<'_>, err: &CobrancaPixError) -> CliError {
 
 /// `cpf` or `cnpj`, the name and, optionally, e-mail and address.
 fn ler_devedor(campos: &Campos<'_>) -> Result<DevedorCobv, CliError> {
-    let documento = match (campos.documento("cpf")?, campos.documento("cnpj")?) {
-        (Some(cpf @ Documento::Cpf(_)), None) => cpf,
-        (None, Some(cnpj @ Documento::Cnpj(_))) => cnpj,
-        (Some(_), None) => {
-            return Err(campos.erro("cpf", "o documento é um CNPJ: use o campo cnpj"));
-        }
-        (None, Some(_)) => {
-            return Err(campos.erro("cnpj", "o documento é um CPF: use o campo cpf"));
-        }
-        (Some(_), Some(_)) => return Err(campos.erro("cnpj", "informe cpf ou cnpj, não os dois")),
-        (None, None) => return Err(campos.erro("cpf", "obrigatório: informe cpf ou cnpj")),
-    };
+    let documento = campos.cpf_ou_cnpj()?;
     let nome = campos.obrigatorio("nome", campos.texto("nome")?)?;
     let mut devedor = DevedorCobv::new(documento, nome);
     devedor.email = campos.texto("email")?;
