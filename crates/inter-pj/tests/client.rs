@@ -160,6 +160,12 @@ async fn reports_scopes_the_token_did_not_receive() {
         api.note.as_deref().unwrap().contains("extrato.read"),
         "{err}"
     );
+    // The token endpoint answered 200: the refusal is the client's, and
+    // no status of error is shown.
+    assert_eq!(
+        err.to_string(),
+        "falha ao obter o token de acesso: POST /oauth/v2/token: o token foi emitido sem os escopos extrato.read; habilite-os na integração (Internet Banking PJ)"
+    );
 }
 
 #[tokio::test]

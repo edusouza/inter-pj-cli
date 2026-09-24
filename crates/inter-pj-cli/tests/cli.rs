@@ -466,7 +466,8 @@ async fn escopo_nao_concedido_e_falha_de_autenticacao() {
         .arg("saldo")
         .assert()
         .code(4)
-        .stderr(predicate::str::contains("sem os escopos extrato.read"));
+        .stderr(predicate::str::contains("sem os escopos extrato.read"))
+        .stderr(predicate::str::contains("respondeu").not());
 }
 
 // --- configuração ---------------------------------------------------------------------
