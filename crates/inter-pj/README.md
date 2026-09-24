@@ -88,7 +88,7 @@ Também há DARF sem código de barras (`pagar_darf`, `darfs`) e lotes de 2 a 15
 
 Na API de Cobrança, além de emitir e consultar: `listar` (uma página) e `listar_todas`, `sumario` por situação, `pdf`, `cancelar` (o motivo é conferido por `motivo_cancelamento`), `editar` (vencimento e valor) com `consultar_edicao`, e `pagar_no_sandbox`, recusado fora do sandbox antes de qualquer requisição.
 
-Na API Pix, as cobranças imediatas também podem ser criadas com o txid escolhido pelo Inter (`criar_cob_sem_txid`), revisadas ou removidas (`revisar_cob`), consultadas com os Pix que as pagaram (`consultar_cob`) e listadas por período (`listar_cobs`, `listar_todas_cobs`).
+Na API Pix, as cobranças imediatas também podem ser criadas com o txid escolhido pelo Inter (`criar_cob_sem_txid`), revisadas ou removidas (`revisar_cob`), consultadas com os Pix que as pagaram (`consultar_cob`) e listadas por período (`listar_cobs`, `listar_todas_cobs`). As cobranças com vencimento (`criar_cobv`, `revisar_cobv`, `consultar_cobv`, `listar_cobvs`, `listar_todas_cobvs`) têm devedor com endereço, multa, juros (8 modalidades), abatimento e até 3 descontos por data, conferidos antes do envio.
 
 Consultas são repetidas automaticamente em falhas temporárias (`429`, `5xx`, conexão), conforme a `RetryPolicy` do cliente. Operações com efeitos só são repetidas quando certamente não foram processadas (`429`, conexão recusada): o Pix com a mesma chave de idempotência; boletos, DARFs e lotes, que não têm essa chave, devem ser consultados antes de uma nova tentativa quando o resultado for incerto.
 
