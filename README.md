@@ -206,85 +206,11 @@ Boletos, contas de consumo e tributos com código de barras estão no guia [Paga
 
 ### DARF
 
-DARFs sem código de barras (tributos federais) são pagos pelas opções ou por um arquivo JSON com os campos da API:
-
-```console
-$ inter-pj pagamento darf pagar --codigo-receita 0220 --contribuinte 12.345.678/0001-95 \
-    --nome-empresa "Empresa Exemplo" --periodo-apuracao 2026-09-30 --vencimento 2026-10-30 \
-    --referencia 13609400849201739 --descricao "IRPJ de setembro" --valor-principal 47,14
-$ inter-pj pagamento darf pagar --arquivo darf.json
-$ inter-pj pagamento darf listar --inicio 2026-10-01 --fim 2026-10-31 --codigo-receita 0220
-```
-
-```json
-{
-  "cnpjCpf": "12.345.678/0001-95",
-  "codigoReceita": "0220",
-  "nomeEmpresa": "Empresa Exemplo",
-  "periodoApuracao": "2026-09-30",
-  "dataVencimento": "2026-10-30",
-  "referencia": "13609400849201739",
-  "descricao": "IRPJ de setembro",
-  "valorPrincipal": 47.14,
-  "valorMulta": 0,
-  "valorJuros": "10,11"
-}
-```
-
-Antes de enviar, a CLI confere o CPF/CNPJ (dígitos verificadores), o código da receita (4 dígitos), a referência (só dígitos, até 30), os textos e os valores; no arquivo, campos desconhecidos são recusados, para que um erro de digitação (`valorMuta`) não apague a multa, e as mensagens apontam o campo. Valores aceitam número (`47.14`) ou texto (`"47,14"`). O resumo mostra principal, multa, juros e o total por extenso, e avisa quando um DARF vencido não tem multa nem juros: esses acréscimos não são calculados pela API. Os trilhos são os mesmos dos outros pagamentos (confirmação, `--sim`, `--simular`, limite por operação e, sem chave de idempotência, o comando para conferir um resultado incerto). Com `--arquivo -`, o DARF vem da entrada padrão e a confirmação exige `--sim`.
-
-A listagem filtra pela data de pagamento; sem datas, mostra os DARFs incluídos nos últimos 30 dias (o padrão da API). O pagamento precisa do escopo `pagamento-darf.write`, e a listagem, de `pagamento-boleto.read`.
+Os DARFs sem código de barras, pagos pelas opções ou por um arquivo JSON com os campos da API, estão no guia [Pagamentos](docs/guias/pagamentos.md#darf): o documento, o código da receita e a referência conferidos antes do envio, o aviso de um DARF vencido sem multa nem juros, que a API não calcula, e a listagem dos DARFs pagos. Pagar precisa do escopo `pagamento-darf.write`, e listar, do `pagamento-boleto.read`.
 
 ### Lotes
 
-Boletos, contas, tributos e DARFs podem ir juntos, de 2 a 150 por lote, a partir de um arquivo JSON ou de uma planilha CSV:
-
-```console
-$ inter-pj pagamento lote modelo csv > lote.csv   # planilha de exemplo (ou: modelo json > lote.json)
-$ inter-pj pagamento lote enviar --arquivo lote.csv --identificador "Pagamentos de outubro"
-Lote a enviar
-  Ambiente       sandbox (dados fictícios)
-  Arquivo        lote.csv
-  Identificador  Pagamentos de outubro
-  Pagamentos     2 boletos e contas (R$ 731,86) e 1 DARF (R$ 47,14)
-  Total          R$ 779,00 (setecentos e setenta e nove reais)
-
-  Onde     Tipo           Documento                                                Vencimento  Quando      Valor
-  linha 2  boleto         03399.20142 93990.000379 28300.301026 5 98850000066653   30/10/2024  agora   R$ 666,53
-  linha 3  conta/tributo  82670000000-1 65330160202-1 31231060000-1 00002830894-8  10/10/2026  agora    R$ 65,33
-  linha 4  DARF           receita 0220 · Empresa Exemplo (12.345.678/0001-95)      30/10/2026  agora    R$ 47,14
-aviso: linha 2: o pagamento fica para depois do vencimento (30/10/2024): pode haver juros e multa, ou recusa
-Enviar o lote de 3 pagamentos (R$ 779,00)? [s/N] s
-Lote recebido: 3 pagamentos, em processamento.
-Identificador do lote  0123456789abcdef01234567
-Meu identificador      Pagamentos de outubro
-
-Acompanhe com: inter-pj pagamento lote consultar 0123456789abcdef01234567 --aguardar
-
-$ inter-pj pagamento lote consultar 0123456789abcdef01234567 --aguardar
-Lote 0123456789abcdef01234567
-  Status             processado com erro
-  Meu identificador  Pagamentos de outubro
-  Criado em          01/10/2026 09:15:00
-  Pagamentos         3
-
-Tipo    Documento                                                Status                 Valor  Código                                Detalhe
-boleto  03399.20142 93990.000379 28300.301026 5 98850000066653   pago               R$ 666,53  3414f226-36fb-4d87-811e-cfd99911d845
-boleto  82670000000-1 65330160202-1 31231060000-1 00002830894-8  pago                R$ 65,33  8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f
-DARF    receita 0220 · Empresa Exemplo (12.345.678/0001-95)      erro no pagamento   R$ 47,14                                        Saldo insuficiente
-erro: o lote foi processado com erro: 1 de 3 pagamentos não foi feito
-```
-
-O arquivo usa os nomes de campo da API. Em JSON, é um objeto com `pagamentos` e, opcionalmente, `meuIdentificador` (`--identificador` o substitui), ou só a lista de pagamentos; em CSV, uma coluna por campo, com cabeçalho, e células vazias para os campos ausentes. Cada pagamento tem `tipoPagamento` e os campos do seu tipo:
-
-- `BOLETO` (boletos, contas e tributos com código de barras): `codBarraLinhaDigitavel` e, quando o código não os traz ou para pagar outro valor, `valorPagar` e `dataVencimento`; opcionalmente `dataPagamento` (agendamento) e `cpfCnpjBeneficiario`, como em `pagamento boleto pagar`;
-- `DARF`: os campos do arquivo de `pagamento darf pagar`.
-
-Antes de enviar, a CLI confere o lote inteiro com as validações de cada tipo (dígitos verificadores, datas, valores, CPF/CNPJ) e recusa campos desconhecidos ou de outro tipo; havendo problemas, lista todos, com a linha (CSV) ou a posição (JSON) e o campo, e não envia nada. O resumo mostra o total por tipo e por extenso, cada pagamento, e avisa sobre vencimentos passados e valores diferentes dos do código. Pagamentos repetidos no arquivo (o mesmo código, ou o mesmo DARF) são recusados, porque com `--sim` um aviso não impediria o pagamento em dobro; se forem mesmo pagamentos distintos, use `--permitir-repetidos`. Os trilhos de segurança são os dos outros pagamentos: confirmação `[s/N]` ou `--sim`, `--simular` e o limite por operação do perfil, que vale para cada pagamento do lote (um lote não é recusado pelo total, e sim pelo pagamento que passa do limite).
-
-O CSV aceita `,` ou `;` como separador (detectado pelo cabeçalho), UTF-8 com ou sem BOM e valores como `65,33`, como o Excel em português salva. Ao abrir um CSV, porém, o Excel converte o que parece número ou data: números longos viram notação científica e perdem dígitos (`1,36094E+16`), códigos perdem os zeros à esquerda (`0220` vira `220`) e datas mudam de formato (`30/10/2026`). Para editar no Excel, importe o arquivo (Dados > De Texto/CSV) sem detectar os tipos de dados, ou formate as colunas como texto antes de digitar; linhas digitáveis e CPF/CNPJ com pontuação, como no modelo, já ficam como texto. Se algo chegar estragado, a conferência recusa o arquivo e diz o que aconteceu, sem enviar nada.
-
-O lote é processado depois do envio: `pagamento lote consultar` mostra o status do lote e de cada pagamento, e com `--aguardar` consulta a cada 6 segundos até o fim do processamento, saindo com o código 0 (processado sem erro), 5 (algum pagamento não foi feito) ou 8 (o tempo acabou; padrão: 5 min). Como nos outros pagamentos, não há chave de idempotência: se o resultado do envio ficar incerto, confira `pagamento boleto listar` e `pagamento darf listar` antes de enviar de novo. O envio precisa do escopo `pagamento-lote.write`, e a consulta, de `pagamento-lote.read`.
+Os lotes de 2 a 150 boletos, contas, tributos e DARFs, a partir de uma planilha CSV ou de um arquivo JSON, estão no guia [Pagamentos](docs/guias/pagamentos.md#lotes): o modelo, a conferência do lote inteiro antes do envio, com cada problema apontado pela linha e pelo campo (inclusive o que o Excel estraga numa planilha), a recusa dos pagamentos repetidos no arquivo e a consulta com `--aguardar`, que sai com o código 0, 5 ou 8 conforme o resultado. Enviar precisa do escopo `pagamento-lote.write`, e consultar, do `pagamento-lote.read`.
 
 ### Cobranças
 
