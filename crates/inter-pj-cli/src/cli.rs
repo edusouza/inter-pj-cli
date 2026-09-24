@@ -24,6 +24,7 @@ use crate::tabela::Separador;
 use crate::valor::{parse_valor, parse_valor_ou_zero};
 
 mod pix;
+mod webhook;
 
 pub(crate) use pix::{
     DescontoAte, DevedorCobvArgs, EncargosCobvArgs, Momento, PeriodoJuros, PeriodoPixArgs,
@@ -35,6 +36,10 @@ pub(crate) use pix::{
     PixLoteCobvListarArgs, PixLoteCobvSituacaoArgs, PixPagarQrcodeArgs, PixRecebidoConsultarArgs,
     PixRecebidosCommand, PixRecebidosListarArgs, PixSandboxCommand, PixSandboxPagarArgs, SimNao,
     StatusCobArg,
+};
+pub(crate) use webhook::{
+    WebhookBankingCommand, WebhookCadastroArgs, WebhookCobrancaCommand, WebhookCommand,
+    WebhookExclusaoArgs, WebhookPixCommand,
 };
 
 const AFTER_HELP: &str = "\
@@ -315,6 +320,13 @@ pub(crate) enum Command {
         subcommand_value_name = "COMANDO"
     )]
     Cobranca(CobrancaCommand),
+    /// Webhooks: os endereços que o Inter chama quando algo acontece na conta
+    #[command(
+        subcommand,
+        subcommand_help_heading = "Comandos",
+        subcommand_value_name = "COMANDO"
+    )]
+    Webhook(WebhookCommand),
     /// Tokens de acesso OAuth
     #[command(
         subcommand,
@@ -352,6 +364,7 @@ impl Command {
             Self::Pix(_)
             | Self::Pagamento(_)
             | Self::Cobranca(_)
+            | Self::Webhook(_)
             | Self::Auth(_)
             | Self::Config(_) => false,
         }

@@ -83,6 +83,15 @@ pub(crate) enum CliError {
     /// received. Its charges have txids, so repeating it creates none twice.
     #[error("{source}")]
     LoteCobvIncerto { source: InterError, id: u64 },
+    /// A change of a webhook whose outcome is unknown: it may have been made.
+    #[error("{source}")]
+    WebhookIncerto {
+        source: InterError,
+        /// What may have happened: "o webhook pode ter sido cadastrado".
+        situacao: &'static str,
+        /// Command that shows the webhook.
+        consulta: String,
+    },
     /// `pix devolucao ... --aguardar`: the refund was not made.
     #[error("a devolução não foi feita: {motivo}")]
     DevolucaoNaoRealizada { motivo: String },
@@ -145,7 +154,8 @@ impl CliError {
             | Self::EmissaoIncerta { source: err, .. }
             | Self::CobrancaPixIncerta { source: err, .. }
             | Self::DevolucaoIncerta { source: err, .. }
-            | Self::LoteCobvIncerto { source: err, .. } => match err {
+            | Self::LoteCobvIncerto { source: err, .. }
+            | Self::WebhookIncerto { source: err, .. } => match err {
                 InterError::InvalidInput(_) => exit::USAGE,
                 InterError::Config(_) | InterError::Identity(_) => exit::CONFIG,
                 InterError::Auth(_) => exit::AUTH,
@@ -216,6 +226,11 @@ impl CliError {
                     "repetir o comando não duplica cobranças: com o mesmo txid, a API não cria outra"
                         .to_owned(),
                 ];
+            }
+            Self::WebhookIncerto {
+                situacao, consulta, ..
+            } => {
+                return vec![format!("{situacao}: confira com {consulta}")];
             }
             Self::EmissaoIncerta { consulta, .. } => {
                 return vec![

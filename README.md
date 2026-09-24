@@ -811,6 +811,51 @@ erro: a devolução de R$ 260,00 passa do que resta do Pix: R$ 250,00 de R$ 300,
 
 `--natureza retirada` devolve o dinheiro de um Pix Saque ou o troco de um Pix Troco (o padrão, `original`, é o do Pix comum), e `--descricao` (até 140 caracteres) vai para o pagador. A devolução é processada depois do pedido: `pix devolucao consultar` mostra em que pé ela está e, com `--aguardar` (aceito também por `solicitar`), consulta a cada 6 segundos até o fim, saindo com o código 0 (devolvida), 5 (não realizada, com o motivo) ou 8 (o tempo acabou; padrão: 60s). Devolver precisa do escopo `pix.write`, além de `pix.read` para a consulta.
 
+### Webhooks
+
+Webhooks são os endereços que o Inter chama quando algo acontece na conta. Cada API tem os seus:
+
+| Comando | O Inter notifica | Escopos |
+| --- | --- | --- |
+| `webhook banking ... pix-pagamento` | os Pix enviados pela conta | `webhook-banking.write` e `webhook-banking.read` |
+| `webhook banking ... boleto-pagamento` | os boletos pagos pela conta | `webhook-banking.write` e `webhook-banking.read` |
+| `webhook cobranca ...` | as cobranças recebidas, canceladas e expiradas | `boleto-cobranca.write` e `boleto-cobranca.read` |
+| `webhook pix ... CHAVE` | as cobranças Pix pagas, com um webhook por chave Pix | `webhook.write` e `webhook.read` |
+
+```console
+$ inter-pj webhook cobranca cadastrar --url https://novo.empresa.example/inter/cobrancas
+Webhook de cobranças a trocar
+  Ambiente   sandbox (dados fictícios)
+  Notifica   cobranças recebidas, canceladas e expiradas
+  URL atual  https://api.empresa.example/inter/cobrancas
+  Nova URL   https://novo.empresa.example/inter/cobrancas
+aviso: as notificações passam a ir para novo.empresa.example, e não mais para api.empresa.example
+Trocar a URL do webhook? [s/N] s
+Webhook cadastrado: o Inter passa a notificar cobranças recebidas, canceladas e expiradas em https://novo.empresa.example/inter/cobrancas.
+
+Confira com: inter-pj webhook cobranca consultar
+
+$ inter-pj webhook pix cadastrar pix@empresa.example --url https://api.empresa.example/inter/pix-cobrancas
+$ inter-pj webhook pix consultar pix@empresa.example
+Webhook da chave pix@empresa.example
+  Notifica       cobranças Pix pagas (imediatas e com vencimento)
+  URL            https://api.empresa.example/inter/pix-cobrancas
+  Cadastrado em  24/09/2026 10:15:00
+
+$ inter-pj webhook banking consultar                  # os dois tipos
+$ inter-pj webhook banking excluir pix-pagamento
+Webhook do tipo pix-pagamento a excluir
+  Ambiente       sandbox (dados fictícios)
+  Notifica       Pix enviados pela conta
+  URL            https://api.empresa.example/inter/pix
+  Cadastrado em  01/09/2026 09:00:00
+aviso: o Inter deixa de notificar Pix enviados pela conta
+Excluir o webhook? [s/N] s
+Webhook excluído: o Inter deixa de notificar Pix enviados pela conta.
+```
+
+A URL precisa começar com `https://`, e o Inter precisa alcançá-la pela internet: a CLI a confere antes de qualquer requisição e avisa quando ela aponta para um endereço local ou de rede privada. `cadastrar` consulta o webhook atual e mostra o antes e o depois, porque a nova URL passa a receber as notificações dos pagamentos da conta; cadastrar a mesma URL não muda nada. `cadastrar` e `excluir` pedem confirmação (sem terminal, `--sim`). Quando o servidor do webhook não aceita uma notificação, o Inter tenta de novo até 4 vezes: 20, 30, 60 e 120 minutos depois (no Banking, 5, 10, 30 e 60).
+
 ### Formatos de saída
 
 | Formato | Para quê |
