@@ -12,13 +12,12 @@ use inter_pj::cobranca::{
     CobrancaDetalhada, EncargoCobranca, OrigemRecebimento, SituacaoCobranca, TipoCobranca,
 };
 use inter_pj::documento::Documento;
-use rust_decimal::Decimal;
 
 use super::Context;
 use crate::cli::CobrancaCommand;
 use crate::confirmacao::Stdio;
 use crate::error::CliError;
-use crate::output::{self, data_br};
+use crate::output::{self, data_br, percentual};
 
 pub(super) async fn run(context: &Context, command: CobrancaCommand) -> Result<(), CliError> {
     match command {
@@ -69,11 +68,6 @@ fn descrever_tipo(tipo: &TipoCobranca) -> &str {
         TipoCobranca::Recorrente => "recorrente",
         outro => outro.as_str(),
     }
-}
-
-/// `2,5%`.
-pub(crate) fn percentual(taxa: Decimal) -> String {
-    format!("{}%", taxa.normalize()).replace('.', ",")
 }
 
 /// A discount, fine or interest in words: `2% até 5 dias antes do
