@@ -1118,7 +1118,7 @@ Mensagens de erro vão para `stderr`, em português, com a explicação da API e
 - Segredos são mantidos em tipos que não aparecem em logs nem em mensagens de erro.
 - TLS com [rustls](https://github.com/rustls/rustls) (sem OpenSSL), mTLS obrigatório e somente `https`.
 
-Detalhes e como reportar vulnerabilidades em [`SECURITY.md`](SECURITY.md).
+Detalhes e como reportar vulnerabilidades em [`SECURITY.md`](SECURITY.md); o modelo de ameaças e os achados da revisão de segurança da 1.0.0, com as correções, em [`docs/seguranca.md`](docs/seguranca.md).
 
 ## Desenvolvimento
 
