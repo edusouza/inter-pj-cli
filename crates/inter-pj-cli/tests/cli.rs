@@ -97,6 +97,29 @@ async fn data_em_formato_invalido_e_erro_de_uso() {
         .stderr(predicate::str::contains("AAAA-MM-DD"));
 }
 
+/// The errors of the parser are in Portuguese, like every other, and go to
+/// stderr with the exit code of a usage error.
+#[tokio::test(flavor = "multi_thread")]
+async fn erros_de_uso_em_portugues() {
+    let env = TestEnv::new().await;
+    env.cmd()
+        .args(["saldo", "--dat", "2026-08-31"])
+        .assert()
+        .code(2)
+        .stdout("")
+        .stderr(
+            "\
+erro: argumento inesperado '--dat'
+
+  dica: há uma opção parecida: '--data'
+
+Uso: inter-pj saldo [OPÇÕES]
+
+Para mais informações, use '--help'.
+",
+        );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn conta_corrente_do_perfil_e_da_flag_vao_no_cabecalho() {
     let env = TestEnv::new().await;
