@@ -4,21 +4,26 @@
 //! Pix the account sends, [`recebidos`], the Pix it received and their
 //! refunds, [`pagamentos`], the boletos, bills and taxes it pays,
 //! [`cobranca`], the charges it issues to its clients, [`cob`], the
-//! immediate Pix charges, and [`cobv`], those with a due date. The data
-//! tell one story: the balance follows from the statement, the Pix
-//! received, the bills paid and the charges paid before are those of the
-//! statement, and what is sent, refunded, paid or issued can be queried.
-//! Every name, document, key and amount is synthetic.
+//! immediate Pix charges, [`cobv`], those with a due date, and [`loc`], the
+//! locations of their QR Codes, which share one state
+//! ([`cobrancas_pix`]). The data tell one story: the balance follows from
+//! the statement, the Pix received, the bills paid and the charges paid
+//! before are those of the statement, and what is sent, refunded, paid or
+//! issued can be queried. Every name, document, key and amount is
+//! synthetic.
 
 mod cob;
 mod cobranca;
+mod cobrancas_pix;
 mod cobv;
 mod conta;
+mod loc;
 mod pagamentos;
 mod pix;
 mod recebidos;
 
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use serde_json::json;
 use wiremock::matchers::{header, method, path};
@@ -44,8 +49,10 @@ impl Banco {
         recebidos::montar(&servidor).await;
         pagamentos::montar(&servidor).await;
         cobranca::montar(&servidor).await;
-        cob::montar(&servidor).await;
-        cobv::montar(&servidor).await;
+        let cobrancas = Arc::new(Mutex::new(cobrancas_pix::Cobrancas::novo()));
+        cob::montar(&servidor, &cobrancas).await;
+        cobv::montar(&servidor, &cobrancas).await;
+        loc::montar(&servidor, &cobrancas).await;
         Self { servidor }
     }
 

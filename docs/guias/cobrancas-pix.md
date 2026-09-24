@@ -287,7 +287,7 @@ Cobrança Pix com vencimento nota0931empresaexemplo2026
   Valor        R$ 1.850,00
   Vencimento   20/10/2026
   Validade     até 19/11/2026, 30 dias após o vencimento
-  Criada em    24/09/2026 10:20:07
+  Criada em    24/09/2026 10:19:12
   Devedor      Cliente Exemplo Ltda (11.222.333/0001-81)
   Endereço     Avenida Brasil, 1200, sala 3 - Belo Horizonte/MG - CEP 30110-000
   E-mail       financeiro@cliente.example
@@ -378,7 +378,7 @@ Cobrança Pix com vencimento mensalidade202610fulanodetal
   Valor        R$ 450,00
   Vencimento   10/10/2026
   Validade     até 20/10/2026, 10 dias após o vencimento
-  Criada em    24/09/2026 10:26:07
+  Criada em    24/09/2026 10:26:12
   Devedor      Fulano de Tal (123.456.789-09)
   Endereço     Rua da Bahia, 1000 - Belo Horizonte/MG - CEP 30160-011
   Recebedor    Empresa Exemplo Ltda (11.444.777/0001-61)
@@ -440,7 +440,7 @@ Cobrança Pix com vencimento nota0931empresaexemplo2026
   Valor        R$ 1.850,00
   Vencimento   30/10/2026
   Validade     até 29/11/2026, 30 dias após o vencimento
-  Criada em    24/09/2026 10:20:07
+  Criada em    24/09/2026 10:19:12
   Devedor      Cliente Exemplo Ltda (11.222.333/0001-81)
   Endereço     Avenida Brasil, 1200, sala 3 - Belo Horizonte/MG - CEP 30110-000
   E-mail       financeiro@cliente.example
