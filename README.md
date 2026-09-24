@@ -630,6 +630,61 @@ Vencimento  Status                Valor  Devedor               txid
 
 A listagem tem os filtros de `pix cob listar` e também `--lote ID`; em CSV, os encargos aparecem com a modalidade e o valor (`valor.multa.modalidade`, `valor.multa.valorPerc`), e os descontos por data, só no JSON.
 
+Muitas cobranças com vencimento podem ser criadas ou alteradas de uma vez, em um lote, a partir de um arquivo JSON (nos campos da API) ou de uma planilha CSV (uma cobrança por linha; as colunas têm os caminhos dos campos da API, como `valor.multa.valorPerc`). Antes de enviar, a CLI confere todas as cobranças e, se alguma tiver problema, recusa o arquivo inteiro, apontando a linha e o campo de cada uma:
+
+```console
+$ inter-pj pix lote-cobv modelo csv > lote.csv     # ou "modelo" para JSON; dados fictícios, vencendo em 30 dias
+$ inter-pj pix lote-cobv criar 42 --arquivo lote.csv --descricao "Mensalidades de outubro"
+Lote de cobranças com vencimento a criar
+  Ambiente     sandbox (dados fictícios)
+  Lote         42
+  Descrição    Mensalidades de outubro
+  Cobranças    2
+  Valor total  R$ 239,90
+  Vencimentos  23/10/2026
+
+txid                          Vencimento      Valor  Devedor
+mensalidade202610cliente0001  23/10/2026  R$ 150,00  Cliente Exemplo Ltda
+mensalidade202610cliente0002  23/10/2026   R$ 89,90  Fulano de Tal
+Criar o lote de 2 cobranças? [s/N] s
+Lote 42 recebido: as 2 cobranças são criadas em instantes.
+
+Acompanhe com: inter-pj pix lote-cobv consultar 42 --aguardar
+
+$ inter-pj pix lote-cobv criar 43 --arquivo ruim.csv --descricao "Teste" --sim
+erro: ruim.csv: 3 cobranças com problema; nada foi enviado:
+  linha 2, campo "calendario.dataDeVencimento": obrigatório
+  linha 3, campo "calendario.dataDeVencimento": obrigatório
+  linha 4, campo "txid": txid inválido: use de 26 a 35 letras e dígitos, sem acentos, espaços, hífens ou símbolos
+```
+
+O id do lote é um número escolhido por você, e cada cobrança tem o seu txid, que não pode se repetir no arquivo; com o mesmo txid, a API não cria outra cobrança, e por isso repetir um lote de resultado incerto não duplica nada. Cada cobrança é conferida como em `pix cobv criar`, e vencimentos que já passaram são recusados. A descrição vem do arquivo JSON ou de `--descricao` (obrigatória com CSV). No CSV, o Excel costuma estragar números longos (notação científica) e tirar zeros à esquerda de CPF, CNPJ e CEP: a mensagem diz quando isso aconteceu. As informações adicionais só existem no JSON.
+
+`revisar` envia as mudanças de cobranças do lote, no mesmo formato: só muda o que estiver no arquivo (uma célula vazia não muda nada), e `status` com `REMOVIDA_PELO_USUARIO_RECEBEDOR` remove a cobrança. Um calendário novo precisa do vencimento, porque a CLI não consulta cada cobrança. Os dois pedem confirmação (sem terminal, ou com `--arquivo -`, exigem `--sim`) e aceitam `--simular`.
+
+O lote é processado depois do pedido, e cada cobrança é criada ou negada:
+
+```console
+$ inter-pj pix lote-cobv consultar 42
+Lote 42: Mensalidades de outubro
+  Criado em  24/09/2026 10:10:00
+  Cobranças  2 · 1 criada · 1 negada
+
+txid                          Situação  Criada em
+mensalidade202610cliente0001  criada    24/09/2026 10:10:03
+mensalidade202610cliente0002  negada
+
+Problemas
+  mensalidade202610cliente0002  Cobrança inválida. cobv.devedor.nome: O campo cobv.devedor.nome não respeita o schema.
+
+$ inter-pj pix lote-cobv consultar 42 --aguardar      # até nenhuma estar em processamento
+$ inter-pj pix lote-cobv sumario 42                   # totais do processamento
+$ inter-pj pix lote-cobv situacao 42 negada           # em-processamento, criada ou negada
+$ inter-pj pix lote-cobv listar --inicio 2026-09-01   # lotes do período, em texto, JSON ou CSV
+```
+
+Com `--aguardar`, a consulta sai com o código 0 se todas as cobranças foram criadas, 5 se alguma foi negada e 8 se o tempo acabou (padrão: 60s). Os escopos são `lotecobv.write` e `lotecobv.read`.
+
 O QR Code de uma cobrança leva a uma location, o endereço onde o banco do pagador busca os dados dela. A API cria uma para cada cobrança, mas uma location pode ser criada antes (para imprimir o QR Code, por exemplo) e usada depois com `--loc` em `pix cob criar`, `pix cobv criar` ou `revisar`:
 
 ```console
@@ -746,7 +801,7 @@ erro: a devolução de R$ 260,00 passa do que resta do Pix: R$ 250,00 de R$ 300,
 | --- | --- |
 | `texto` (padrão) | leitura: tabelas alinhadas, valores em `R$ 1.234,56`, datas `DD/MM/AAAA` |
 | `json` (ou `--json`) | automação: os nomes de campo da API e valores numéricos exatos |
-| `csv` | planilhas e scripts (`saldo`, `extrato` e as listagens de pagamentos, de cobranças, de cobranças Pix, de Pix recebidos e de locations): RFC 4180, datas `AAAA-MM-DD`, ponto decimal, saídas do extrato com valor negativo |
+| `csv` | planilhas e scripts (`saldo`, `extrato` e as listagens de pagamentos, de cobranças, de cobranças Pix e seus lotes, de Pix recebidos e de locations): RFC 4180, datas `AAAA-MM-DD`, ponto decimal, saídas do extrato com valor negativo |
 
 Para o Excel em português, use `--formato csv --separador ';'`: ponto e vírgula, vírgula decimal e UTF-8 com BOM. Textos vindos de terceiros que começam com `=`, `+`, `-` ou `@` (ex.: a mensagem de um Pix) recebem um apóstrofo no CSV, para não serem executados como fórmula pela planilha.
 
@@ -778,7 +833,7 @@ $ curl --cert certificado.crt --key chave.key \
 | 5 | requisição rejeitada pela API (400, 404, 409, 422); com `--aguardar`, Pix que terminou sem ser pago, lote processado com erro, cobrança que não foi emitida, alteração que não foi feita ou devolução não realizada |
 | 6 | serviço indisponível, limite de requisições (429), erro 5xx ou falha de rede |
 | 7 | operação cancelada na confirmação (nada foi enviado) |
-| 8 | `pix consultar`, `pagamento lote consultar`, `cobranca emitir`, `cobranca editar`, `cobranca edicao` ou `pix devolucao` com `--aguardar`: tempo esgotado antes de um status final |
+| 8 | `pix consultar`, `pagamento lote consultar`, `cobranca emitir`, `cobranca editar`, `cobranca edicao`, `pix devolucao` ou `pix lote-cobv consultar` com `--aguardar`: tempo esgotado antes de um status final |
 
 Mensagens de erro vão para `stderr`, em português, com a explicação da API e dicas. Com `-v`/`-vv` a CLI mostra detalhes das requisições (método, caminho, status e tempo) — nunca tokens, segredos ou corpos de resposta.
 

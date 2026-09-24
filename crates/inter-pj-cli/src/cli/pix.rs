@@ -1,5 +1,5 @@
 //! `inter-pj pix` commands of the Pix API (`/pix/v2`): the charges, the Pix
-//! received and their refunds, and the locations.
+//! received and their refunds, the locations and the batches.
 //!
 //! Doc comments here are `--help` text too (in Portuguese).
 
@@ -11,8 +11,8 @@ use clap::{ArgAction, ArgGroup, Args, Subcommand, ValueEnum};
 use inter_pj::cobranca::Uf;
 use inter_pj::documento::Documento;
 use inter_pj::pix::{
-    ChavePix, IdDevolucao, IdDevolucaoError, InfoAdicional, NaturezaDevolucao, TipoCob, Txid,
-    TxidError,
+    ChavePix, IdDevolucao, IdDevolucaoError, InfoAdicional, NaturezaDevolucao, StatusCobvLote,
+    TipoCob, Txid, TxidError,
 };
 use rust_decimal::Decimal;
 
@@ -825,6 +825,133 @@ pub(crate) struct PixLocDesvincularArgs {
     /// Confirma sem perguntar (para scripts)
     #[arg(long, help_heading = "Segurança")]
     pub(crate) sim: bool,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum PixLoteCobvCommand {
+    /// Cria um lote de cobranças com vencimento a partir de um arquivo JSON ou CSV, após mostrar um resumo e pedir confirmação
+    Criar(PixLoteCobvArquivoArgs),
+    /// Altera cobranças de um lote a partir de um arquivo JSON ou CSV, após mostrar um resumo e pedir confirmação
+    Revisar(PixLoteCobvArquivoArgs),
+    /// Mostra um lote e em que pé está cada cobrança (com --aguardar, até o fim do processamento)
+    Consultar(PixLoteCobvConsultarArgs),
+    /// Lotes criados em um período (padrão: últimos 30 dias)
+    Listar(PixLoteCobvListarArgs),
+    /// Totais do processamento de um lote
+    Sumario(PixLoteCobvIdArgs),
+    /// As cobranças de um lote em uma situação: em-processamento, criada ou negada
+    Situacao(PixLoteCobvSituacaoArgs),
+    /// Imprime um arquivo de exemplo para `pix lote-cobv criar`: json (padrão) ou csv
+    Modelo(super::LoteModeloArgs),
+}
+
+/// `criar` and `revisar`: the batch and its file.
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Lote")]
+pub(crate) struct PixLoteCobvArquivoArgs {
+    /// id do lote, um número escolhido por você
+    #[arg(value_name = "ID")]
+    pub(crate) id: u64,
+
+    /// Arquivo JSON, nos campos da API, ou CSV, uma cobrança por linha com os nomes da API nas colunas ("-" para a entrada padrão); veja `pix lote-cobv modelo`
+    #[arg(long, value_name = "ARQUIVO")]
+    pub(crate) arquivo: PathBuf,
+
+    /// Descrição do lote; obrigatória na criação quando o arquivo não a tem (CSV)
+    #[arg(long, value_name = "TEXTO")]
+    pub(crate) descricao: Option<String>,
+
+    /// Confirma sem perguntar (para scripts)
+    #[arg(long, conflicts_with = "simular", help_heading = "Segurança")]
+    pub(crate) sim: bool,
+
+    /// Mostra a requisição que seria enviada, sem enviar nada
+    #[arg(long, help_heading = "Segurança")]
+    pub(crate) simular: bool,
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct PixLoteCobvConsultarArgs {
+    /// id do lote
+    #[arg(value_name = "ID")]
+    pub(crate) id: u64,
+
+    /// Consulta a cada 6 segundos até nenhuma cobrança do lote estar em processamento
+    #[arg(long)]
+    pub(crate) aguardar: bool,
+
+    /// Tempo máximo de espera com --aguardar: 60s, 5m [padrão: 60s]
+    #[arg(
+        long,
+        value_name = "DURACAO",
+        value_parser = parse_duracao,
+        default_value = "60s",
+        hide_default_value = true,
+        requires = "aguardar"
+    )]
+    pub(crate) timeout: Duration,
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct PixLoteCobvListarArgs {
+    #[command(flatten)]
+    pub(crate) periodo: PeriodoPixArgs,
+
+    /// Traz só esta página (a primeira é 0), em vez de todas
+    #[arg(long, value_name = "N")]
+    pub(crate) pagina: Option<u32>,
+
+    /// Itens por página com --pagina, de 1 a 1000 [padrão da API: 100]
+    #[arg(long, value_name = "N", requires = "pagina")]
+    pub(crate) itens_por_pagina: Option<u32>,
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct PixLoteCobvIdArgs {
+    /// id do lote
+    #[arg(value_name = "ID")]
+    pub(crate) id: u64,
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct PixLoteCobvSituacaoArgs {
+    /// id do lote
+    #[arg(value_name = "ID")]
+    pub(crate) id: u64,
+
+    /// em-processamento, criada ou negada
+    #[arg(
+        value_name = "SITUACAO",
+        value_enum,
+        ignore_case = true,
+        hide_possible_values = true
+    )]
+    pub(crate) situacao: SituacaoLoteArg,
+}
+
+/// The situation of a charge of a batch, with the API's codes as aliases.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum SituacaoLoteArg {
+    #[value(alias = "EM_PROCESSAMENTO")]
+    EmProcessamento,
+    #[value(alias = "CRIADA")]
+    Criada,
+    #[value(alias = "NEGADA")]
+    Negada,
+}
+
+impl From<SituacaoLoteArg> for StatusCobvLote {
+    fn from(situacao: SituacaoLoteArg) -> Self {
+        match situacao {
+            SituacaoLoteArg::EmProcessamento => Self::EmProcessamento,
+            SituacaoLoteArg::Criada => Self::Criada,
+            SituacaoLoteArg::Negada => Self::Negada,
+        }
+    }
 }
 
 /// `--inicio` and `--fim` of the Pix listings.
