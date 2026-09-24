@@ -216,35 +216,7 @@ Os lotes de 2 a 150 boletos, contas, tributos e DARFs, a partir de uma planilha 
 
 ### Cobranças
 
-Emitir cobranças, que são boletos com Pix para os clientes da empresa, está no guia [Cobranças](docs/guias/cobrancas.md): pelas opções ou por um arquivo JSON com os campos da API (`cobranca modelo`), com o resumo e a confirmação, a espera pela emissão, o boleto e o Pix da cobrança emitida, o QR Code no terminal ou numa imagem, o PDF, o prazo depois do vencimento (`--dias-agenda`), a listagem de um período com os seus filtros e o resumo por situação. Emitir precisa do escopo `boleto-cobranca.write`, e consultar e listar, do `boleto-cobranca.read`.
-
-Não há chave de idempotência, mas, por 30 minutos, a API recusa outra cobrança com o mesmo seu número, valor, vencimento e pagador. Se o resultado da emissão ficar incerto, o erro traz o comando que procura a cobrança (`cobranca listar --filtrar-por emissao --seu-numero NF-123`) para conferir antes de tentar de novo.
-
-Uma cobrança ainda não paga pode ser cancelada ou ter o valor e o vencimento alterados. Nos dois casos, a CLI primeiro consulta a cobrança e mostra o que vai mudar, e cobranças pagas, canceladas ou expiradas são recusadas sem nenhuma alteração:
-
-```console
-$ inter-pj cobranca editar 0b7e4c1a-5d3f-4a2b-9c8d-7e6f5a4b3c2d --valor 200,00 --vencimento 2026-11-10
-Cobrança a alterar
-  Ambiente    sandbox (dados fictícios)
-  Seu número  NF-123
-  Situação    a receber
-  Valor       R$ 150,00 → R$ 200,00
-  Vencimento  20/10/2026 → 10/11/2026
-  Pagador     Cliente Exemplo Ltda (12.345.678/0001-95)
-  Código      0b7e4c1a-5d3f-4a2b-9c8d-7e6f5a4b3c2d
-aviso: a consulta pode levar até 30 minutos para mostrar o novo valor ou vencimento
-Alterar a cobrança? [s/N] s
-Alteração em processamento.
-Código da alteração  5a6b7c8d-1e2f-4a3b-8c9d-0e1f2a3b4c5d
-
-Acompanhe com: inter-pj cobranca edicao 5a6b7c8d-1e2f-4a3b-8c9d-0e1f2a3b4c5d --aguardar
-
-$ inter-pj cobranca cancelar 0b7e4c1a-5d3f-4a2b-9c8d-7e6f5a4b3c2d --motivo "Pedido cancelado"
-```
-
-A API altera só o valor (de R$ 2,50 a R$ 99.999.999,99) e o vencimento (hoje ou depois). A alteração é processada depois do pedido: `cobranca edicao` mostra em que pé ela está e, com `--aguardar` (aceito também por `editar`), consulta a cada 6 segundos até o fim, saindo com o código 0 (feita), 5 (não foi feita) ou 8 (o tempo acabou; padrão: 60s). Mesmo feita, a alteração pode levar até 30 minutos para aparecer em `cobranca consultar`. O motivo do cancelamento tem até 50 caracteres. Os dois comandos pedem confirmação (sem terminal, exigem `--sim`, e nesse caso nem a consulta é feita) e precisam do escopo `boleto-cobranca.write`, além de `boleto-cobranca.read` para a consulta; a API aceita até 10 alterações por minuto.
-
-No sandbox, `cobranca pagar <codigo> --com boleto` (ou `pix`) paga uma cobrança, para testar o fluxo inteiro: emitir, pagar, consultar e, com um webhook cadastrado, receber a notificação. Em produção, quem paga é o cliente, e o comando é recusado antes de qualquer requisição. O pagamento precisa do escopo `boleto-cobranca.write`.
+Emitir cobranças, que são boletos com Pix para os clientes da empresa, está no guia [Cobranças](docs/guias/cobrancas.md): pelas opções ou por um arquivo JSON com os campos da API (`cobranca modelo`), com o resumo e a confirmação, a espera pela emissão, o boleto e o Pix da cobrança emitida, o QR Code no terminal ou numa imagem, o PDF, o prazo depois do vencimento (`--dias-agenda`), a listagem de um período com os seus filtros, o resumo por situação, a alteração do valor ou do vencimento, o cancelamento, a conferência de uma emissão de resultado incerto e o pagamento no sandbox. Emitir, alterar e cancelar precisam do escopo `boleto-cobranca.write`, e consultar e listar, do `boleto-cobranca.read`.
 
 ### Cobranças Pix
 
