@@ -29,7 +29,8 @@ pub(crate) use pix::{
     DescontoAte, DevedorCobvArgs, EncargosCobvArgs, Momento, PeriodoJuros, PeriodoPixArgs,
     PixCobCommand, PixCobConsultarArgs, PixCobCriarArgs, PixCobListarArgs, PixCobRevisarArgs,
     PixCobvCommand, PixCobvConsultarArgs, PixCobvCriarArgs, PixCobvListarArgs, PixCobvRevisarArgs,
-    SimNao, StatusCobArg,
+    PixDevolucaoCommand, PixDevolucaoConsultarArgs, PixDevolucaoSolicitarArgs,
+    PixRecebidoConsultarArgs, PixRecebidosCommand, PixRecebidosListarArgs, SimNao, StatusCobArg,
 };
 
 const AFTER_HELP: &str = "\
@@ -338,7 +339,8 @@ impl Command {
             | Self::Cobranca(CobrancaCommand::Listar(_) | CobrancaCommand::Sumario(_))
             | Self::Pix(
                 PixCommand::Cob(PixCobCommand::Listar(_))
-                | PixCommand::Cobv(PixCobvCommand::Listar(_)),
+                | PixCommand::Cobv(PixCobvCommand::Listar(_))
+                | PixCommand::Recebidos(PixRecebidosCommand::Listar(_)),
             ) => true,
             Self::Extrato(args) => !matches!(args.comando, Some(ExtratoCommand::Pdf(_))),
             Self::Pix(_)
@@ -518,6 +520,20 @@ pub(crate) enum PixCommand {
         subcommand_value_name = "COMANDO"
     )]
     Cobv(PixCobvCommand),
+    /// Pix recebidos pela conta, com as suas devoluções
+    #[command(
+        subcommand,
+        subcommand_help_heading = "Comandos",
+        subcommand_value_name = "COMANDO"
+    )]
+    Recebidos(PixRecebidosCommand),
+    /// Devoluções de Pix recebidos: tiram dinheiro da conta
+    #[command(
+        subcommand,
+        subcommand_help_heading = "Comandos",
+        subcommand_value_name = "COMANDO"
+    )]
+    Devolucao(PixDevolucaoCommand),
 }
 
 #[derive(Debug, Args)]
