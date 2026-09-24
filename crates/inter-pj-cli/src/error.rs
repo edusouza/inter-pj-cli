@@ -70,6 +70,18 @@ pub(crate) enum CliError {
         tipo: &'static str,
         txid: String,
     },
+    /// A refund whose outcome is unknown: the money may have left. With the
+    /// same id, the API does not refund again.
+    #[error("{source}")]
+    DevolucaoIncerta {
+        source: InterError,
+        /// End-to-end id of the Pix refunded.
+        e2e: String,
+        id: String,
+    },
+    /// `pix devolucao ... --aguardar`: the refund was not made.
+    #[error("a devolução não foi feita: {motivo}")]
+    DevolucaoNaoRealizada { motivo: String },
     /// `cobranca emitir --aguardar`: the API could not issue the charge.
     #[error("a cobrança não foi emitida: {situacao}")]
     CobrancaNaoEmitida { situacao: String },
@@ -120,13 +132,15 @@ impl CliError {
             Self::PixNaoPago { .. }
             | Self::LoteComErro { .. }
             | Self::CobrancaNaoEmitida { .. }
-            | Self::EdicaoNaoFeita { .. } => exit::REJECTED,
+            | Self::EdicaoNaoFeita { .. }
+            | Self::DevolucaoNaoRealizada { .. } => exit::REJECTED,
             Self::TempoEsgotado { .. } => exit::WAIT_TIMEOUT,
             Self::Inter(err)
             | Self::ResultadoIncerto { source: err, .. }
             | Self::PagamentoIncerto { source: err, .. }
             | Self::EmissaoIncerta { source: err, .. }
-            | Self::CobrancaPixIncerta { source: err, .. } => match err {
+            | Self::CobrancaPixIncerta { source: err, .. }
+            | Self::DevolucaoIncerta { source: err, .. } => match err {
                 InterError::InvalidInput(_) => exit::USAGE,
                 InterError::Config(_) | InterError::Identity(_) => exit::CONFIG,
                 InterError::Auth(_) => exit::AUTH,
@@ -179,6 +193,14 @@ impl CliError {
                         .to_owned(),
                     format!("confira com: inter-pj pix {tipo} consultar {txid}"),
                     format!("ou repita o comando com --txid {txid}"),
+                ];
+            }
+            Self::DevolucaoIncerta { e2e, id, .. } => {
+                return vec![
+                    "a devolução pode ter sido feita; com o mesmo id, a API não devolve de novo"
+                        .to_owned(),
+                    format!("confira com: inter-pj pix devolucao consultar {e2e} {id}"),
+                    format!("ou repita o comando com --id {id}"),
                 ];
             }
             Self::EmissaoIncerta { consulta, .. } => {

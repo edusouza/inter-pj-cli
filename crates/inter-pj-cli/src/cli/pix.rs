@@ -1,18 +1,23 @@
-//! `inter-pj pix` commands of the Pix API (`/pix/v2`): the charges.
+//! `inter-pj pix` commands of the Pix API (`/pix/v2`): the charges, the Pix
+//! received and their refunds.
 //!
 //! Doc comments here are `--help` text too (in Portuguese).
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use chrono::{DateTime, FixedOffset, NaiveDate};
 use clap::{ArgAction, ArgGroup, Args, Subcommand, ValueEnum};
 use inter_pj::cobranca::Uf;
 use inter_pj::documento::Documento;
-use inter_pj::pix::{ChavePix, InfoAdicional, Txid, TxidError};
+use inter_pj::pix::{
+    ChavePix, IdDevolucao, IdDevolucaoError, InfoAdicional, NaturezaDevolucao, Txid, TxidError,
+};
 use rust_decimal::Decimal;
 
 use super::{
-    TaxaOuValor, parse_cep, parse_chave, parse_data, parse_documento, parse_taxa_ou_valor, parse_uf,
+    TaxaOuValor, parse_cep, parse_chave, parse_data, parse_documento, parse_duracao,
+    parse_taxa_ou_valor, parse_uf,
 };
 use crate::valor::parse_valor;
 
@@ -539,6 +544,186 @@ pub(crate) struct PixCobvListarArgs {
     pub(crate) lote: Option<u32>,
 }
 
+#[derive(Debug, Subcommand)]
+pub(crate) enum PixRecebidosCommand {
+    /// Pix recebidos em um período (padrão: últimos 30 dias), com filtros
+    Listar(PixRecebidosListarArgs),
+    /// Mostra um Pix recebido e as suas devoluções
+    Consultar(PixRecebidoConsultarArgs),
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct PixRecebidosListarArgs {
+    #[command(flatten)]
+    pub(crate) periodo: PeriodoPixArgs,
+
+    /// Apenas os Pix desta cobrança
+    #[arg(long, value_name = "TXID", value_parser = parse_txid)]
+    pub(crate) txid: Option<Txid>,
+
+    #[command(flatten)]
+    pub(crate) cobranca: ComSemCobrancaArgs,
+
+    #[command(flatten)]
+    pub(crate) devolucao: ComSemDevolucaoArgs,
+
+    /// Apenas deste pagador (CPF ou CNPJ)
+    #[arg(long, value_name = "CPF/CNPJ", value_parser = parse_documento)]
+    pub(crate) documento: Option<Documento>,
+
+    /// Traz só esta página (a primeira é 0), em vez de todas
+    #[arg(long, value_name = "N")]
+    pub(crate) pagina: Option<u32>,
+
+    /// Itens por página com --pagina, de 1 a 1000 [padrão da API: 100]
+    #[arg(long, value_name = "N", requires = "pagina")]
+    pub(crate) itens_por_pagina: Option<u32>,
+}
+
+/// `--com-cobranca` or `--sem-cobranca`.
+#[derive(Debug, Clone, Copy, Args)]
+pub(crate) struct ComSemCobrancaArgs {
+    /// Apenas os Pix de cobranças (com txid)
+    #[arg(long, conflicts_with_all = ["sem_cobranca", "txid"])]
+    pub(crate) com_cobranca: bool,
+
+    /// Apenas os Pix sem cobrança (sem txid)
+    #[arg(long, conflicts_with = "txid")]
+    pub(crate) sem_cobranca: bool,
+}
+
+/// `--com-devolucao` or `--sem-devolucao`.
+#[derive(Debug, Clone, Copy, Args)]
+pub(crate) struct ComSemDevolucaoArgs {
+    /// Apenas os Pix com alguma devolução
+    #[arg(long, conflicts_with = "sem_devolucao")]
+    pub(crate) com_devolucao: bool,
+
+    /// Apenas os Pix sem devolução
+    #[arg(long)]
+    pub(crate) sem_devolucao: bool,
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct PixRecebidoConsultarArgs {
+    /// endToEndId do Pix, mostrado por `pix recebidos listar` e no extrato
+    #[arg(value_name = "E2EID", value_parser = parse_e2e)]
+    pub(crate) e2e: String,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum PixDevolucaoCommand {
+    /// Devolve um Pix recebido, todo ou em parte, após mostrar um resumo e pedir confirmação
+    Solicitar(Box<PixDevolucaoSolicitarArgs>),
+    /// Mostra em que pé está uma devolução (com --aguardar, até o fim)
+    Consultar(PixDevolucaoConsultarArgs),
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Devolução")]
+#[command(group(
+    ArgGroup::new("quanto")
+        .required(true)
+        .args(["valor", "tudo"])
+))]
+pub(crate) struct PixDevolucaoSolicitarArgs {
+    /// endToEndId do Pix recebido, mostrado por `pix recebidos listar`
+    #[arg(value_name = "E2EID", value_parser = parse_e2e)]
+    pub(crate) e2e: String,
+
+    /// Valor a devolver: 150,00, 1.500,00 ou 150.00
+    #[arg(long, value_name = "VALOR", value_parser = parse_valor)]
+    pub(crate) valor: Option<Decimal>,
+
+    /// Devolve tudo o que ainda não foi devolvido do Pix
+    #[arg(long, conflicts_with = "simular")]
+    pub(crate) tudo: bool,
+
+    /// O que devolver: original (um Pix comum, ou a compra de um Pix Troco) ou retirada (o dinheiro de um Pix Saque, ou o troco) [padrão da API: original]
+    #[arg(
+        long,
+        value_name = "NATUREZA",
+        value_enum,
+        ignore_case = true,
+        hide_possible_values = true
+    )]
+    pub(crate) natureza: Option<NaturezaArg>,
+
+    /// Mensagem ao pagador, até 140 caracteres
+    #[arg(long, value_name = "TEXTO")]
+    pub(crate) descricao: Option<String>,
+
+    /// id da devolução, de 1 a 35 letras e dígitos [padrão: gerado]; repetir o comando com o mesmo id não devolve de novo
+    #[arg(long, value_name = "ID", value_parser = parse_id_devolucao)]
+    pub(crate) id: Option<IdDevolucao>,
+
+    #[command(flatten)]
+    pub(crate) espera: EsperaDevolucaoArgs,
+
+    /// Confirma sem perguntar (para scripts)
+    #[arg(long, conflicts_with = "simular", help_heading = "Segurança")]
+    pub(crate) sim: bool,
+
+    /// Mostra a requisição que seria enviada, sem enviar nada
+    #[arg(long, conflicts_with = "aguardar", help_heading = "Segurança")]
+    pub(crate) simular: bool,
+}
+
+/// `--natureza` of a refund.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum NaturezaArg {
+    #[value(alias = "ORIGINAL")]
+    Original,
+    #[value(alias = "RETIRADA")]
+    Retirada,
+}
+
+impl From<NaturezaArg> for NaturezaDevolucao {
+    fn from(natureza: NaturezaArg) -> Self {
+        match natureza {
+            NaturezaArg::Original => Self::Original,
+            NaturezaArg::Retirada => Self::Retirada,
+        }
+    }
+}
+
+/// `--aguardar` and `--timeout` of the refunds.
+#[derive(Debug, Clone, Copy, Args)]
+#[command(next_help_heading = "Espera")]
+pub(crate) struct EsperaDevolucaoArgs {
+    /// Consulta a cada 6 segundos até a devolução terminar, feita ou não
+    #[arg(long)]
+    pub(crate) aguardar: bool,
+
+    /// Tempo máximo de espera com --aguardar: 60s, 5m [padrão: 60s]
+    #[arg(
+        long,
+        value_name = "DURACAO",
+        value_parser = parse_duracao,
+        default_value = "60s",
+        hide_default_value = true,
+        requires = "aguardar"
+    )]
+    pub(crate) timeout: Duration,
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct PixDevolucaoConsultarArgs {
+    /// endToEndId do Pix devolvido
+    #[arg(value_name = "E2EID", value_parser = parse_e2e)]
+    pub(crate) e2e: String,
+
+    /// id da devolução, mostrado por `pix devolucao solicitar`
+    #[arg(value_name = "ID", value_parser = parse_id_devolucao)]
+    pub(crate) id: IdDevolucao,
+
+    #[command(flatten)]
+    pub(crate) espera: EsperaDevolucaoArgs,
+}
+
 /// `--inicio` and `--fim` of the Pix listings.
 #[derive(Debug, Clone, Copy, Args)]
 pub(crate) struct PeriodoPixArgs {
@@ -633,4 +818,20 @@ fn parse_desconto(value: &str) -> Result<DescontoAte, String> {
         valor: parse_taxa_ou_valor(valor)?,
         ate,
     })
+}
+
+/// The end-to-end id of a Pix: letters and digits (`E1234...`).
+fn parse_e2e(value: &str) -> Result<String, String> {
+    let id = value.trim();
+    if (1..=64).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_alphanumeric()) {
+        Ok(id.to_owned())
+    } else {
+        Err("endToEndId inválido: use as letras e os dígitos do identificador (ex.: E12345678202609231200abcdef12345)".to_owned())
+    }
+}
+
+fn parse_id_devolucao(value: &str) -> Result<IdDevolucao, String> {
+    value
+        .parse()
+        .map_err(|err: IdDevolucaoError| err.to_string())
 }

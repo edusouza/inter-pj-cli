@@ -780,7 +780,12 @@ async fn listar(context: &Context, args: &PixCobvListarArgs) -> Result<(), CliEr
                 let _ = write!(texto, "\n\n{}", totais(&cobs));
             }
             if let Some((numero, pagina)) = pagina {
-                texto.push_str(&paginacao(numero, &pagina.parametros, cobs.len()));
+                texto.push_str(&paginacao(
+                    numero,
+                    &pagina.parametros,
+                    cobs.len(),
+                    "cobranças",
+                ));
             }
             output::print(&texto)
         }

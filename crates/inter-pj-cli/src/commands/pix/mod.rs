@@ -4,15 +4,19 @@
 mod cob;
 mod cobv;
 mod consultar;
+mod devolucao;
 mod encargos;
 mod enviar;
+mod recebidos;
 
 use std::fmt::Write as _;
 
 use chrono::{DateTime, Days, FixedOffset, Local, NaiveDate, NaiveTime, TimeZone};
 use inter_pj::Error as InterError;
 use inter_pj::documento::Documento;
-use inter_pj::pix::{ParametrosConsulta, PeriodoPix, PessoaPix, PixRecebido, StatusCob, Txid};
+use inter_pj::pix::{
+    ParametrosConsulta, PeriodoPix, PessoaPix, PixRecebido, StatusCob, StatusDevolucao, Txid,
+};
 use rust_decimal::Decimal;
 
 use super::Context;
@@ -32,6 +36,8 @@ pub(super) async fn run(context: &Context, command: PixCommand) -> Result<(), Cl
         PixCommand::Consultar(args) => consultar::run(context, &args).await,
         PixCommand::Cob(command) => cob::run(context, command).await,
         PixCommand::Cobv(command) => cobv::run(context, command).await,
+        PixCommand::Recebidos(command) => recebidos::run(context, command).await,
+        PixCommand::Devolucao(command) => devolucao::run(context, command).await,
     }
 }
 
@@ -111,11 +117,7 @@ where
         Coluna::texto("endToEndId", ""),
     ]);
     for recebido in pix {
-        let devolvido: Decimal = recebido
-            .devolucoes
-            .iter()
-            .filter_map(|devolucao| devolucao.valor)
-            .sum();
+        let devolvido = devolvido(recebido);
         tabela.linha(vec![
             Celula::texto(
                 recebido
@@ -130,6 +132,46 @@ where
         ]);
     }
     tabela
+}
+
+/// What was refunded of a Pix: the refunds made.
+fn devolvido(pix: &PixRecebido) -> Decimal {
+    pix.devolucoes
+        .iter()
+        .filter(|devolucao| devolucao.status == Some(StatusDevolucao::Devolvido))
+        .filter_map(|devolucao| devolucao.valor)
+        .sum()
+}
+
+/// What is being refunded: the refunds neither made nor refused, those of
+/// unknown status included.
+fn em_devolucao(pix: &PixRecebido) -> Decimal {
+    pix.devolucoes
+        .iter()
+        .filter(|devolucao| {
+            !matches!(
+                devolucao.status,
+                Some(StatusDevolucao::Devolvido | StatusDevolucao::NaoRealizado)
+            )
+        })
+        .filter_map(|devolucao| devolucao.valor)
+        .sum()
+}
+
+/// What can still be refunded of a Pix, when its amount is known.
+fn disponivel(pix: &PixRecebido) -> Option<Decimal> {
+    pix.valor
+        .map(|valor| valor - devolvido(pix) - em_devolucao(pix))
+}
+
+/// A refund status in words: `NAO_REALIZADO` -> `não realizada`.
+fn descrever_status_devolucao(status: &StatusDevolucao) -> &str {
+    match status {
+        StatusDevolucao::EmProcessamento => "em processamento",
+        StatusDevolucao::Devolvido => "devolvida",
+        StatusDevolucao::NaoRealizado => "não realizada",
+        outro => outro.as_str(),
+    }
 }
 
 /// The error of a creation: with an unknown outcome, how to check and
@@ -266,15 +308,16 @@ fn totais<'a>(cobs: impl IntoIterator<Item = (Option<Decimal>, Option<&'a Status
 }
 
 /// Where the page asked for with `--pagina` stands among the others, from
-/// the parameters of the page and its number of charges.
-fn paginacao(numero: u32, parametros: &ParametrosConsulta, itens: usize) -> String {
+/// the parameters of the page and its number of items, `nome` in the
+/// period (`cobranças`).
+fn paginacao(numero: u32, parametros: &ParametrosConsulta, itens: usize, nome: &str) -> String {
     let mut texto = format!("\n\nPágina {numero}");
     let paginacao = parametros.paginacao.unwrap_or_default();
     if let Some(total) = paginacao.quantidade_de_paginas {
         let _ = write!(texto, " de {} (a primeira é 0)", total.saturating_sub(1));
     }
     if let Some(total) = paginacao.quantidade_total_de_itens {
-        let _ = write!(texto, "; {total} cobranças no período");
+        let _ = write!(texto, "; {total} {nome} no período");
     }
     if paginacao.tem_mais(numero, itens) {
         let _ = write!(texto, "; a próxima é --pagina {}", numero + 1);
@@ -354,20 +397,20 @@ mod tests {
             "paginaAtual": 1, "itensPorPagina": 100, "quantidadeDePaginas": 3, "quantidadeTotalDeItens": 250
         }));
         assert_eq!(
-            paginacao(1, &completa, 100),
+            paginacao(1, &completa, 100, "cobranças"),
             "\n\nPágina 1 de 2 (a primeira é 0); 250 cobranças no período; a próxima é --pagina 2"
         );
         assert_eq!(
-            paginacao(2, &completa, 50),
+            paginacao(2, &completa, 50, "cobranças"),
             "\n\nPágina 2 de 2 (a primeira é 0); 250 cobranças no período"
         );
         // Without the number of pages, a full page may have a next one.
         let sem_total = parametros(serde_json::json!({"paginaAtual": 0, "itensPorPagina": 2}));
         assert_eq!(
-            paginacao(0, &sem_total, 2),
+            paginacao(0, &sem_total, 2, "cobranças"),
             "\n\nPágina 0; a próxima é --pagina 1"
         );
-        assert_eq!(paginacao(0, &sem_total, 1), "\n\nPágina 0");
+        assert_eq!(paginacao(0, &sem_total, 1, "Pix"), "\n\nPágina 0");
     }
 
     #[test]

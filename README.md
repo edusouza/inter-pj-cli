@@ -630,19 +630,91 @@ Vencimento  Status                Valor  Devedor               txid
 
 A listagem tem os filtros de `pix cob listar` e também `--lote ID`; em CSV, os encargos aparecem com a modalidade e o valor (`valor.multa.modalidade`, `valor.multa.valorPerc`), e os descontos por data, só no JSON.
 
+### Pix recebidos e devoluções
+
+Os Pix que a conta recebeu, com ou sem cobrança, ficam na API Pix, com as suas devoluções:
+
+```console
+$ inter-pj pix recebidos listar --inicio 2026-09-01 --fim 2026-09-30
+Pix recebidos de 01/09/2026 00:00 a 30/09/2026 23:59
+
+Horário                    Valor  Devolvido  endToEndId                        txid
+18/09/2026 09:41:07    R$ 300,00   R$ 50,00  E00416968202609181241abcdEFGH123  a1b2c3d4e5f60718293a4b5c6d7e8f90
+22/09/2026 15:33:10     R$ 89,90             E18236120202609221533s0a1b2c3d4e
+23/09/2026 10:02:44  R$ 1.200,00             E60701190202609231002x9y8z7w6v5u  cobvexemplo0000000000000000002
+
+3 Pix · R$ 1.589,90 · devolvidos R$ 50,00
+
+$ inter-pj pix recebidos consultar E00416968202609181241abcdEFGH123
+Pix recebido E00416968202609181241abcdEFGH123
+  Valor          R$ 300,00
+  Recebido em    18/09/2026 09:41:07
+  Devolvido      R$ 50,00
+  Pode devolver  R$ 250,00
+  txid           a1b2c3d4e5f60718293a4b5c6d7e8f90
+  Chave          pix@empresa.example
+  Mensagem       Pedido 123
+
+Devoluções
+id  Status        Valor  Solicitada em
+D1  devolvida  R$ 50,00  18/09/2026 12:00:00
+
+Para devolver: inter-pj pix devolucao solicitar E00416968202609181241abcdEFGH123 --valor VALOR (ou --tudo)
+```
+
+Os filtros da listagem são `--txid` (os Pix de uma cobrança), `--com-cobranca` ou `--sem-cobranca`, `--com-devolucao` ou `--sem-devolucao` e `--documento` (CPF/CNPJ do pagador), além do período e das páginas, como nas cobranças. Em CSV, as colunas têm os nomes da API, mais `valorDevolvido`. As consultas precisam do escopo `pix.read`.
+
+Uma devolução **tira dinheiro da conta**, e os trilhos são os do `pix enviar`:
+
+```console
+$ inter-pj pix devolucao solicitar E00416968202609181241abcdEFGH123 --valor 100,00 --descricao "Pedido cancelado"
+Devolução a solicitar
+  Ambiente      sandbox (dados fictícios)
+  Pix           E00416968202609181241abcdEFGH123
+  Recebido em   18/09/2026 09:41:07
+  Valor do Pix  R$ 300,00
+  Já devolvido  R$ 50,00
+  Devolução     R$ 100,00 (cem reais)
+  Descrição     Pedido cancelado
+  id            D7978c0c97ea847e78e8849634473c1f1
+Devolver o Pix? [s/N] s
+Devolução solicitada.
+
+Devolução D7978c0c97ea847e78e8849634473c1f1
+  Status         em processamento
+  Valor          R$ 100,00
+  Pix            E00416968202609181241abcdEFGH123
+  Solicitada em  24/09/2026 10:10:00
+  rtrId          D00416968202609241310xyzabcdefgh
+
+Acompanhe com: inter-pj pix devolucao consultar E00416968202609181241abcdEFGH123 D7978c0c97ea847e78e8849634473c1f1 --aguardar
+
+$ inter-pj pix devolucao solicitar E00416968202609181241abcdEFGH123 --tudo --aguardar   # o que resta, até o fim
+$ inter-pj pix devolucao solicitar E00416968202609181241abcdEFGH123 --valor 260 --sim
+erro: a devolução de R$ 260,00 passa do que resta do Pix: R$ 250,00 de R$ 300,00, R$ 50,00 já devolvidos ou em devolução
+```
+
+- **Consulta antes**: a CLI consulta o Pix e recusa, sem enviar nada, uma devolução maior que o que resta dele (o valor menos as devoluções feitas ou em processamento). `--tudo` devolve exatamente esse resto.
+- **Resumo e confirmação**: o Pix, o que já foi devolvido e a devolução, com o valor por extenso e a produção em destaque; `[s/N]` só de um terminal, ou `--sim`. Sem terminal nem `--sim`, nem a consulta é feita.
+- **Limite por operação**: `limite_por_operacao` vale também para as devoluções, mesmo com `--sim`.
+- **`--simular`**: mostra a requisição, sem consultar nem enviar nada.
+- **Idempotência**: cada devolução tem um id (1 a 35 letras e dígitos), gerado ou dado com `--id` e mostrado no resumo; com o mesmo id, a API não devolve de novo. Se o resultado ficar incerto, o erro traz o comando que consulta a devolução e o que a repete com o mesmo id; repetir um id que o Pix já tem apenas mostra a devolução existente.
+
+`--natureza retirada` devolve o dinheiro de um Pix Saque ou o troco de um Pix Troco (o padrão, `original`, é o do Pix comum), e `--descricao` (até 140 caracteres) vai para o pagador. A devolução é processada depois do pedido: `pix devolucao consultar` mostra em que pé ela está e, com `--aguardar` (aceito também por `solicitar`), consulta a cada 6 segundos até o fim, saindo com o código 0 (devolvida), 5 (não realizada, com o motivo) ou 8 (o tempo acabou; padrão: 60s). Devolver precisa do escopo `pix.write`, além de `pix.read` para a consulta.
+
 ### Formatos de saída
 
 | Formato | Para quê |
 | --- | --- |
 | `texto` (padrão) | leitura: tabelas alinhadas, valores em `R$ 1.234,56`, datas `DD/MM/AAAA` |
 | `json` (ou `--json`) | automação: os nomes de campo da API e valores numéricos exatos |
-| `csv` | planilhas e scripts (`saldo`, `extrato` e as listagens de pagamentos, de cobranças e de cobranças Pix): RFC 4180, datas `AAAA-MM-DD`, ponto decimal, saídas do extrato com valor negativo |
+| `csv` | planilhas e scripts (`saldo`, `extrato` e as listagens de pagamentos, de cobranças, de cobranças Pix e de Pix recebidos): RFC 4180, datas `AAAA-MM-DD`, ponto decimal, saídas do extrato com valor negativo |
 
 Para o Excel em português, use `--formato csv --separador ';'`: ponto e vírgula, vírgula decimal e UTF-8 com BOM. Textos vindos de terceiros que começam com `=`, `+`, `-` ou `@` (ex.: a mensagem de um Pix) recebem um apóstrofo no CSV, para não serem executados como fórmula pela planilha.
 
 ### Retentativas
 
-Consultas que falham por limite de requisições (`429`), instabilidade do servidor (`500`, `502`, `503`, `504`) ou falha de conexão são repetidas automaticamente, com espera crescente (1 s, 2 s, ...) e respeitando o cabeçalho `Retry-After`. O padrão é de 3 tentativas; ajuste com `--tentativas N` (ou `INTER_TENTATIVAS`) ou desative com `--sem-retentativa`. Com `-v`, cada nova tentativa aparece em `stderr`. O envio de Pix, os pagamentos, a emissão de cobranças e a criação e a alteração de cobranças Pix só são repetidos quando certamente não foram processados (`429` ou conexão recusada); o Pix, sempre com a mesma chave de idempotência.
+Consultas que falham por limite de requisições (`429`), instabilidade do servidor (`500`, `502`, `503`, `504`) ou falha de conexão são repetidas automaticamente, com espera crescente (1 s, 2 s, ...) e respeitando o cabeçalho `Retry-After`. O padrão é de 3 tentativas; ajuste com `--tentativas N` (ou `INTER_TENTATIVAS`) ou desative com `--sem-retentativa`. Com `-v`, cada nova tentativa aparece em `stderr`. O envio de Pix, os pagamentos, a emissão de cobranças, a criação e a alteração de cobranças Pix e as devoluções só são repetidos quando certamente não foram processados (`429` ou conexão recusada); o Pix, sempre com a mesma chave de idempotência, e a devolução, com o mesmo id.
 
 ### Tokens e rate limit
 
@@ -665,10 +737,10 @@ $ curl --cert certificado.crt --key chave.key \
 | 2 | uso incorreto (argumentos inválidos) |
 | 3 | configuração ausente ou inválida (inclui certificado/chave) |
 | 4 | falha de autenticação ou acesso negado (credenciais, escopos, 401/403) |
-| 5 | requisição rejeitada pela API (400, 404, 409, 422); com `--aguardar`, Pix que terminou sem ser pago, lote processado com erro, cobrança que não foi emitida ou alteração que não foi feita |
+| 5 | requisição rejeitada pela API (400, 404, 409, 422); com `--aguardar`, Pix que terminou sem ser pago, lote processado com erro, cobrança que não foi emitida, alteração que não foi feita ou devolução não realizada |
 | 6 | serviço indisponível, limite de requisições (429), erro 5xx ou falha de rede |
 | 7 | operação cancelada na confirmação (nada foi enviado) |
-| 8 | `pix consultar`, `pagamento lote consultar`, `cobranca emitir`, `cobranca editar` ou `cobranca edicao` com `--aguardar`: tempo esgotado antes de um status final |
+| 8 | `pix consultar`, `pagamento lote consultar`, `cobranca emitir`, `cobranca editar`, `cobranca edicao` ou `pix devolucao` com `--aguardar`: tempo esgotado antes de um status final |
 
 Mensagens de erro vão para `stderr`, em português, com a explicação da API e dicas. Com `-v`/`-vv` a CLI mostra detalhes das requisições (método, caminho, status e tempo) — nunca tokens, segredos ou corpos de resposta.
 
