@@ -10,6 +10,9 @@ use wiremock::matchers::{any, body_json, method, path, query_param, query_param_
 use wiremock::{Mock, ResponseTemplate};
 
 const ID: &str = "RR1234567820260924abcdefghijk";
+/// The QR Code of a recurrence alone (`JORNADA_2`), from the examples of
+/// the API: the location of the recurrence is in field 80.
+const QR_DA_RECORRENCIA: &str = "00020126180014br.gov.bcb.pix5204000053039865802BR5913Fulano de Tal6008BRASILIA62070503***80800014br.gov.bcb.pix2558pix.example.com/qr/v2/rec/2353c790eefb11eaadc10242ac120002630462C9";
 const TXID: &str = "7978c0c97ea847e78e8849634473c1f1";
 
 async fn env() -> TestEnv {
@@ -369,6 +372,34 @@ async fn consulta_com_o_qr_code_composto() {
         "{stdout}"
     );
     assert_eq!(ler_qr_code(&stdout), COPIA_E_COLA);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn consulta_com_o_qr_code_da_recorrencia() {
+    let env = env().await;
+    env.mount_token("rec.read", Some(1)).await;
+    let mut com_location = rec("CRIADA");
+    com_location["dadosQR"] = json!({"jornada": "JORNADA_2", "pixCopiaECola": QR_DA_RECORRENCIA});
+    Mock::given(method("GET"))
+        .and(path(format!("/pix/v2/rec/{ID}")))
+        .and(query_param_is_missing("txid"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(com_location))
+        .expect(1)
+        .mount(&env.server)
+        .await;
+    let assert = env
+        .cmd()
+        .args(["pix-automatico", "rec", "consultar", ID, "--qrcode"])
+        .assert()
+        .success();
+    let stdout = stdout_of(&assert);
+    assert!(
+        stdout.contains(&format!("Copia e cola  {QR_DA_RECORRENCIA}")),
+        "{stdout}"
+    );
+    assert_eq!(ler_qr_code(&stdout), QR_DA_RECORRENCIA);
+    let stderr = stderr_of(&assert);
+    assert!(!stderr.contains("inválido"), "{stderr}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
