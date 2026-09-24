@@ -3,7 +3,7 @@
 use std::borrow::Cow;
 use std::io::{self, Write};
 
-use chrono::{DateTime, NaiveDate, NaiveDateTime};
+use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, TimeZone};
 use rust_decimal::{Decimal, RoundingStrategy};
 use serde::Serialize;
 
@@ -164,6 +164,38 @@ pub(crate) fn data_hora_br(raw: &str) -> String {
         .iter()
         .find_map(|formato| NaiveDateTime::parse_from_str(raw, formato).ok())
         .map_or_else(|| raw.to_owned(), |data| data.format(FORMATO).to_string())
+}
+
+/// A moment with offset (`2026-09-23T20:15:00.358Z`, as the Pix API sends
+/// it) in the local time zone: `23/09/2026 17:15:00`; other formats as
+/// [`data_hora_br`] shows them.
+pub(crate) fn horario_local(raw: &str) -> String {
+    horario_em(raw, &Local)
+}
+
+pub(crate) fn horario_em<Tz: TimeZone>(raw: &str, fuso: &Tz) -> String
+where
+    Tz::Offset: std::fmt::Display,
+{
+    DateTime::parse_from_rfc3339(raw.trim()).map_or_else(
+        |_| data_hora_br(raw),
+        |momento| {
+            momento
+                .with_timezone(fuso)
+                .format("%d/%m/%Y %H:%M:%S")
+                .to_string()
+        },
+    )
+}
+
+/// A title and its lines, indented.
+pub(crate) fn secao(titulo: &str, linhas: &[(&str, String)]) -> String {
+    let mut texto = titulo.to_owned();
+    for linha in key_values_left(linhas).lines() {
+        texto.push_str("\n  ");
+        texto.push_str(linha);
+    }
+    texto
 }
 
 /// Masks all but the last `visible` characters: `*****67`.

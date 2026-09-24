@@ -61,6 +61,15 @@ pub(crate) enum CliError {
         /// Command that finds the charge, to run before trying again.
         consulta: String,
     },
+    /// A Pix charge whose creation is unknown: it may have been created.
+    /// With the same txid, the API does not create a second one.
+    #[error("{source}")]
+    CobrancaPixIncerta {
+        source: InterError,
+        /// `cob` or `cobv`, as in the commands.
+        tipo: &'static str,
+        txid: String,
+    },
     /// `cobranca emitir --aguardar`: the API could not issue the charge.
     #[error("a cobrança não foi emitida: {situacao}")]
     CobrancaNaoEmitida { situacao: String },
@@ -116,7 +125,8 @@ impl CliError {
             Self::Inter(err)
             | Self::ResultadoIncerto { source: err, .. }
             | Self::PagamentoIncerto { source: err, .. }
-            | Self::EmissaoIncerta { source: err, .. } => match err {
+            | Self::EmissaoIncerta { source: err, .. }
+            | Self::CobrancaPixIncerta { source: err, .. } => match err {
                 InterError::InvalidInput(_) => exit::USAGE,
                 InterError::Config(_) | InterError::Identity(_) => exit::CONFIG,
                 InterError::Auth(_) => exit::AUTH,
@@ -161,6 +171,14 @@ impl CliError {
                         "{situacao}, e esta API não tem chave de idempotência: repetir o comando pode pagar duas vezes"
                     ),
                     format!("confira antes de tentar de novo: {consulta}"),
+                ];
+            }
+            Self::CobrancaPixIncerta { tipo, txid, .. } => {
+                return vec![
+                    "a cobrança pode ter sido criada; com o mesmo txid, a API não cria outra"
+                        .to_owned(),
+                    format!("confira com: inter-pj pix {tipo} consultar {txid}"),
+                    format!("ou repita o comando com --txid {txid}"),
                 ];
             }
             Self::EmissaoIncerta { consulta, .. } => {

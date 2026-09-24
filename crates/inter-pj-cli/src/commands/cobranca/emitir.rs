@@ -10,10 +10,11 @@ use inter_pj::cobranca::{
 };
 use inter_pj::{Environment, Error as InterError, InterClient, endpoint};
 
-use super::consultar::{OpcoesQr, mostrar};
+use super::consultar::mostrar;
 use super::{argumento, descrever_situacao, percentual};
 use crate::arquivo;
 use crate::cli::{CobrancaEmitirArgs, FormaArg, Formato, TaxaOuValor};
+use crate::commands::qrcode::OpcoesQr;
 use crate::commands::{Context, hoje, simulacao};
 use crate::confirmacao::{Terminal, confirmar, descrever_ambiente};
 use crate::error::{CliError, resultado_incerto};
