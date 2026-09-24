@@ -16,6 +16,7 @@ Os exemplos são da Empresa Exemplo Ltda, uma empresa fictícia, no perfil de pr
   - [Por um arquivo](#por-um-arquivo)
   - [Alterar uma cobrança com vencimento](#alterar-uma-cobrança-com-vencimento)
   - [As cobranças com vencimento de um período](#as-cobranças-com-vencimento-de-um-período)
+- [Locations](#locations)
 
 ## Criar uma cobrança imediata
 
@@ -287,7 +288,7 @@ Cobrança Pix com vencimento nota0931empresaexemplo2026
   Valor        R$ 1.850,00
   Vencimento   20/10/2026
   Validade     até 19/11/2026, 30 dias após o vencimento
-  Criada em    24/09/2026 10:20:07
+  Criada em    24/09/2026 10:19:12
   Devedor      Cliente Exemplo Ltda (11.222.333/0001-81)
   Endereço     Avenida Brasil, 1200, sala 3 - Belo Horizonte/MG - CEP 30110-000
   E-mail       financeiro@cliente.example
@@ -378,7 +379,7 @@ Cobrança Pix com vencimento mensalidade202610fulanodetal
   Valor        R$ 450,00
   Vencimento   10/10/2026
   Validade     até 20/10/2026, 10 dias após o vencimento
-  Criada em    24/09/2026 10:26:07
+  Criada em    24/09/2026 10:26:12
   Devedor      Fulano de Tal (123.456.789-09)
   Endereço     Rua da Bahia, 1000 - Belo Horizonte/MG - CEP 30160-011
   Recebedor    Empresa Exemplo Ltda (11.444.777/0001-61)
@@ -440,7 +441,7 @@ Cobrança Pix com vencimento nota0931empresaexemplo2026
   Valor        R$ 1.850,00
   Vencimento   30/10/2026
   Validade     até 29/11/2026, 30 dias após o vencimento
-  Criada em    24/09/2026 10:20:07
+  Criada em    24/09/2026 10:19:12
   Devedor      Cliente Exemplo Ltda (11.222.333/0001-81)
   Endereço     Avenida Brasil, 1200, sala 3 - Belo Horizonte/MG - CEP 30110-000
   E-mail       financeiro@cliente.example
@@ -485,3 +486,104 @@ Vencimento  Status                       Valor  Devedor          txid
 ```
 
 A listagem tem os filtros de `pix cob listar` e também `--lote ID`, o das cobranças criadas num lote. Em `--formato csv`, os encargos aparecem com a modalidade e o valor (`valor.multa.modalidade`, `valor.multa.valorPerc`), e os descontos por data, só no JSON.
+
+## Locations
+
+O QR Code de uma cobrança leva a uma location, o endereço onde o banco do pagador busca os dados dela. A API cria uma para cada cobrança, mas uma location pode ser criada antes, para um QR Code impresso, e servir a uma cobrança depois da outra. Criar e desvincular precisam do escopo `payloadlocation.write`, e consultar e listar, do `payloadlocation.read`.
+
+O caixa da loja tem um QR Code impresso, de uma location para cobranças imediatas:
+
+```console
+$ inter-pj pix loc criar --tipo cob
+Location criada.
+
+Location 7008
+  Tipo       cobrança imediata
+  Criada em  24/09/2026 10:33:12
+  Location   qrcodepix.inter.example/qr/v2/loc/7008
+  Cobrança   nenhuma
+
+Use com: inter-pj pix cob criar ... --loc 7008
+```
+
+A cada venda, a cobrança é criada com a location do caixa (`--loc`), e o cliente paga pelo QR Code impresso:
+
+```console
+$ inter-pj pix cob criar --chave pix@empresa.example --valor 42,50 --expiracao 10m \
+    --solicitacao "Venda no caixa" --loc 7008 --txid caixa0001empresaexemplo2026
+*** PRODUÇÃO: a cobrança vale de verdade ***
+Cobrança Pix a criar
+  Ambiente     PRODUÇÃO (conta real)
+  Valor        R$ 42,50 (quarenta e dois reais e cinquenta centavos)
+  Chave        pix@empresa.example (e-mail)
+  Expira       10 minutos após a criação
+  Solicitação  Venda no caixa
+  Location     7008
+  txid         caixa0001empresaexemplo2026
+Criar a cobrança? [s/N] s
+Cobrança Pix criada.
+
+Cobrança Pix caixa0001empresaexemplo2026
+  Status       ativa
+  Valor        R$ 42,50
+  Criada em    24/09/2026 10:40:12
+  Expira em    24/09/2026 10:50:12
+  Chave        pix@empresa.example
+  Solicitação  Venda no caixa
+  Revisão      0
+  Location     qrcodepix.inter.example/qr/v2/loc/7008
+
+Copia e cola  00020101021226600014br.gov.bcb.pix2538qrcodepix.inter.example/qr/v2/loc/70085204000053039865802BR5920EMPRESA EXEMPLO LTDA6014BELO HORIZONTE62070503***6304AFBD
+
+Acompanhe com: inter-pj pix cob consultar caixa0001empresaexemplo2026
+```
+
+`pix loc consultar` mostra a location e a cobrança que ela serve:
+
+```console
+$ inter-pj pix loc consultar 7008
+Location 7008
+  Tipo       cobrança imediata
+  Criada em  24/09/2026 10:33:12
+  Location   qrcodepix.inter.example/qr/v2/loc/7008
+  Cobrança   caixa0001empresaexemplo2026
+```
+
+Encerrada a venda, a cobrança é desvinculada, e a location fica livre para a próxima. A CLI consulta a location antes, recusa sem alterar nada uma location sem cobrança e pede confirmação (sem terminal, `--sim`), porque o QR Code deixa de levar à cobrança:
+
+```console
+$ inter-pj pix loc desvincular 7008
+Location 7008 a desvincular
+  Ambiente  PRODUÇÃO (conta real)
+  Location  qrcodepix.inter.example/qr/v2/loc/7008
+  Cobrança  caixa0001empresaexemplo2026
+aviso: o QR Code desta location deixa de levar à cobrança caixa0001empresaexemplo2026
+Desvincular a cobrança? [s/N] s
+Cobrança caixa0001empresaexemplo2026 desvinculada: a location está livre.
+
+Location 7008
+  Tipo       cobrança imediata
+  Criada em  24/09/2026 10:33:12
+  Location   qrcodepix.inter.example/qr/v2/loc/7008
+  Cobrança   nenhuma
+```
+
+A cobrança desvinculada continua como estava, mas sem location e sem QR Code. `pix cob revisar` e `pix cobv revisar` também aceitam `--loc`, para trocar a location de uma cobrança ativa.
+
+`pix loc listar` mostra as locations criadas num período, por padrão os últimos 30 dias até agora, com a cobrança de cada uma:
+
+```console
+$ inter-pj pix loc listar --inicio 2026-09-24 --fim 2026-09-24
+Locations criadas de 24/09/2026 00:00 a 24/09/2026 23:59
+
+Criada em              id  Tipo  txid                          Location
+24/09/2026 10:05:12  7004  cob   pedido1061empresaexemplo2026  qrcodepix.inter.example/qr/v2/cob/pedido1061empresaexemplo2026
+24/09/2026 10:12:12  7005  cob   pedido1062empresaexemplo2026  qrcodepix.inter.example/qr/v2/cob/pedido1062empresaexemplo2026
+24/09/2026 10:19:12  7006  cobv  nota0931empresaexemplo2026    qrcodepix.inter.example/qr/v2/cobv/nota0931empresaexemplo2026
+24/09/2026 10:26:12  7007  cobv  mensalidade202610fulanodetal  qrcodepix.inter.example/qr/v2/cobv/mensalidade202610fulanodetal
+24/09/2026 10:33:12  7008  cob                                 qrcodepix.inter.example/qr/v2/loc/7008
+
+5 locations · 4 com cobrança
+```
+
+A listagem filtra por `--tipo cob` ou `cobv` e por `--com-cobranca` ou `--sem-cobranca`, em texto, JSON ou CSV com os nomes da API.

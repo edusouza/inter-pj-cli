@@ -220,7 +220,7 @@ Emitir cobranças, que são boletos com Pix para os clientes da empresa, está n
 
 ### Cobranças Pix
 
-A API Pix cria cobranças com QR Code dinâmico, que o cliente paga pelo app de qualquer banco. A cobrança imediata (`pix cob`), para pagar na hora, até expirar, e a cobrança com vencimento (`pix cobv`), o boleto do Pix, com multa, juros, abatimento e desconto, estão no guia [Cobranças Pix](docs/guias/cobrancas-pix.md): a criação, pelas opções ou por um arquivo JSON com os campos da API (`pix cobv modelo`), com o resumo e a confirmação, o txid que torna segura a repetição, a validade depois do vencimento e os encargos, a alteração e a remoção, uma cobrança paga com os seus Pix, a conferência de uma criação de resultado incerto e a listagem de um período com os seus filtros. Criar e alterar precisam do escopo `cob.write` ou `cobv.write`; consultar e listar, do `cob.read` ou `cobv.read`.
+A API Pix cria cobranças com QR Code dinâmico, que o cliente paga pelo app de qualquer banco. A cobrança imediata (`pix cob`), para pagar na hora, até expirar, e a cobrança com vencimento (`pix cobv`), o boleto do Pix, com multa, juros, abatimento e desconto, estão no guia [Cobranças Pix](docs/guias/cobrancas-pix.md): a criação, pelas opções ou por um arquivo JSON com os campos da API (`pix cobv modelo`), com o resumo e a confirmação, o txid que torna segura a repetição, a validade depois do vencimento e os encargos, a alteração e a remoção, uma cobrança paga com os seus Pix, a conferência de uma criação de resultado incerto e a listagem de um período com os seus filtros; e as locations, os endereços dos QR Codes, que podem ser criadas antes (`pix loc`) e servir a uma cobrança depois da outra. Criar e alterar precisam do escopo `cob.write` ou `cobv.write`; consultar e listar, do `cob.read` ou `cobv.read`.
 
 Muitas cobranças com vencimento podem ser criadas ou alteradas de uma vez, em um lote, a partir de um arquivo JSON (nos campos da API) ou de uma planilha CSV (uma cobrança por linha; as colunas têm os caminhos dos campos da API, como `valor.multa.valorPerc`). Antes de enviar, a CLI confere todas as cobranças e, se alguma tiver problema, recusa o arquivo inteiro, apontando a linha e o campo de cada uma:
 
@@ -276,44 +276,6 @@ $ inter-pj pix lote-cobv listar --inicio 2026-09-01   # lotes do período, em te
 ```
 
 Com `--aguardar`, a consulta sai com o código 0 se todas as cobranças foram criadas, 5 se alguma foi negada e 8 se o tempo acabou (padrão: 60s). Os escopos são `lotecobv.write` e `lotecobv.read`.
-
-O QR Code de uma cobrança leva a uma location, o endereço onde o banco do pagador busca os dados dela. A API cria uma para cada cobrança, mas uma location pode ser criada antes (para imprimir o QR Code, por exemplo) e usada depois com `--loc` em `pix cob criar`, `pix cobv criar` ou `revisar`:
-
-```console
-$ inter-pj pix loc criar --tipo cobv
-Location criada.
-
-Location 790
-  Tipo       cobrança com vencimento
-  Criada em  24/09/2026 10:10:00
-  Location   pix.example.com/qr/v2/cobv/5b7e4c1a5d3f4a2b9c8d7e6f5a4b3c2d
-  Cobrança   nenhuma
-
-Use com: inter-pj pix cobv criar ... --loc 790
-
-$ inter-pj pix loc listar --inicio 2026-09-01 --fim 2026-09-30
-Locations criadas de 01/09/2026 00:00 a 30/09/2026 23:59
-
-Criada em             id  Tipo  txid                              Location
-24/09/2026 10:10:00  789  cob   7978c0c97ea847e78e8849634473c1f1  pix.example.com/qr/v2/9d36b84fc70b478fb95c12729b90ca25
-24/09/2026 10:10:00  790  cobv  cobvexemplo0000000000000000001    pix.example.com/qr/v2/cobv/5b7e4c1a5d3f4a2b9c8d7e6f5a4b3c2d
-24/09/2026 10:10:00  791  cobv                                    pix.example.com/qr/v2/cobv/5b7e4c1a5d3f4a2b9c8d7e6f5a4b3c2d
-
-3 locations · 2 com cobrança
-
-$ inter-pj pix loc consultar 790
-$ inter-pj pix loc desvincular 790
-Location 790 a desvincular
-  Ambiente  sandbox (dados fictícios)
-  Location  pix.example.com/qr/v2/cobv/5b7e4c1a5d3f4a2b9c8d7e6f5a4b3c2d
-  Cobrança  cobvexemplo0000000000000000001
-aviso: o QR Code desta location deixa de levar à cobrança cobvexemplo0000000000000000001
-Desvincular a cobrança? [s/N] s
-Cobrança cobvexemplo0000000000000000001 desvinculada: a location está livre.
-...
-```
-
-A listagem filtra por `--tipo cob` ou `cobv` e por `--com-cobranca` ou `--sem-cobranca`. `desvincular` consulta a location antes, recusa sem nenhuma alteração uma location sem cobrança e pede confirmação (sem terminal, `--sim`), porque o QR Code impresso deixa de levar à cobrança. Os escopos são `payloadlocation.write` e `payloadlocation.read`.
 
 No sandbox, as cobranças podem ser pagas pela CLI, para testar o fluxo inteiro (criar, pagar, consultar e, com um webhook cadastrado, receber a notificação):
 
