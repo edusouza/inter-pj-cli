@@ -414,6 +414,16 @@ pub(crate) enum AuthCommand {
     Token(TokenArgs),
     /// Remove os tokens em cache
     Limpar(LimparArgs),
+    /// Mostra o certificado da integração: titular, emissor e validade, com os dias que faltam
+    Certificado(CertificadoArgs),
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct CertificadoArgs {
+    /// Outro certificado (.crt), como um renovado antes de trocá-lo na configuração [padrão: o do perfil]
+    #[arg(long, value_name = "ARQUIVO")]
+    pub(crate) arquivo: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]

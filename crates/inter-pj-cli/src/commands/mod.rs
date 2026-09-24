@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use chrono::{Days, Local, NaiveDate};
+use chrono::{Days, Local, NaiveDate, Utc};
 use clap::ArgMatches;
 use clap::parser::ValueSource;
 use inter_pj::{ClientIdentity, Credentials, InterClient};
@@ -167,6 +167,14 @@ impl Context {
         let required = settings.for_client()?;
         let identity = ClientIdentity::from_pem_files(required.certificado, required.chave_privada)
             .map_err(inter_pj::Error::from)?;
+        // A certificate the reader cannot parse is left to the TLS library.
+        if let Some(aviso) = identity
+            .certificate()
+            .ok()
+            .and_then(|certificado| auth::aviso_de_validade(&certificado, Utc::now()))
+        {
+            eprintln!("aviso: {aviso}");
+        }
         let mut builder = InterClient::builder()
             .environment(required.ambiente)
             .credentials(Credentials::new(

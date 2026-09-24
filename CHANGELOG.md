@@ -6,6 +6,11 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+### Adicionado
+
+- `inter-pj auth certificado [--arquivo ...]`: o certificado da integração, lido localmente, sem chamar a API: titular, emissor, número de série, validade e a situação (válido; com a renovação aberta, nos últimos 90 dias; vencendo; vencido; ou ainda não válido), em texto ou JSON. Nos últimos 30 dias da validade, e depois dela, todo comando que acessa a API avisa em stderr (#53).
+- Biblioteca: `CertificateInfo` (`ClientIdentity::certificate`, `CertificateInfo::from_pem`), com o titular e o emissor (`DistinguishedName`), o número de série e a validade do certificado, lidos do DER sem dependências novas (#53).
+
 ## [0.8.0] - 2026-09-24
 
 Pix Automático: as recorrências que o pagador autoriza uma vez no banco dele, as solicitações de confirmação, as cobranças recorrentes de cada ciclo, as locations dos QR Codes, os webhooks e o sandbox que simula o pagador e o banco dele.
