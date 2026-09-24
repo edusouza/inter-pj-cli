@@ -1,14 +1,15 @@
 //! Pix Automático in one state: the recurrences ([`rec`](super::rec)), which
-//! the payers authorize once, and the confirmation requests
-//! ([`solicrec`](super::solicrec)) that ask them to. What is created or
-//! changed today takes the next time of one clock, 5 minutes after the one
-//! before, and each recurrence or request created today the next id of the
-//! account's bank.
+//! the payers authorize once, the confirmation requests
+//! ([`solicrec`](super::solicrec)) that ask them to, and the recurring
+//! charges ([`cobr`](super::cobr)) of each cycle. What is created or changed
+//! today takes the next time of one clock, 5 minutes after the one before,
+//! and each recurrence or request created today the next id of the account's
+//! bank.
 
 use chrono::{DateTime, SecondsFormat, TimeDelta};
 use serde_json::{Value, json};
 
-use super::{rec, solicrec};
+use super::{cobr, rec, solicrec};
 use crate::sessao::HOJE;
 
 /// The ISPB of the account's bank, in the ids it creates.
@@ -33,6 +34,10 @@ pub(super) struct Automatico {
     pub(super) recs: Vec<Value>,
     /// Each confirmation request as the API shows it.
     pub(super) solicitacoes: Vec<Value>,
+    /// Each recurring charge as the API shows it.
+    pub(super) cobrs: Vec<Value>,
+    /// The debits the payers' banks scheduled today, for the id of the next.
+    pub(super) agendadas: usize,
     /// What was done today, for the time of the next one.
     feitos: i64,
     /// The recurrences created today, for the id of the next one.
@@ -49,6 +54,8 @@ impl Automatico {
         Self {
             recs,
             solicitacoes,
+            cobrs: cobr::iniciais(),
+            agendadas: 0,
             feitos: 0,
             criadas: 0,
             solicitadas: 0,
@@ -88,15 +95,13 @@ impl Automatico {
             if solicitacao["status"] != "CRIADA" {
                 continue;
             }
-            let criacao = solicitacao["atualizacao"][0]["data"].as_str().unwrap();
-            let criacao = DateTime::parse_from_rfc3339(criacao).unwrap();
-            let depois = |segundos| {
-                (criacao + TimeDelta::seconds(segundos))
-                    .to_rfc3339_opts(SecondsFormat::Millis, true)
-            };
+            let criacao = solicitacao["atualizacao"][0]["data"]
+                .as_str()
+                .unwrap()
+                .to_owned();
             let atualizacao = solicitacao["atualizacao"].as_array_mut().unwrap();
-            atualizacao.push(json!({"status": "ENVIADA", "data": depois(2)}));
-            atualizacao.push(json!({"status": "RECEBIDA", "data": depois(5)}));
+            atualizacao.push(json!({"status": "ENVIADA", "data": depois(&criacao, 2)}));
+            atualizacao.push(json!({"status": "RECEBIDA", "data": depois(&criacao, 5)}));
             solicitacao["status"] = json!("RECEBIDA");
         }
     }
@@ -121,4 +126,10 @@ impl Automatico {
         }
         rec
     }
+}
+
+/// `segundos` after `momento` (RFC 3339), in the same format.
+pub(super) fn depois(momento: &str, segundos: i64) -> String {
+    let momento = DateTime::parse_from_rfc3339(momento).unwrap();
+    (momento + TimeDelta::seconds(segundos)).to_rfc3339_opts(SecondsFormat::Millis, true)
 }
