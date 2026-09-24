@@ -3,9 +3,11 @@
 //! ([`solicrec`](super::solicrec)) that ask them to, the recurring charges
 //! ([`cobr`](super::cobr)) of each cycle and the locations of the QR Codes
 //! of the recurrences ([`locrec`](super::locrec)), each in its recurrence
-//! or free for the next. What is created or changed today takes the next
-//! time of one clock, 5 minutes after the one before, and each recurrence
-//! or request created today the next id of the account's bank.
+//! or free for the next; the sandbox answers for the payers
+//! ([`sandbox_automatico`](super::sandbox_automatico)). What is created or
+//! changed today takes the next time of one clock, 5 minutes after the one
+//! before, and each recurrence or request created today the next id of the
+//! account's bank.
 
 use chrono::{DateTime, SecondsFormat, TimeDelta};
 use serde_json::{Value, json};
