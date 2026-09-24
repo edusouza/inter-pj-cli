@@ -325,6 +325,17 @@ mod tests {
     }
 
     #[test]
+    fn the_qr_code_of_a_recurrence_is_drawn() {
+        // Pix Automático (`JORNADA_2`), from the examples of the API: the
+        // location of the recurrence is in field 80, and the Pix template
+        // has only the GUI.
+        let recorrencia = "00020126180014br.gov.bcb.pix5204000053039865802BR5913Fulano de Tal6008BRASILIA62070503***80800014br.gov.bcb.pix2558pix.example.com/qr/v2/rec/2353c790eefb11eaadc10242ac120002630462C9";
+        let qr = QrPix::new(recorrencia).unwrap();
+        let modulos = modulos_do_terminal(&qr.terminal(true), true);
+        assert_eq!(ler(qr.lado, |x, y| modulos[y][x]), recorrencia);
+    }
+
+    #[test]
     fn damaged_codes_are_not_drawn() {
         let danificado = MANUAL.replace("Fulano", "Fulana");
         let erro = QrPix::new(&danificado).err().unwrap();

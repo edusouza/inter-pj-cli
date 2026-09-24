@@ -1799,6 +1799,12 @@ fn parse_chave(value: &str) -> Result<ChavePix, String> {
 fn parse_copia_e_cola(value: &str) -> Result<CopiaECola, String> {
     let codigo = value.trim();
     let brcode = BrCode::parse(codigo).map_err(|err| err.to_string())?;
+    if brcode.apenas_recorrencia() {
+        return Err(
+            "o código é o QR Code de uma recorrência do Pix Automático, sem nada a pagar: a recorrência é aprovada no app do banco do pagador"
+                .to_owned(),
+        );
+    }
     Ok(CopiaECola {
         codigo: codigo.to_owned(),
         brcode,

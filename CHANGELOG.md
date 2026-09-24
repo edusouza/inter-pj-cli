@@ -31,6 +31,7 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 - `extrato completo --todas-paginas` mostra o título "Extrato completo de...", como uma página do mesmo comando, e não mais "Extrato de..." (#57).
 - O Pix Automático segue o calendário do banco, como os outros comandos: a data do primeiro pagamento que já passou e as datas do `rec modelo` usam o dia em Brasília, e não o do fuso da máquina, e o aviso do cancelamento depois das 22h do dia anterior à liquidação usa a hora de Brasília (#57).
 - `webhook banking reenviar boleto-pagamento` (e `Banking::reenviar_callbacks` na biblioteca) envia os códigos das transações no campo `codigoTransacao`, como a API Banking documenta para os boletos pagos; ia no `codigoSolicitacao`, o campo dos Pix enviados. A especificação unificada liga o corpo do reenvio do Banking ao da Cobrança, que tem o mesmo nome, e o teste de contrato passa a conferir o corpo de cada tipo no schema do próprio Banking (#57).
+- O QR Code de uma recorrência do Pix Automático, que tem a location no campo 80 e só o identificador do Pix no 26, era recusado como um copia e cola sem chave nem URL, e `pix-automatico rec consultar --qrcode` e `--qrcode-png` não o desenhavam. `BrCode`, na biblioteca, lê o campo 80 (`recorrencia` e `apenas_recorrencia`); `pix enviar --copia-e-cola` e os `pagar-qrcode` do sandbox recusam esse código, que não tem o que pagar, dizendo o que ele é, e o resumo de um código composto, que paga uma cobrança e pede a aprovação de uma recorrência, mostra também a recorrência (#57).
 
 ### Segurança
 
