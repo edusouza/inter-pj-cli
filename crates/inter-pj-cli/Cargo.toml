@@ -15,6 +15,9 @@ publish.workspace = true
 [[bin]]
 name = "inter-pj"
 path = "src/main.rs"
+# The library (`inter_pj`) documents the API; rustdoc for the binary would
+# collide with it in target/doc.
+doc = false
 
 [dependencies]
 inter-pj.workspace = true

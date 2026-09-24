@@ -1,0 +1,33 @@
+# Varredura de segredos (gitleaks): regras padrão + regras para credenciais do Inter.
+# Qualquer achado faz o CI falhar. Veja SECURITY.md para o procedimento em caso de vazamento.
+
+title = "inter-pj-cli"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "inter-client-secret"
+description = "client_secret de integração do Inter (UUID)"
+regex = '''(?i)client[_-]?secret["']?\s*[:=]\s*["']?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})'''
+secretGroup = 1
+keywords = ["client_secret", "client-secret", "clientsecret"]
+
+[[rules]]
+id = "inter-client-id"
+description = "client_id de integração do Inter (UUID)"
+regex = '''(?i)client[_-]?id["']?\s*[:=]\s*["']?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})'''
+secretGroup = 1
+keywords = ["client_id", "client-id", "clientid"]
+
+[[rules]]
+id = "inter-conta-corrente"
+description = "Número de conta corrente em configuração, variável ou cabeçalho"
+regex = '''(?i)(?:conta[_-]?corrente|contacorrente)["']?\s*[:=,]\s*["']?(\d{5,})'''
+secretGroup = 1
+keywords = ["conta_corrente", "conta-corrente", "contacorrente"]
+
+  [[rules.allowlists]]
+  description = "Valores fictícios usados nos testes e nos exemplos da documentação oficial"
+  regexTarget = "secret"
+  regexes = ['''^(1234567|7654321|12345678|00123|0+)$''']
