@@ -319,7 +319,7 @@ Acompanhe com: inter-pj pix-automatico solicitacao consultar SC1234567820260924T
 ou pela recorrência: inter-pj pix-automatico rec consultar RR1234567820260924Qm4Tz8Kd2Wb
 ```
 
-`--ispb` é o código de 8 dígitos do banco do pagador (o do Inter é 00416968), `--conta` vai com o dígito verificador, e `--expiracao` é o prazo para ele responder: `2h`, `7d`, uma data, até o fim do dia, ou data e hora com fuso; sem ela, 7 dias. Os escopos são `solicrec.write` e `solicrec.read`, além do `rec.read`, com que a CLI consulta a recorrência antes de criar a solicitação. Como na recorrência, não há chave de idempotência: um resultado incerto vem com o comando que confere se a solicitação foi enviada.
+`--ispb` é o código de 8 dígitos do banco do pagador (o do Inter é 00416968), `--conta` vai com o dígito verificador, e `--expiracao` é o prazo para ele responder: `2h`, `7d`, uma data, até o fim do dia em Brasília, ou data e hora com fuso; sem ela, 7 dias. Os escopos são `solicrec.write` e `solicrec.read`, além do `rec.read`, com que a CLI consulta a recorrência antes de criar a solicitação. Como na recorrência, não há chave de idempotência: um resultado incerto vem com o comando que confere se a solicitação foi enviada.
 
 O banco do pagador recebe a solicitação, e ela fica à espera da resposta dele:
 

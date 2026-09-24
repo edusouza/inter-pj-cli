@@ -253,7 +253,7 @@ Criada em            Status     Valor  Devedor  txid
 1 cobrança · R$ 89,90
 ```
 
-`--inicio` e `--fim` aceitam uma data (o dia inteiro, no fuso local) ou a data e a hora com o fuso (`2026-09-24T08:00:00-03:00`). Os filtros são `--status` (`ativa`, `concluida`, `removida-pelo-usuario` ou `removida-pelo-psp`), `--documento` (o CPF ou o CNPJ do devedor) e `--com-location` ou `--sem-location`. A listagem lê todas as páginas, de 1.000 cobranças cada; `--pagina N` (a primeira é 0), com `--itens-por-pagina`, traz uma só. Em `--formato csv`, as colunas têm os nomes da API (`valor.original`, `devedor.nome`, `pixCopiaECola`), com os códigos e os horários como a API os envia.
+`--inicio` e `--fim` aceitam uma data (o dia inteiro, em Brasília, como no extrato) ou a data e a hora com o fuso (`2026-09-24T08:00:00-03:00`). Os filtros são `--status` (`ativa`, `concluida`, `removida-pelo-usuario` ou `removida-pelo-psp`), `--documento` (o CPF ou o CNPJ do devedor) e `--com-location` ou `--sem-location`. A listagem lê todas as páginas, de 1.000 cobranças cada; `--pagina N` (a primeira é 0), com `--itens-por-pagina`, traz uma só. Em `--formato csv`, as colunas têm os nomes da API (`valor.original`, `devedor.nome`, `pixCopiaECola`), com os códigos e os horários como a API os envia.
 
 ## Cobranças com vencimento
 

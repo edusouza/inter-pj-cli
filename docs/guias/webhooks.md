@@ -195,7 +195,7 @@ Sem entrega no período: 1 operação. Para pedir o reenvio:
 
 A cobrança que a Beltrana de Tal pagou em 10/08 chegou na segunda tentativa: na primeira, o servidor estava reiniciando (`503`). A que expirou em 21/08, do Fulano de Tal, não chegou em nenhuma das cinco: o sistema da empresa recusava as cobranças expiradas (`400`). A dica considera todas as tentativas do período, então uma cobrança entregue numa tentativa posterior não entra nela.
 
-O período segue as regras das listagens Pix: datas `AAAA-MM-DD`, do começo do primeiro dia ao fim do último, ou data e hora com fuso, e, por padrão, os últimos 30 dias até agora. `--falhas` mostra só as tentativas que falharam, e `--codigo` (cobranças), `--txid` (Pix), `--end-to-end` e `--codigo-transacao` (Banking), só as de uma operação. A CLI lê todas as páginas do histórico, ou só uma, com `--pagina` (a primeira é 0) e `--itens-por-pagina`, de 10 a 50. A listagem sai também em `--json` e em `--formato csv`, com os campos da API e a URL de cada tentativa.
+O período segue as regras das listagens Pix: datas `AAAA-MM-DD`, do começo do primeiro dia ao fim do último, em Brasília, ou data e hora com fuso, e, por padrão, os últimos 30 dias até agora. `--falhas` mostra só as tentativas que falharam, e `--codigo` (cobranças), `--txid` (Pix), `--end-to-end` e `--codigo-transacao` (Banking), só as de uma operação. A CLI lê todas as páginas do histórico, ou só uma, com `--pagina` (a primeira é 0) e `--itens-por-pagina`, de 10 a 50. A listagem sai também em `--json` e em `--formato csv`, com os campos da API e a URL de cada tentativa.
 
 ## Pedir o reenvio
 
