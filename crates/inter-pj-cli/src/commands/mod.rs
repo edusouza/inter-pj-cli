@@ -3,8 +3,10 @@
 mod assistente;
 mod auth;
 mod cobranca;
+mod completions;
 mod config;
 mod extrato;
+mod manual;
 mod pagamento;
 mod pix;
 mod pix_automatico;
@@ -60,8 +62,14 @@ pub(crate) async fn run(cli: Cli, matches: &ArgMatches) -> Result<(), CliError> 
                 .to_owned(),
         ));
     }
+    // Generated from the command definition: no configuration needed.
+    let command = match cli.command {
+        Command::Completions(args) => return completions::run(&args),
+        Command::Manual(args) => return manual::run(&args),
+        command => command,
+    };
     let context = Context::new(cli.global, matches, &SystemEnv)?;
-    match cli.command {
+    match command {
         Command::Saldo(args) => saldo::run(&context, &args).await,
         Command::Extrato(args) => extrato::run(&context, args).await,
         Command::Pix(command) => pix::run(&context, command).await,
@@ -71,6 +79,7 @@ pub(crate) async fn run(cli: Cli, matches: &ArgMatches) -> Result<(), CliError> 
         Command::Webhook(command) => webhook::run(&context, command).await,
         Command::Auth(command) => auth::run(&context, command).await,
         Command::Config(command) => config::run(&context, &command),
+        Command::Completions(_) | Command::Manual(_) => unreachable!("handled above"),
     }
 }
 

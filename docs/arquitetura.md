@@ -186,3 +186,5 @@ A biblioteca expõe erros tipados (`Error::{Config, Identity, Auth, Api, Transpo
 ### Idioma
 
 Código, comentários e rustdoc em inglês (padrão do ecossistema Rust). Tudo que o usuário lê — ajuda, mensagens, documentação — em português, e os modelos usam os nomes de campo da API (`disponivel`, `bloqueadoCheque`), preservando a linguagem do domínio.
+
+O clap não tem tradução: os títulos e as linhas de uso da ajuda são definidos em `cli::command`, para todos os comandos. As páginas de manual geradas pelo `clap_mangen` a partir da mesma definição têm os títulos e rótulos em inglês trocados (`commands/manual.rs`), com um teste que falha se algum sobrar depois de uma atualização da dependência.
