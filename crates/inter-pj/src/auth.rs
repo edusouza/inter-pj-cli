@@ -13,7 +13,6 @@ use std::sync::Arc;
 use chrono::{DateTime, TimeDelta, Utc};
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use sha2::{Digest, Sha256};
 use tokio::sync::Mutex;
 
 use crate::error::Result;
@@ -141,8 +140,10 @@ pub trait TokenStore: Send + Sync + fmt::Debug {
 pub fn cache_key(base_url: &str, client_id: &str) -> String {
     let raw = base_url.trim();
     let normalized = url::Url::parse(raw).map_or_else(|_| raw.to_owned(), String::from);
-    let digest = Sha256::digest(format!("{}\n{client_id}", normalized.trim_end_matches('/')));
+    let input = format!("{}\n{client_id}", normalized.trim_end_matches('/'));
+    let digest = aws_lc_rs::digest::digest(&aws_lc_rs::digest::SHA256, input.as_bytes());
     digest
+        .as_ref()
         .iter()
         .take(16)
         .fold(String::with_capacity(32), |mut hex, byte| {
@@ -505,7 +506,12 @@ mod tests {
 
     #[test]
     fn cache_key_is_stable_and_hides_client_id() {
+        // First 16 bytes of SHA-256("https://cdpj.partners.bancointer.com.br\nmeu-client-id"):
+        // changing it would orphan the tokens already cached on disk.
+        const EXPECTED: &str = "00012f5804743954325c488aac2e8cb6";
+
         let key = cache_key("https://cdpj.partners.bancointer.com.br/", "meu-client-id");
+        assert_eq!(key, EXPECTED);
         assert_eq!(
             key,
             cache_key("https://cdpj.partners.bancointer.com.br", "meu-client-id")
