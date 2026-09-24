@@ -131,7 +131,8 @@ impl Banking<'_> {
     /// [`MAX_IDS_REENVIO`](webhook::MAX_IDS_REENVIO) operations of a kind
     /// (`POST /banking/v2/webhooks/{tipoWebhook}/callbacks/retry`, scope
     /// `webhook-banking.write`): the `codigoSolicitacao` of Pix sent, or the
-    /// `codigoTransacao` of boletos paid. The answer names those found.
+    /// `codigoTransacao` of boletos paid, each in the field of its name. The
+    /// answer names those found.
     ///
     /// The request is repeated automatically only when it surely was not
     /// processed.
@@ -148,9 +149,11 @@ impl Banking<'_> {
         codigos: &[String],
     ) -> Result<ReenvioCallbacks> {
         webhook::quantos_reenviar(codigos.len())?;
-        let oque = match tipo {
-            TipoWebhookBanking::PixPagamento => "código da solicitação do Pix",
-            TipoWebhookBanking::BoletoPagamento => "código da transação",
+        let (campo, oque) = match tipo {
+            TipoWebhookBanking::PixPagamento => {
+                ("codigoSolicitacao", "código da solicitação do Pix")
+            }
+            TipoWebhookBanking::BoletoPagamento => ("codigoTransacao", "código da transação"),
         };
         let codigos = codigos
             .iter()
@@ -158,7 +161,7 @@ impl Banking<'_> {
             .collect::<Result<Vec<_>>>()?;
         let request = ApiRequest::new(endpoint::banking::WEBHOOK_REENVIAR)
             .path_param("tipoWebhook", tipo.as_str().to_owned())
-            .json(json!({ "codigoSolicitacao": codigos }))
+            .json(json!({ campo: codigos }))
             .retry(RetryMode::WhenNotProcessed);
         self.client.execute(request).await
     }

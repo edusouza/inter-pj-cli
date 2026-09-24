@@ -204,14 +204,22 @@ async fn retries_send_the_ids_and_name_those_found() {
         .expect(1)
         .mount(&server)
         .await;
+    // Each kind of the Banking API names its codes in a field of its own.
     Mock::given(method("POST"))
         .and(path(
             "/banking/v2/webhooks/boleto-pagamento/callbacks/retry",
         ))
         .and(body_json(
-            json!({"codigoSolicitacao": ["8bbdede4-35db-4ec9-b652-e176841e62c8"]}),
+            json!({"codigoTransacao": ["8bbdede4-35db-4ec9-b652-e176841e62c8"]}),
         ))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"foundIds": []})))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/banking/v2/webhooks/pix-pagamento/callbacks/retry"))
+        .and(body_json(json!({"codigoSolicitacao": [CODIGO]})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"foundIds": [CODIGO]})))
         .expect(1)
         .mount(&server)
         .await;
@@ -241,6 +249,12 @@ async fn retries_send_the_ids_and_name_those_found() {
         .await
         .unwrap();
     assert!(reenvio.found_ids.is_empty());
+    let reenvio = client
+        .banking()
+        .reenviar_callbacks(TipoWebhookBanking::PixPagamento, &[CODIGO.to_owned()])
+        .await
+        .unwrap();
+    assert_eq!(reenvio.found_ids, [CODIGO]);
     let chave: ChavePix = "+55 (11) 91234-5678".parse().unwrap();
     let txid: Txid = TXID.parse().unwrap();
     let reenvio = client
