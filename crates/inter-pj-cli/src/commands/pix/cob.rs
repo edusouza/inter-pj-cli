@@ -35,6 +35,7 @@ pub(super) async fn run(context: &Context, command: PixCobCommand) -> Result<(),
         PixCobCommand::Revisar(args) => revisar(context, &args, &mut Stdio).await,
         PixCobCommand::Consultar(args) => consultar(context, &args).await,
         PixCobCommand::Listar(args) => listar(context, &args).await,
+        PixCobCommand::Pagar(args) => super::sandbox::pagar_cob(context, &args).await,
     }
 }
 
