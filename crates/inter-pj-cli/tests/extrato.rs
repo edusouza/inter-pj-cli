@@ -352,6 +352,48 @@ async fn extrato_completo_le_todas_as_paginas_em_csv() {
     );
 }
 
+/// Every page read makes one statement, with the title and the totals of
+/// the period.
+#[tokio::test(flavor = "multi_thread")]
+async fn extrato_completo_com_todas_as_paginas_mostra_os_totais() {
+    let env = env().await;
+    for (pagina, ultima) in [(0, false), (1, true)] {
+        Mock::given(method("GET"))
+            .and(path(COMPLETO))
+            .and(query_param("pagina", pagina.to_string()))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "totalPaginas": 2, "totalElementos": 2, "ultimaPagina": ultima,
+                "transacoes": [completa(pagina + 1, if ultima { "D" } else { "C" }, "10.00")]
+            })))
+            .expect(1)
+            .mount(&env.server)
+            .await;
+    }
+
+    let out = stdout_of(
+        &env.cmd()
+            .args(["extrato", "completo", "--todas-paginas"])
+            .args(AGOSTO)
+            .assert()
+            .success(),
+    );
+    assert_eq!(
+        out,
+        "\
+Extrato completo de 01/08/2026 a 31/08/2026
+
+Data        Tipo  Descrição                   Contraparte             Valor
+10/08/2026  Pix   Pix recebido · Transação 1  Cliente Exemplo      R$ 10,00
+10/08/2026  Pix   Pix enviado · Transação 2   Fornecedor Exemplo  -R$ 10,00
+
+Entradas               R$ 10,00
+Saídas                -R$ 10,00
+Resultado do período    R$ 0,00
+2 transações
+"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn extrato_completo_usa_scroll_acima_de_dez_mil_transacoes() {
     let env = env().await;

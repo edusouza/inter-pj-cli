@@ -9,26 +9,27 @@ CLI em Rust para acessar a sua **conta PJ do Inter Empresas** pela linha de coma
 
 ```console
 $ inter-pj saldo
-Saldo disponível          R$ 2.850,55
-Bloqueado em cheque         R$ 240,25
-Bloqueado judicialmente     R$ 510,35
-Bloqueado administrativo      R$ 0,00
-Limite                    R$ 1.000,00
+Saldo disponível          R$ 16.579,17
+Bloqueado em cheque            R$ 0,00
+Bloqueado judicialmente        R$ 0,00
+Bloqueado administrativo       R$ 0,00
+Limite                     R$ 5.000,00
 
 $ inter-pj saldo --json | jq .disponivel
-2850.55
+16579.17
 
-$ inter-pj extrato --inicio 2026-08-01 --fim 2026-08-31
-Extrato de 01/08/2026 a 31/08/2026
+$ inter-pj extrato --inicio 2026-08-01 --fim 2026-08-10
+Extrato de 01/08/2026 a 10/08/2026
 
-Data        Tipo       Descrição                                   Valor
-03/08/2026  Pix        Pix recebido · Cliente Exemplo Ltda   R$ 1.500,00
-05/08/2026  Pagamento  Pagamento efetuado · Boleto; energia   -R$ 250,10
+Data        Tipo               Descrição                                      Valor
+03/08/2026  Pix                Pix recebido · Cliente Exemplo Ltda      R$ 1.500,00
+05/08/2026  Pagamento          Pagamento efetuado · Energia Exemplo SA   -R$ 250,10
+10/08/2026  Cobrança (boleto)  Boleto recebido · Beltrana de Tal          R$ 890,00
 
-Entradas              R$ 1.500,00
+Entradas              R$ 2.390,00
 Saídas                 -R$ 250,10
-Resultado do período  R$ 1.249,90
-2 transações
+Resultado do período  R$ 2.139,90
+3 transações
 ```
 
 ## O que já funciona
@@ -158,6 +159,8 @@ Locais padrão: configuração em `~/.config/inter-pj/config.toml` (Windows: `%A
 
 ## Uso
 
+Os [guias](docs/guias/README.md) mostram cada assunto com exemplos de terminal, que os testes executam contra uma simulação da API e conferem a cada mudança. Um resumo:
+
 ```console
 $ inter-pj saldo                        # saldo atual, bloqueios e limite
 $ inter-pj saldo --data 2026-08-31      # saldo disponível ao fim do dia
@@ -191,21 +194,7 @@ Nos últimos 30 dias da validade, e depois dela, todo comando que acessa a API a
 
 ### Extrato
 
-```console
-$ inter-pj extrato                                          # últimos 30 dias, hoje incluído
-$ inter-pj extrato --inicio 2026-01-01 --fim 2026-12-31 --dividir-periodo
-
-$ inter-pj extrato completo --inicio 2026-08-01 --fim 2026-08-31            # 1ª página, com contraparte
-$ inter-pj extrato completo --tipo-operacao D --tipo-transacao pix --pagina 1 --tamanho-pagina 100
-$ inter-pj extrato completo --inicio 2026-08-01 --fim 2026-08-31 --todas-paginas --formato csv > agosto.csv
-
-$ inter-pj extrato pdf --inicio 2026-08-01 --fim 2026-08-31                 # extrato-2026-08-01-a-2026-08-31.pdf
-$ inter-pj extrato pdf --inicio 2026-08-01 --fim 2026-08-31 --saida - | lpr
-```
-
-- A API aceita **no máximo 90 dias por consulta** (contando o primeiro e o último dia). A CLI confere o período antes de chamar a API; `--dividir-periodo` consulta períodos maiores em partes consecutivas.
-- `extrato completo` traz os detalhes de cada transação (pagador/recebedor do Pix, dados do boleto, do pagamento...). `--todas-paginas` percorre todas as páginas e, acima de 10.000 transações, passa para o modo *scroll* da API (um por conta, expira após 6 minutos sem uso).
-- `extrato pdf` grava o arquivo com permissão `600` e nunca substitui um arquivo existente sem `--sobrescrever`.
+O extrato de um período, o extrato completo, com os detalhes de cada transação, os filtros e as páginas, as planilhas e o PDF estão no guia [Saldo e extrato](docs/guias/saldo-e-extrato.md). A API aceita no máximo 90 dias por consulta, e `--dividir-periodo` consulta um período maior em partes.
 
 ### Pix
 
