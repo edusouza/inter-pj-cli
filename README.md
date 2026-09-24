@@ -202,46 +202,7 @@ Enviar um Pix por chave, código copia e cola ou dados bancários, agendar e aco
 
 ### Pagamentos
 
-Boletos, contas de consumo e tributos com código de barras:
-
-```console
-$ inter-pj pagamento boleto pagar '07797.77705 11678.471159 90071.126347 1 15950000003010'
-Pagamento a enviar
-  Ambiente         sandbox (dados fictícios)
-  Tipo             boleto do banco 077
-  Linha digitável  07797.77705 11678.471159 90071.126347 1 15950000003010
-  Valor            R$ 30,10 (trinta reais e dez centavos)
-  Vencimento       10/10/2026
-  Quando           agora
-Confirmar o pagamento? [s/N] s
-Pagamento realizado.
-Código da transação  3414f226-36fb-4d87-811e-cfd99911d845
-
-Acompanhe com: inter-pj pagamento boleto listar --codigo-transacao 3414f226-36fb-4d87-811e-cfd99911d845
-
-$ inter-pj pagamento boleto pagar 82670000000653301602023123106000000002830894 --vencimento 2026-10-10   # conta de água
-$ inter-pj pagamento boleto pagar '<linha digitável>' --valor 31,20 --data 2026-10-09 --beneficiario 12.345.678/0001-95
-```
-
-O código — linha digitável (47 dígitos nos boletos, 48 nas contas e tributos) ou código de barras (44) — tem todos os dígitos verificadores conferidos localmente. Valor e vencimento vêm do próprio código quando ele os traz; contas de consumo e tributos não trazem o vencimento, então precisam de `--vencimento` (a data impressa no documento). O resumo mostra o valor por extenso e, quando `--valor` ou `--vencimento` diferem do código, os dois lados com um aviso (juros, multa ou desconto); também avisa quando o pagamento fica para depois do vencimento. `--data` agenda o pagamento, e `--beneficiario` pede à API que confira o CPF/CNPJ de quem recebe. Os trilhos de segurança são os do Pix: confirmação `[s/N]` ou `--sim`, `--simular` e o limite por operação do perfil.
-
-Esta API não tem chave de idempotência. Se o resultado ficar incerto (tempo esgotado, erro 5xx), o pagamento pode ter sido feito e repetir o comando pode pagar duas vezes: a CLI mostra o `pagamento boleto listar --codigo ...` que confere isso antes de uma nova tentativa. Conforme a configuração da conta, o pagamento aguarda aprovação no Internet Banking. O pagamento precisa do escopo `pagamento-boleto.write`; no sandbox, a documentação oferece os códigos `03395988500000666539201493990000372830030102` (boleto vencido) e `82670000000653301602023123106000000002830894` (conta de água).
-
-```console
-$ inter-pj pagamento boleto listar --inicio 2026-09-01 --fim 2026-09-30
-Pagamentos incluídos de 01/09/2026 a 30/09/2026
-
-Vencimento  Pagamento   Beneficiário        Status        Valor  Código da transação
-10/10/2026  09/10/2026  Fornecedor Exemplo  agendado   R$ 30,10  3414f226-36fb-4d87-811e-cfd99911d845
-
-1 pagamento
-
-$ inter-pj pagamento boleto listar --filtrar-por vencimento --inicio 2026-12-01 --fim 2026-12-31
-$ inter-pj pagamento boleto listar --codigo '07797.77705 11678.471159 90071.126347 1 92950000003010'
-$ inter-pj pagamento boleto cancelar 3414f226-36fb-4d87-811e-cfd99911d845   # mostra o agendamento e pede confirmação
-```
-
-A listagem cobre até 90 dias por consulta; sem datas, mostra os pagamentos incluídos nos últimos 30 dias. `--filtrar-por` escolhe a data a que o período se refere (`inclusao`, `pagamento` ou `vencimento`), e o código (linha digitável ou código de barras) tem os dígitos verificadores conferidos antes da consulta. O cancelamento vale para agendamentos: a CLI mostra o pagamento (beneficiário, valor, data e status) e pede confirmação `[s/N]`, ou `--sim` em scripts. A listagem precisa do escopo `pagamento-boleto.read`; o cancelamento, também de `pagamento-boleto.write`.
+Boletos, contas de consumo e tributos com código de barras estão no guia [Pagamentos](docs/guias/pagamentos.md): o código conferido pelos dígitos verificadores, o valor e o vencimento que ele traz, `--vencimento` das contas, `--valor` de um boleto vencido ou com desconto, o agendamento, a conferência do beneficiário, a listagem e o cancelamento de um agendamento. Os trilhos são os do Pix, mas esta API não tem chave de idempotência: quando o resultado fica incerto, a CLI mostra como conferir antes de pagar de novo. Pagar precisa do escopo `pagamento-boleto.write`, e listar, do `pagamento-boleto.read`.
 
 ### DARF
 
