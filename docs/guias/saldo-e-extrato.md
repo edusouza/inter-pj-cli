@@ -81,7 +81,6 @@ Uma linha por transação, na ordem em que o banco as envia, com as saídas em v
 
 Sem `--inicio` e `--fim`, o extrato é o dos últimos 30 dias, hoje incluído:
 
-<!-- guia: saída ilustrativa -->
 ```console
 $ inter-pj extrato
 Extrato de 26/08/2026 a 24/09/2026
