@@ -17,7 +17,7 @@ Planejado a partir das especificações de todas as APIs do [Portal do Desenvolv
 | **0.2.0** | Extrato: consulta, enriquecido, PDF e exportação | [#12](https://github.com/edusouza/inter-pj-cli/issues/12) | `GET /banking/v2/extrato`, `/extrato/completo`, `/extrato/exportar` |
 | **0.3.0** | Pix: envio e consulta | [#18](https://github.com/edusouza/inter-pj-cli/issues/18) | `POST /banking/v2/pix`, `GET /banking/v2/pix/{codigoSolicitacao}` |
 | **0.4.0** | Pagamentos: boletos, tributos, DARF e lotes | [#22](https://github.com/edusouza/inter-pj-cli/issues/22) | `/banking/v2/pagamento*` (7 operações) |
-| 0.5.0 | Cobrança: boleto com Pix | [#27](https://github.com/edusouza/inter-pj-cli/issues/27) | `/cobranca/v3/cobrancas*` (9 operações) |
+| **0.5.0** | Cobrança: boleto com Pix | [#27](https://github.com/edusouza/inter-pj-cli/issues/27) | `/cobranca/v3/cobrancas*` (9 operações) |
 | 0.6.0 | Pix Cobrança: cob, cobv, recebidos, devoluções, locations e lotes | [#33](https://github.com/edusouza/inter-pj-cli/issues/33) | `/pix/v2/cob*`, `/cobv*`, `/pix*`, `/loc*`, `/lotecobv*` (27 operações) |
 | 0.7.0 | Webhooks e callbacks | [#40](https://github.com/edusouza/inter-pj-cli/issues/40) | webhooks de Banking, Cobrança e Pix (15 operações) |
 | 0.8.0 | Pix Automático | [#45](https://github.com/edusouza/inter-pj-cli/issues/45) | `/pix/v2/rec*`, `/solicrec*`, `/cobr*`, `/locrec*`, `/webhookrec`, `/webhookcobr` (27 operações) |
