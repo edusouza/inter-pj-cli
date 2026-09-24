@@ -246,39 +246,83 @@ fn the_documented_history_survives_a_round_trip() {
     assert_eq!(pagina.data[1].disparo(), Some("2023-09-24T14:15:22Z"));
 }
 
+/// Checks that a body of a retry has exactly the fields `campos`, all
+/// required, the first a list of 1 to [`MAX_IDS_REENVIO`] codes.
+fn confere_reenvio(schema: &Value, campos: &[&str], contexto: &str) {
+    let documentados: BTreeSet<&str> = campos.iter().copied().collect();
+    let obrigatorios: BTreeSet<&str> = schema["required"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    assert_eq!(obrigatorios, documentados, "{contexto}");
+    assert_eq!(
+        nomes(schema),
+        documentados
+            .iter()
+            .map(|campo| (*campo).to_owned())
+            .collect(),
+        "{contexto}"
+    );
+    let lista = &schema["properties"][campos[0]];
+    assert_eq!(lista["minItems"], 1, "{contexto}");
+    assert_eq!(lista["maxItems"], MAX_IDS_REENVIO, "{contexto}");
+}
+
 #[test]
 fn retries_send_the_documented_bodies() {
     for (endpoint, campos) in [
-        (
-            endpoint::banking::WEBHOOK_REENVIAR,
-            &["codigoSolicitacao"][..],
-        ),
         (
             endpoint::cobranca::WEBHOOK_REENVIAR,
             &["codigoSolicitacao"][..],
         ),
         (endpoint::pix::WEBHOOK_REENVIAR, &["txId", "chavePix"][..]),
     ] {
-        let schema = corpo(&endpoint);
-        let documentados: BTreeSet<&str> = campos.iter().copied().collect();
-        let obrigatorios: BTreeSet<&str> = schema["required"]
+        confere_reenvio(corpo(&endpoint), campos, &endpoint.to_string());
+    }
+    // Each kind of the Banking API names its codes in a field of its own:
+    // its schema is one body per kind, under `body`, as its example shows.
+    let banking = spec::schema("Banking_RetryCallbacksRequestBody");
+    for (tipo, campo) in [
+        (TipoWebhookBanking::PixPagamento, "codigoSolicitacao"),
+        (TipoWebhookBanking::BoletoPagamento, "codigoTransacao"),
+    ] {
+        let corpo = banking["properties"]["body"]["oneOf"]
             .as_array()
             .unwrap()
             .iter()
-            .filter_map(Value::as_str)
-            .collect();
-        assert_eq!(obrigatorios, documentados, "{endpoint}");
-        assert_eq!(
-            nomes(schema),
-            documentados
-                .iter()
-                .map(|campo| (*campo).to_owned())
-                .collect(),
-            "{endpoint}"
+            .map(resolve)
+            .find(|corpo| corpo["title"] == tipo.as_str())
+            .unwrap_or_else(|| panic!("{tipo}: sem corpo de reenvio"));
+        confere_reenvio(corpo, &[campo], tipo.as_str());
+        assert!(
+            banking["example"][tipo.as_str()][campo].is_array(),
+            "{tipo}"
         );
-        let lista = &schema["properties"][campos[0]];
-        assert_eq!(lista["minItems"], 1, "{endpoint}");
-        assert_eq!(lista["maxItems"], MAX_IDS_REENVIO, "{endpoint}");
+    }
+}
+
+#[test]
+fn the_banking_retry_has_a_body_of_its_own() {
+    // The unified specification points the operation to the body of the
+    // Cobrança retry, of the same name, which lists "códigos identificadores
+    // das cobranças"; the description of the operation, like the schema of
+    // the Banking API, names a field for each kind.
+    let operacao = operation(&endpoint::banking::WEBHOOK_REENVIAR);
+    assert_eq!(
+        operacao["requestBody"]["$ref"], "#/components/requestBodies/RetryCallbacksRequest",
+        "a especificação passou a ligar o reenvio do Banking a outro corpo: confira-o em retries_send_the_documented_bodies"
+    );
+    let descricao = operacao["description"].as_str().unwrap();
+    for (tipo, campo) in [
+        (TipoWebhookBanking::PixPagamento, "codigoSolicitacao"),
+        (TipoWebhookBanking::BoletoPagamento, "codigoTransacao"),
+    ] {
+        assert!(
+            descricao.contains(&format!("<b>{tipo}</b> - {campo}")),
+            "{descricao}"
+        );
     }
 }
 

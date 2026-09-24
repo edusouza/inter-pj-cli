@@ -22,6 +22,13 @@ A especificação é a **fonte de verdade dos testes de contrato** (`crates/inte
 - o enum `Scope` precisa conter exatamente os escopos declarados (exceto os do Fórum);
 - os modelos Rust precisam aceitar os exemplos derivados dos schemas.
 
+## Onde a especificação se contradiz
+
+Os testes seguem a especificação, menos onde ela contradiz a si mesma. Cada um destes casos tem um teste que falha quando a especificação muda:
+
+- o reenvio de callbacks da Cobrança está listado em `/cobranca/v3/webhook/callbacks/retry`, mas a descrição da própria operação mostra `/cobranca/v3/cobrancas/webhook/callbacks/retry`, o caminho que a biblioteca usa (`DIVERGENCIAS`, em `tests/spec/mod.rs`);
+- o reenvio de callbacks do Banking aponta para o corpo do reenvio da Cobrança, que tem o mesmo nome (`RetryCallbacksRequest`); a descrição da operação e o schema do próprio Banking (`Banking_RetryCallbacksRequestBody`) dão um campo para cada tipo de webhook: `codigoSolicitacao` para `pix-pagamento` e `codigoTransacao` para `boleto-pagamento`.
+
 ## Dados pessoais nos exemplos
 
 Alguns exemplos do portal traziam CPFs e CNPJs com dígitos verificadores válidos, e-mails em provedores reais, telefone e números de conta com aparência real (por exemplo, no detalhe de transferências e nos pagadores de cobranças). Para não manter possíveis dados de terceiros no repositório, eles foram substituídos por valores sintéticos (`123.456.789-09`, `12.345.678/0001-95`, endereços em `example.com`, `+5500000000000`, contas `1234…`) pelo script [`sanitizar.py`](sanitizar.py), que preserva o restante do arquivo byte a byte. CNPJs, CPFs formatados e e-mails são procurados em qualquer texto, inclusive nas descrições; só os domínios reservados para documentação (RFC 2606 e RFC 6761) ficam como estão.
