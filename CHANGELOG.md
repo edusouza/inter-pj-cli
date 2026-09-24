@@ -6,6 +6,10 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+### Adicionado
+
+- Biblioteca: `InterClient::pix`, a API Pix, com as cobranças imediatas (`cob`): `Pix::criar_cob` (com o seu `txid`, que torna segura a repetição de uma criação de resultado incerto), `criar_cob_sem_txid`, `revisar_cob` (inclusive a remoção), `consultar_cob` (com os Pix que a pagaram e suas devoluções) e `listar_cobs`/`listar_todas_cobs` por período de criação, com filtros de CPF/CNPJ, location e status. `CobSolicitada::validar` confere localmente a chave Pix, os valores (até 10 dígitos e 2 casas), a expiração, o devedor, os textos, as informações adicionais e as regras do Pix Saque e do Pix Troco; `Txid` valida (26 a 35 letras e dígitos) e gera txids (#34).
+
 ## [0.5.0] - 2026-09-24
 
 Cobranças: boletos com Pix para os clientes da empresa, da emissão ao cancelamento, com o QR Code do Pix no terminal e em PNG.

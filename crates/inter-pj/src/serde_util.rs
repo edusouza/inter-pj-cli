@@ -292,6 +292,52 @@ pub(crate) mod decimal_as_number {
     }
 }
 
+/// Serializes monetary values as text with two decimal places (`"100.50"`),
+/// the format of the Pix API (`\d{1,10}\.\d{2}`).
+pub(crate) mod decimal_texto {
+    use rust_decimal::Decimal;
+    use serde::Serializer;
+
+    pub(crate) fn serialize<S: Serializer>(
+        value: &Decimal,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&format!("{value:.2}"))
+    }
+
+    #[allow(clippy::ref_option)] // signature imposed by `serialize_with`
+    pub(crate) fn serialize_option<S: Serializer>(
+        value: &Option<Decimal>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        match value {
+            Some(value) => serialize(value, serializer),
+            None => serializer.serialize_none(),
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use rust_decimal::Decimal;
+
+        #[derive(serde::Serialize)]
+        struct Wrapper(#[serde(serialize_with = "super::serialize")] Decimal);
+
+        fn json(value: &str) -> String {
+            serde_json::to_string(&Wrapper(value.parse().unwrap())).unwrap()
+        }
+
+        #[test]
+        fn amounts_have_two_decimal_places() {
+            assert_eq!(json("150"), "\"150.00\"");
+            assert_eq!(json("150.5"), "\"150.50\"");
+            assert_eq!(json("0.01"), "\"0.01\"");
+            assert_eq!(json("9999999999.99"), "\"9999999999.99\"");
+            assert_eq!(json("7.890"), "\"7.89\"");
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
