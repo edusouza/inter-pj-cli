@@ -56,6 +56,22 @@ O plano completo — o caminho até a 1.0 — está em [`docs/roadmap.md`](docs/
 $ cargo install --locked --git https://github.com/edusouza/inter-pj-cli --tag v0.8.0 inter-pj-cli
 ```
 
+### Completions do shell e páginas de manual
+
+Os pacotes das releases trazem os scripts de completion em `completions/` e, fora do Windows, as páginas de manual em `man/man1`. O próprio `inter-pj` também os gera, o que serve a quem instalou com Cargo:
+
+```console
+$ inter-pj completions bash > ~/.local/share/bash-completion/completions/inter-pj
+$ inter-pj completions zsh > ~/.zfunc/_inter-pj    # com fpath=(~/.zfunc $fpath) antes do compinit
+$ inter-pj completions fish > ~/.config/fish/completions/inter-pj.fish
+$ inter-pj completions powershell >> $PROFILE
+$ inter-pj completions elvish >> ~/.config/elvish/rc.elv
+$ inter-pj manual ~/.local/share/man/man1           # uma página por comando
+$ man inter-pj-pix-enviar
+```
+
+As completions sugerem os comandos e as opções em todos os níveis e, no bash, no zsh e no fish, os valores das opções (`--formato`, `--tipo-conta`...). Abra um novo shell depois de instalá-las.
+
 ## Configuração
 
 ### 1. Crie a integração no Internet Banking PJ
