@@ -161,7 +161,7 @@ Os comandos que a saída sugere, como `Acompanhe com: inter-pj -p sandbox pix co
 
 ## Uso
 
-Os [guias](docs/guias/README.md) mostram cada assunto com exemplos de terminal, que os testes executam contra uma simulação da API e conferem a cada mudança. Um resumo:
+Os [guias](docs/guias/README.md) mostram cada assunto com exemplos de terminal, que os testes executam contra uma simulação da API e conferem a cada mudança, e as [receitas](docs/receitas.md), como usar a CLI em scripts, num cron ou num CI. Um resumo:
 
 ```console
 $ inter-pj saldo                        # saldo atual, bloqueios e limite
