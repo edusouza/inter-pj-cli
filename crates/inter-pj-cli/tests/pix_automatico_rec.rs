@@ -125,6 +125,38 @@ async fn cria_pelas_opcoes_e_diz_como_o_pagador_aprova() {
     }
 }
 
+/// The dates of Pix Automático follow the bank's calendar, like the others:
+/// with today fixed by `INTER_HOJE`, the first payment of yesterday has
+/// passed and the model starts in 30 days.
+#[tokio::test(flavor = "multi_thread")]
+async fn datas_seguem_o_dia_do_banco() {
+    let env = env().await;
+    nothing_is_sent(&env).await;
+    let assert = env
+        .cmd()
+        .env("INTER_HOJE", "2026-09-24")
+        .args(criar_com("--data-inicial", "2026-09-23"))
+        .arg("--sim")
+        .assert()
+        .code(2);
+    assert!(
+        stderr_of(&assert).contains("a data do primeiro pagamento (23/09/2026) já passou"),
+        "{}",
+        stderr_of(&assert)
+    );
+    let modelo = stdout_of(
+        &env.cmd()
+            .env("INTER_HOJE", "2026-09-24")
+            .args(["pix-automatico", "rec", "modelo"])
+            .assert()
+            .success(),
+    );
+    assert!(
+        modelo.contains("\"dataInicial\": \"2026-10-24\""),
+        "{modelo}"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn cria_pelo_arquivo_do_modelo() {
     let env = env().await;
