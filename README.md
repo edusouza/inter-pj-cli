@@ -268,10 +268,10 @@ Lote 0123456789abcdef01234567
   Criado em          01/10/2026 09:15:00
   Pagamentos         3
 
-Tipo    Status                 Valor  Código                                Detalhe
-boleto  pago               R$ 666,53  3414f226-36fb-4d87-811e-cfd99911d845
-boleto  pago                R$ 65,33  8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f
-DARF    erro no pagamento   R$ 47,14                                        Saldo insuficiente
+Tipo    Documento                                                Status                 Valor  Código                                Detalhe
+boleto  03399.20142 93990.000379 28300.301026 5 98850000066653   pago               R$ 666,53  3414f226-36fb-4d87-811e-cfd99911d845
+boleto  82670000000-1 65330160202-1 31231060000-1 00002830894-8  pago                R$ 65,33  8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f
+DARF    receita 0220 · Empresa Exemplo (12.345.678/0001-95)      erro no pagamento   R$ 47,14                                        Saldo insuficiente
 erro: o lote foi processado com erro: 1 de 3 pagamentos não foi feito
 ```
 

@@ -330,8 +330,8 @@ async fn mount_lote(env: &TestEnv, status: &str) {
             "status": status,
             "qtdePagamentos": 2,
             "pagamentos": [
-                {"tipoPagamento": "BOLETO", "status": "PAGO", "valorPagar": 30.1},
-                {"tipoPagamento": "DARF", "status": "ERRO_PAGAMENTO", "valorTotal": 47.14, "detalhe": "Saldo insuficiente"}
+                {"tipoPagamento": "BOLETO", "status": "PAGO", "valorPagar": 30.1, "codBarraLinhaDigitavel": "07791159500000030107777011678471159007112634"},
+                {"tipoPagamento": "DARF", "status": "ERRO_PAGAMENTO", "valorTotal": 47.14, "detalhe": "Saldo insuficiente", "codigoReceita": "0220", "nomeEmpresa": "Empresa Exemplo", "cnpjCpf": "12345678000195"}
             ]
         })))
         .mount(&env.server)
@@ -356,8 +356,15 @@ async fn consulta_um_lote() {
         )),
         "{texto}"
     );
+    // Each row says which payment it is, as the summary of `enviar` did.
     assert!(
-        texto.contains("DARF    erro no pagamento  R$ 47,14"),
+        texto.contains("boleto  07797.77705 11678.471159 90071.126347 1 15950000003010  pago"),
+        "{texto}"
+    );
+    assert!(
+        texto.contains(
+            "DARF    receita 0220 · Empresa Exemplo (12.345.678/0001-95)     erro no pagamento  R$ 47,14"
+        ),
         "{texto}"
     );
     assert!(texto.contains("Saldo insuficiente"), "{texto}");
