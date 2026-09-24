@@ -193,12 +193,17 @@ impl Comando {
     }
 
     /// Takes what the command printed as what the guide shows. The answer
-    /// to a confirmation stays where it was, and the generated keys stay the
-    /// ones of the guide.
+    /// to a confirmation stays where it was, or, in a new example, goes
+    /// after the summary; the generated keys stay the ones of the guide.
     pub(crate) fn atualizar(&mut self, execucao: &Execucao) {
         let mut novo: Vec<String> = execucao.linhas().iter().map(|l| (*l).to_owned()).collect();
         if let Some(posicao) = self.esperado.iter().position(|linha| confirmacao(linha)) {
-            novo.insert(posicao.min(novo.len()), self.esperado[posicao].clone());
+            let destino = if self.esperado.len() == 1 {
+                depois_do_resumo(&novo)
+            } else {
+                posicao.min(novo.len())
+            };
+            novo.insert(destino, self.esperado[posicao].clone());
         }
         let antigos = ids(&self.esperado.join("\n")).1;
         let mut texto = novo.join("\n");
@@ -211,6 +216,19 @@ impl Comando {
         }
         self.novo = Some(novo);
     }
+}
+
+/// Where a terminal shows the question of a confirmation: after the
+/// summary, which is the banner of production, if any, a title, and its
+/// indented lines and warnings.
+fn depois_do_resumo(linhas: &[String]) -> usize {
+    let banner = usize::from(linhas.first().is_some_and(|linha| linha.starts_with("***")));
+    let titulo = (banner + 1).min(linhas.len());
+    titulo
+        + linhas[titulo..]
+            .iter()
+            .take_while(|linha| linha.starts_with("  ") || linha.starts_with("aviso: "))
+            .count()
 }
 
 /// Whether the texts are the same, but for the generated keys and txids,
@@ -271,6 +289,20 @@ fn ids(texto: &str) -> (String, Vec<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_question_goes_after_the_summary() {
+        let linhas = |texto: &str| texto.lines().map(str::to_owned).collect::<Vec<_>>();
+        let saida = linhas(
+            "*** PRODUÇÃO ***\nPix a enviar\n  Valor  R$ 1,00\naviso: confira\nPix enviado.\nCódigo  1",
+        );
+        assert_eq!(depois_do_resumo(&saida), 4);
+        assert_eq!(
+            depois_do_resumo(&linhas("Devolução\n  Valor  R$ 1,00\nFeito.")),
+            2
+        );
+        assert_eq!(depois_do_resumo(&[]), 0);
+    }
 
     #[test]
     fn generated_ids_match_any_other_consistently() {

@@ -66,7 +66,8 @@ impl Sessao {
              ambiente = \"producao\"\n\
              client_id = \"id-da-integracao-dos-guias\"\n\
              certificado = \"~/inter/certificado.crt\"\n\
-             chave_privada = \"~/inter/chave.key\"\n\n\
+             chave_privada = \"~/inter/chave.key\"\n\
+             limite_por_operacao = \"20.000,00\"\n\n\
              [perfis.sandbox]\n\
              ambiente = \"sandbox\"\n\
              client_id = \"id-da-integracao-dos-guias\"\n\
@@ -166,9 +167,40 @@ impl Sessao {
         let status = filho.wait().unwrap();
         let raiz = self.dir.path().display().to_string();
         Execucao {
-            saida: String::from_utf8_lossy(&bytes).replace(&raiz, ""),
+            saida: String::from_utf8_lossy(&bytes)
+                .replace(&raiz, "")
+                .replace(&self.servidor, endereco_da_api(linha)),
             sucesso: status.success(),
         }
+    }
+}
+
+/// The address of the API that the profile of `linha` calls, which the
+/// commands print (in a simulation) in place of the mock's.
+fn endereco_da_api(linha: &Linha) -> &'static str {
+    let variavel = |nome: &str| {
+        linha
+            .variaveis
+            .iter()
+            .find(|(variavel, _)| variavel == nome)
+            .map(|(_, valor)| valor.as_str())
+    };
+    let mut perfil = variavel("INTER_PERFIL");
+    let mut ambiente = variavel("INTER_AMBIENTE");
+    let mut argumentos = linha.argumentos.iter().map(String::as_str);
+    while let Some(argumento) = argumentos.next() {
+        match argumento.split_once('=') {
+            Some(("--perfil", valor)) => perfil = Some(valor),
+            Some(("--ambiente", valor)) => ambiente = Some(valor),
+            _ if argumento == "-p" || argumento == "--perfil" => perfil = argumentos.next(),
+            _ if argumento == "--ambiente" => ambiente = argumentos.next(),
+            _ => {}
+        }
+    }
+    if ambiente.map_or(perfil == Some("sandbox"), |ambiente| ambiente == "sandbox") {
+        "https://cdpj-sandbox.partners.uatinter.co"
+    } else {
+        "https://cdpj.partners.bancointer.com.br"
     }
 }
 
