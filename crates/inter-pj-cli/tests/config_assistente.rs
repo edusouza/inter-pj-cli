@@ -8,16 +8,20 @@ use std::fs;
 use common::{TestEnv, stderr_of, stdout_of};
 use serde_json::Value;
 
-/// The answers, one per line, with the certificate and the key of `env`.
+/// The answers, one per line, with the certificate and the key of `env`
+/// and a file that does not exist, all with absolute paths (`/nao/existe`
+/// would be relative to the drive on Windows).
 fn respostas(env: &TestEnv, linhas: &[&str]) -> String {
     let certificado = env.path("certificado.crt").display().to_string();
     let chave = env.path("chave.key").display().to_string();
+    let inexistente = env.path("nao-existe.crt").display().to_string();
     let mut texto = String::new();
     for linha in linhas {
         texto.push_str(
             &linha
                 .replace("{crt}", &certificado)
-                .replace("{key}", &chave),
+                .replace("{key}", &chave)
+                .replace("{inexistente}", &inexistente),
         );
         texto.push('\n');
     }
@@ -106,7 +110,7 @@ async fn respostas_invalidas_sao_perguntadas_de_novo() {
                 "producao",
                 "",
                 "id-de-teste",
-                "/nao/existe.crt",
+                "{inexistente}",
                 "{key}",
                 "{crt}",
                 "{crt}",
@@ -118,11 +122,15 @@ async fn respostas_invalidas_sao_perguntadas_de_novo() {
         .assert()
         .success();
     let stderr = stderr_of(&assert);
+    let inexistente = format!(
+        "  não foi possível ler {}",
+        env.path("nao-existe.crt").display()
+    );
     for problema in [
         "  o nome do perfil tem letras sem acento, dígitos, _ ou -",
         "  ambiente inválido: \"teste\"",
         "  o client_id é o identificador da integração, sem espaços",
-        "  não foi possível ler /nao/existe.crt",
+        &inexistente,
         "  o arquivo de certificado não contém um certificado PEM",
         "  o arquivo de chave privada não contém uma chave PEM",
         "  a conta corrente vai só com os dígitos",
