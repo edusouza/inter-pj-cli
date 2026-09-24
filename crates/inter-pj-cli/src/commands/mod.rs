@@ -248,6 +248,26 @@ fn hoje() -> NaiveDate {
         .unwrap_or_else(|| hoje_em(Utc::now()))
 }
 
+/// Now, in Brasília, on the day of [`hoje`]: the time of the clock, on the
+/// day `INTER_HOJE` fixes when there is one. The deadlines that start now
+/// (the expiration of a confirmation request, the end of the default
+/// period of the Pix listings, the time to cancel a recurring charge) go
+/// with the dates of the tests.
+fn agora() -> DateTime<FixedOffset> {
+    agora_em(Utc::now(), HOJE_FIXO.get().copied())
+}
+
+fn agora_em(agora: DateTime<Utc>, hoje_fixo: Option<NaiveDate>) -> DateTime<FixedOffset> {
+    let agora = agora.with_timezone(&BRASILIA);
+    hoje_fixo
+        .and_then(|dia| {
+            dia.and_time(agora.time())
+                .and_local_timezone(BRASILIA)
+                .single()
+        })
+        .unwrap_or(agora)
+}
+
 /// `INTER_HOJE` (AAAA-MM-DD), the day taken as today, so that examples and
 /// tests with dates do not go stale. Like `INTER_BASE_URL`, which it needs,
 /// it exists for the tests against a local mock of the API: with the bank,
@@ -351,6 +371,20 @@ mod tests {
         assert_eq!(em("2026-09-25T02:59:59Z"), dia(2026, 9, 24));
         assert_eq!(em("2026-09-25T03:00:00Z"), dia(2026, 9, 25));
         assert_eq!(em("2026-12-31T23:59:59Z"), dia(2026, 12, 31));
+    }
+
+    #[test]
+    fn now_is_on_the_fixed_day() {
+        let relogio: DateTime<Utc> = "2027-03-05T01:30:15Z".parse().unwrap();
+        // The time of the clock in Brasília, 22:30:15 of the day before.
+        assert_eq!(
+            agora_em(relogio, None).to_rfc3339(),
+            "2027-03-04T22:30:15-03:00"
+        );
+        assert_eq!(
+            agora_em(relogio, NaiveDate::from_ymd_opt(2026, 9, 24)).to_rfc3339(),
+            "2026-09-24T22:30:15-03:00"
+        );
     }
 
     fn matches(args: &[&str]) -> ArgMatches {
