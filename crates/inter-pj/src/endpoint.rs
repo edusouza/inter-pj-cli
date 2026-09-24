@@ -253,6 +253,47 @@ pub mod cobranca {
     };
 }
 
+/// Operations of the Pix API (`/pix/v2`).
+pub mod pix {
+    use super::{Endpoint, Method};
+    use crate::scope::Scope;
+
+    /// `PUT /pix/v2/cob/{txid}` — creates an immediate charge with your txid.
+    pub const CRIAR_COB: Endpoint = Endpoint {
+        method: Method::Put,
+        path: "/pix/v2/cob/{txid}",
+        scopes: &[Scope::CobWrite],
+    };
+
+    /// `POST /pix/v2/cob` — creates an immediate charge; Inter chooses the txid.
+    pub const CRIAR_COB_SEM_TXID: Endpoint = Endpoint {
+        method: Method::Post,
+        path: "/pix/v2/cob",
+        scopes: &[Scope::CobWrite],
+    };
+
+    /// `PATCH /pix/v2/cob/{txid}` — changes or removes an immediate charge.
+    pub const REVISAR_COB: Endpoint = Endpoint {
+        method: Method::Patch,
+        path: "/pix/v2/cob/{txid}",
+        scopes: &[Scope::CobWrite],
+    };
+
+    /// `GET /pix/v2/cob/{txid}` — an immediate charge.
+    pub const CONSULTAR_COB: Endpoint = Endpoint {
+        method: Method::Get,
+        path: "/pix/v2/cob/{txid}",
+        scopes: &[Scope::CobRead],
+    };
+
+    /// `GET /pix/v2/cob` — immediate charges of a period, paginated.
+    pub const LISTAR_COBS: Endpoint = Endpoint {
+        method: Method::Get,
+        path: "/pix/v2/cob",
+        scopes: &[Scope::CobRead],
+    };
+}
+
 /// Every operation implemented by this crate.
 pub const ALL: &[Endpoint] = &[
     TOKEN,
@@ -278,4 +319,9 @@ pub const ALL: &[Endpoint] = &[
     cobranca::EDITAR,
     cobranca::EDICAO,
     cobranca::PAGAR,
+    pix::CRIAR_COB,
+    pix::CRIAR_COB_SEM_TXID,
+    pix::REVISAR_COB,
+    pix::CONSULTAR_COB,
+    pix::LISTAR_COBS,
 ];
