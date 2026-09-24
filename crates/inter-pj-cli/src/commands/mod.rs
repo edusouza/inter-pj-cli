@@ -6,6 +6,7 @@ mod config;
 mod extrato;
 mod pagamento;
 mod pix;
+mod pix_automatico;
 mod qrcode;
 mod saldo;
 mod simulacao;
@@ -63,6 +64,7 @@ pub(crate) async fn run(cli: Cli, matches: &ArgMatches) -> Result<(), CliError> 
         Command::Saldo(args) => saldo::run(&context, &args).await,
         Command::Extrato(args) => extrato::run(&context, args).await,
         Command::Pix(command) => pix::run(&context, command).await,
+        Command::PixAutomatico(command) => pix_automatico::run(&context, command).await,
         Command::Pagamento(command) => pagamento::run(&context, command).await,
         Command::Cobranca(command) => cobranca::run(&context, command).await,
         Command::Webhook(command) => webhook::run(&context, command).await,

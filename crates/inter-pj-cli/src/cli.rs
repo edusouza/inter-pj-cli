@@ -24,6 +24,7 @@ use crate::tabela::Separador;
 use crate::valor::{parse_valor, parse_valor_ou_zero};
 
 mod pix;
+mod pix_automatico;
 mod webhook;
 
 pub(crate) use pix::{
@@ -36,6 +37,10 @@ pub(crate) use pix::{
     PixLoteCobvListarArgs, PixLoteCobvSituacaoArgs, PixPagarQrcodeArgs, PixRecebidoConsultarArgs,
     PixRecebidosCommand, PixRecebidosListarArgs, PixSandboxCommand, PixSandboxPagarArgs, SimNao,
     StatusCobArg,
+};
+pub(crate) use pix_automatico::{
+    PixAutomaticoCommand, RecCancelarArgs, RecCommand, RecConsultarArgs, RecCriarArgs,
+    RecListarArgs, RecRevisarArgs,
 };
 pub(crate) use webhook::{
     CallbacksArgs, WebhookBankingCommand, WebhookCadastroArgs, WebhookCobrancaCommand,
@@ -320,6 +325,13 @@ pub(crate) enum Command {
         subcommand_value_name = "COMANDO"
     )]
     Cobranca(CobrancaCommand),
+    /// Pix Automático: cobranças recorrentes que o pagador autoriza uma vez
+    #[command(
+        subcommand,
+        subcommand_help_heading = "Comandos",
+        subcommand_value_name = "COMANDO"
+    )]
+    PixAutomatico(PixAutomaticoCommand),
     /// Webhooks: os endereços que o Inter chama quando algo acontece na conta
     #[command(
         subcommand,
@@ -360,6 +372,7 @@ impl Command {
                 | PixCommand::Loc(PixLocCommand::Listar(_))
                 | PixCommand::LoteCobv(PixLoteCobvCommand::Listar(_)),
             )
+            | Self::PixAutomatico(PixAutomaticoCommand::Rec(RecCommand::Listar(_)))
             | Self::Webhook(
                 WebhookCommand::Banking(WebhookBankingCommand::Callbacks(_))
                 | WebhookCommand::Cobranca(WebhookCobrancaCommand::Callbacks(_))
@@ -367,6 +380,7 @@ impl Command {
             ) => true,
             Self::Extrato(args) => !matches!(args.comando, Some(ExtratoCommand::Pdf(_))),
             Self::Pix(_)
+            | Self::PixAutomatico(_)
             | Self::Pagamento(_)
             | Self::Cobranca(_)
             | Self::Webhook(_)

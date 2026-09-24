@@ -61,6 +61,17 @@ pub(crate) enum CliError {
         /// Command that finds the charge, to run before trying again.
         consulta: String,
     },
+    /// A creation without idempotency key (a recurrence, a confirmation
+    /// request) whose outcome is unknown: it may have been made, and
+    /// repeating it may make another.
+    #[error("{source}")]
+    CriacaoIncerta {
+        source: InterError,
+        /// What may have happened: "a recorrência pode ter sido criada".
+        situacao: &'static str,
+        /// Command that finds it, to run before trying again.
+        consulta: String,
+    },
     /// A Pix charge whose creation is unknown: it may have been created.
     /// With the same txid, the API does not create a second one.
     #[error("{source}")]
@@ -164,6 +175,7 @@ impl CliError {
             | Self::ResultadoIncerto { source: err, .. }
             | Self::PagamentoIncerto { source: err, .. }
             | Self::EmissaoIncerta { source: err, .. }
+            | Self::CriacaoIncerta { source: err, .. }
             | Self::CobrancaPixIncerta { source: err, .. }
             | Self::DevolucaoIncerta { source: err, .. }
             | Self::LoteCobvIncerto { source: err, .. }
@@ -211,6 +223,16 @@ impl CliError {
                 vec![
                     format!(
                         "{situacao}, e esta API não tem chave de idempotência: repetir o comando pode pagar duas vezes"
+                    ),
+                    format!("confira antes de tentar de novo: {consulta}"),
+                ]
+            }
+            Self::CriacaoIncerta {
+                situacao, consulta, ..
+            } => {
+                vec![
+                    format!(
+                        "{situacao}, e esta API não tem chave de idempotência: repetir o comando pode criar outra"
                     ),
                     format!("confira antes de tentar de novo: {consulta}"),
                 ]

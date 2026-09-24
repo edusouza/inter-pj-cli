@@ -9,6 +9,7 @@ mod cobv;
 mod csv;
 mod lote;
 mod lote_cobv;
+mod rec;
 
 use std::fmt::Display;
 use std::io::{self, Read};
@@ -32,6 +33,7 @@ pub(crate) use cobranca::{cobranca, modelo_cobranca};
 pub(crate) use cobv::{cobv, modelo_cobv};
 pub(crate) use lote::{ArquivoLote, MODELO_CSV, MODELO_JSON, ler_lote};
 pub(crate) use lote_cobv::{ler_lote_cobv, ler_revisao_lote_cobv, modelo_lote_cobv};
+pub(crate) use rec::{modelo_rec, rec};
 
 /// Fields of a payment by barcode, as in the API (`EfetuarPagamento`).
 pub(crate) const CAMPOS_BOLETO: [&str; 5] = [
@@ -314,6 +316,19 @@ impl<'a> Campos<'a> {
         self.texto(campo)?
             .map(|texto| Documento::parse(&texto).map_err(|err| self.erro(campo, err)))
             .transpose()
+    }
+
+    /// The document of a person: its `cpf` or its `cnpj`, one of them, in
+    /// the field of its kind.
+    pub(crate) fn cpf_ou_cnpj(&self) -> Result<Documento, CliError> {
+        match (self.documento("cpf")?, self.documento("cnpj")?) {
+            (Some(cpf @ Documento::Cpf(_)), None) => Ok(cpf),
+            (None, Some(cnpj @ Documento::Cnpj(_))) => Ok(cnpj),
+            (Some(_), None) => Err(self.erro("cpf", "o documento é um CNPJ: use o campo cnpj")),
+            (None, Some(_)) => Err(self.erro("cnpj", "o documento é um CPF: use o campo cpf")),
+            (Some(_), Some(_)) => Err(self.erro("cnpj", "informe cpf ou cnpj, não os dois")),
+            (None, None) => Err(self.erro("cpf", "obrigatório: informe cpf ou cnpj")),
+        }
     }
 }
 
