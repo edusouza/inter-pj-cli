@@ -6,10 +6,11 @@
 ┌──────────────────────── crates/inter-pj-cli (binário `inter-pj`) ─────────────────────────┐
 │ cli.rs, cli/  definição dos comandos (clap) e ajuda em português                          │
 │ config.rs     arquivo TOML, perfis, precedência flag > env > arquivo, origem dos valores  │
-│ commands/     saldo, extrato, pix, pagamento, cobranca, webhook, auth, config             │
+│ commands/     saldo, extrato, pix, pix_automatico, pagamento, cobranca, webhook,          │
+│               auth, config                                                                │
 │ token_store   cache de tokens em arquivo (600, gravação atômica)                          │
 │ confirmacao   resumo + [s/N] antes de mover dinheiro (só com stdin em terminal)           │
-│ arquivo/      pagamentos e cobranças em arquivo: JSON da API e CSV (Excel pt-BR)          │
+│ arquivo/      pagamentos, cobranças e recorrências em arquivo: JSON da API e CSV          │
 │ valor.rs      valores em reais digitados (150,00 / 1.500,00) e por extenso                │
 │ tabela.rs     tabelas em texto alinhado e CSV (RFC 4180, modo Excel pt-BR)                │
 │ output.rs     R$ no formato brasileiro, JSON, escrita em stdout                           │
@@ -33,6 +34,9 @@
 │ documento.rs  CPF e CNPJ (inclusive o alfanumérico) com dígitos verificadores             │
 │ pix/          API Pix: cobranças, recebidos, devoluções, locations, lotes e sandbox       │
 │               chave Pix (formatos do DICT) e leitura do copia e cola (BR Code, CRC16)     │
+│ pix_automatico/                                                                           │
+│               Pix Automático: recorrências, solicitações de confirmação, cobranças        │
+│               recorrentes, locations, webhooks e sandbox                                  │
 │ webhook.rs    webhooks das três APIs: URL conferida, callbacks e reenvio                  │
 └───────────────────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -62,7 +66,7 @@ Os endpoints ficam em um só lugar (`endpoint.rs`) e são usados tanto para mont
 
 ### Retentativas só quando repetir é seguro
 
-Cada requisição tem um modo de repetição. Consultas (`GET`) e o pedido de token são repetidas em `429`, `500`, `502`, `503`, `504`, falhas de conexão e tempo esgotado. As requisições do modo *scroll* do extrato mudam estado no servidor (avançam o cursor): repeti-las depois de um `504` poderia pular um lote inteiro, então elas só são repetidas quando certamente não foram processadas (`429` ou conexão recusada). O envio de Pix também só é repetido nesses dois casos, e sempre com a mesma chave de idempotência; depois de um `5xx` ou de tempo esgotado o resultado é incerto e a decisão fica com quem chamou. As cobranças Pix e as devoluções seguem a mesma regra e, como levam o txid ou o id da devolução no caminho, quem chamou pode repeti-las com segurança. Pagamentos por código de barras, DARFs, lotes, cancelamentos e as operações da API de Cobrança seguem a mesma regra, mas não têm chave de idempotência: depois de um resultado incerto, o pagamento ou a cobrança deve ser consultado antes de uma nova tentativa. Os cadastros, as exclusões e os reenvios de webhooks também só são repetidos nesses dois casos, e uma alteração incerta vem com o comando que mostra o webhook. Nenhuma outra operação com efeitos é repetida. Falhas de TLS (certificado recusado, CA desconhecida) também não, porque repetir não resolve.
+Cada requisição tem um modo de repetição. Consultas (`GET`) e o pedido de token são repetidas em `429`, `500`, `502`, `503`, `504`, falhas de conexão e tempo esgotado. As requisições do modo *scroll* do extrato mudam estado no servidor (avançam o cursor): repeti-las depois de um `504` poderia pular um lote inteiro, então elas só são repetidas quando certamente não foram processadas (`429` ou conexão recusada). O envio de Pix também só é repetido nesses dois casos, e sempre com a mesma chave de idempotência; depois de um `5xx` ou de tempo esgotado o resultado é incerto e a decisão fica com quem chamou. As cobranças Pix e as devoluções seguem a mesma regra e, como levam o txid ou o id da devolução no caminho, quem chamou pode repeti-las com segurança. Pagamentos por código de barras, DARFs, lotes, cancelamentos e as operações da API de Cobrança seguem a mesma regra, mas não têm chave de idempotência: depois de um resultado incerto, o pagamento ou a cobrança deve ser consultado antes de uma nova tentativa. Os cadastros, as exclusões e os reenvios de webhooks também só são repetidos nesses dois casos, e uma alteração incerta vem com o comando que mostra o webhook. No Pix Automático, a criação de recorrências e de solicitações segue a regra dos pagamentos, sem chave de idempotência, e a das cobranças recorrentes, a das cobranças Pix, com o txid no caminho. Nenhuma outra operação com efeitos é repetida. Falhas de TLS (certificado recusado, CA desconhecida) também não, porque repetir não resolve.
 
 A espera cresce exponencialmente a partir de 1 s, com *jitter* (entre metade e o total do intervalo) e teto de 60 s; um `Retry-After` maior que o teto faz a CLI desistir na hora, com a dica de aguardar.
 
@@ -140,6 +144,16 @@ A especificação se contradiz no reenvio de callbacks de cobranças: a chave da
 O histórico dos callbacks guarda o conteúdo enviado como veio, porque os schemas não o descrevem bem: o do Pix repete o da Cobrança, e o exemplo documentado traz `{}` onde o schema diz uma lista. `Callback::valores` procura um campo onde quer que ele esteja, para mostrar o código da operação que o reenvio recebe. No Banking, esse código não é o do filtro: o histórico de `pix-pagamento` filtra pelo `endToEnd`, e o reenvio pede o `codigoSolicitacao`. O comando sugerido para reenviar considera todas as tentativas do período, então uma operação entregue numa tentativa automática posterior fica de fora.
 
 O reenvio aceita até 50 operações por pedido e 5 pedidos por minuto, em produção. A CLI confere todos os códigos antes do primeiro pedido, para que um código inválido no segundo bloco não deixe o primeiro enviado, tira as repetições e divide o resto em blocos de 50; com mais de 5 blocos, espera 12 segundos entre eles, porque uma retentativa depois de um `429` não cobre o minuto inteiro. Se um bloco falha depois de outros, a dica diz quantos já foram pedidos e traz o comando para os restantes.
+
+### Pix Automático: recorrências, solicitações e cobranças recorrentes
+
+O Pix Automático encadeia três objetos. A recorrência (`rec`) é a autorização do pagador: o devedor e o contrato, o período, a periodicidade, o valor (fixo, um mínimo para o limite que o pagador define, ou o de cada cobrança) e a política de retentativas. O pagador a aprova no banco dele, pelo QR Code de uma location (`locrec`), pelo QR Code composto com uma cobrança imediata ou com vencimento, ou por uma solicitação de confirmação (`solicrec`) que o recebedor envia ao banco do pagador. Aprovada a recorrência, cada ciclo tem uma cobrança recorrente (`cobr`), que o banco do pagador agenda e debita no vencimento.
+
+`IdRec` e `IdSolicRec` são conferidos antes de qualquer requisição (29 letras e dígitos), e as regras que a documentação define (tamanhos, datas, valores, a conta e o ISPB do pagador, a conta que recebe) são conferidas com o campo como a API o nomeia, que a CLI traduz para a opção. A criação de recorrências e de solicitações não tem chave de idempotência: a biblioteca só a repete quando certamente não foi processada, e um resultado incerto vira `CriacaoIncerta`, com o comando que confere o que aconteceu. A cobrança recorrente é criada com o txid no caminho (`PUT /cobr/{txid}`), que a CLI gera quando não é informado; como a API não cria duas com o mesmo txid, repeti-la é seguro, como nas cobranças Pix.
+
+Antes de enviar, a CLI consulta aquilo de que a operação depende. A solicitação e a cobrança consultam a recorrência: só uma aprovada aceita cobranças, e uma já aprovada ou encerrada não aceita solicitação. O cancelamento de uma solicitação vale enquanto ela não tem resposta, e o pedido de nova tentativa confere a política da recorrência e a janela de 7 dias depois da liquidação prevista, que a especificação define. O que só a API decide vira aviso no resumo, e não recusa: um valor diferente do fixo, um vencimento fora do período da recorrência, o limite de 3 tentativas, dois pedidos no mesmo dia e o horário limite do cancelamento (22h do dia anterior à liquidação).
+
+A especificação tem particularidades que a biblioteca e os testes de contrato levam em conta. O caminho do sandbox de cobranças usa `{txId}`, enquanto o parâmetro documentado é `txid`; o sandbox da solicitação é endereçado pela recorrência, e o da recorrência pede o escopo `pix.write`. Os webhooks entregam as notificações no endereço cadastrado seguido de `/rec` e `/cobr`, com os corpos `{recs: [...]}` e `{cobsr: [...]}`, e a CLI mostra esse endereço. Os exemplos trazem o CEP com hífen, a conta como número, o tipo de conta `POUPANÇA` com cedilha e o status das atualizações em `nome`, que os modelos leem como vêm; os testes de contrato leem os exemplos da especificação em tempo de execução, com CPF e CNPJ sintéticos no lugar dos dela.
 
 ### Extrato completo: paginação e scroll
 
