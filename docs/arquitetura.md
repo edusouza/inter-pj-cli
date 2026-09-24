@@ -16,7 +16,7 @@
 │ output.rs     R$ no formato brasileiro, JSON, escrita em stdout                           │
 │ qr.rs         QR Code do Pix no terminal e em PNG (gravador próprio)                      │
 │ saida.rs      PDF e PNG gravados com permissão 600, sem sobrescrever, ou em stdout        │
-│ files.rs      gravação de arquivos sensíveis com permissão 600                            │
+│ files.rs      arquivos 600, criados com O_EXCL ou trocados por rename (sem seguir links)  │
 │ error.rs      códigos de saída e dicas                                                    │
 └──────────────────────────────────────┬────────────────────────────────────────────────────┘
                                        │ usa

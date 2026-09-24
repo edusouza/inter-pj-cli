@@ -7,8 +7,7 @@
 //! Nothing here moves money, so the answers may come from a pipe too.
 
 use std::fmt::Write as _;
-use std::fs::{self, OpenOptions};
-use std::io::Write as _;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use chrono::{Local, Utc};
@@ -131,6 +130,9 @@ fn perguntar_perfil(
         let (escrito, lido) = caminho(texto, base)?;
         ClientIdentity::from_pem_files(&certificado_lido, &lido).map_err(|err| err.to_string())?;
         eprintln!("  certificado e chave aceitos");
+        if let Some(aviso) = config::aviso_de_permissao_da_chave(&lido) {
+            output::eprint_linha(&format!("  aviso: {aviso}"));
+        }
         Ok(escrito)
     })?;
     let conta_corrente = perguntar(
@@ -294,21 +296,17 @@ fn arquivo(perfil: &Perfil) -> String {
 }
 
 /// Adds the section of `perfil` at the end of an existing file, which keeps
-/// its comments.
+/// its comments. The file is written again, atomically and readable by the
+/// owner only, as `config init` writes it.
 fn acrescentar(caminho: &Path, perfil: &Perfil) -> Result<(), CliError> {
     let erro = |err| CliError::io(format!("falha ao gravar {}", caminho.display()), err);
-    let atual = fs::read_to_string(caminho).map_err(erro)?;
-    let mut texto = String::new();
-    if !atual.is_empty() && !atual.ends_with('\n') {
+    let mut texto = fs::read_to_string(caminho).map_err(erro)?;
+    if !texto.is_empty() && !texto.ends_with('\n') {
         texto.push('\n');
     }
     texto.push('\n');
     texto.push_str(&secao(perfil));
-    OpenOptions::new()
-        .append(true)
-        .open(caminho)
-        .and_then(|mut arquivo| arquivo.write_all(texto.as_bytes()))
-        .map_err(erro)
+    write_private(caminho, texto.as_bytes()).map_err(erro)
 }
 
 #[cfg(test)]

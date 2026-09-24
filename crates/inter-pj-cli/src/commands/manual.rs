@@ -8,7 +8,7 @@ use clap_mangen::Man;
 
 use crate::cli::{self, ManualArgs};
 use crate::error::CliError;
-use crate::output;
+use crate::{files, output};
 
 pub(super) fn run(args: &ManualArgs) -> Result<(), CliError> {
     let diretorio = &args.diretorio;
@@ -23,7 +23,7 @@ pub(super) fn run(args: &ManualArgs) -> Result<(), CliError> {
         .map_err(|err| CliError::io(format!("falha ao criar {}", diretorio.display()), err))?;
     for pagina in &paginas {
         let caminho = diretorio.join(&pagina.arquivo);
-        fs::write(&caminho, &pagina.texto)
+        files::write_public(&caminho, pagina.texto.as_bytes())
             .map_err(|err| CliError::io(format!("falha ao gravar {}", caminho.display()), err))?;
     }
     output::print(&format!(
