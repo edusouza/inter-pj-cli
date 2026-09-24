@@ -82,7 +82,17 @@ fn da_linha_de_comando(matches: &ArgMatches, id: &str) -> bool {
 
 /// `texto` as one argument of a shell command: quoted when it has to be.
 pub(crate) fn argumento(texto: &str) -> String {
-    let simples = |c: char| c.is_ascii_alphanumeric() || "-_./:,+=@%".contains(c);
+    argumento_em(texto, cfg!(windows))
+}
+
+/// [`argumento`] in the shells of Windows (`windows`), where cmd and
+/// PowerShell read as it is the backslash that separates a path and the
+/// `~` of a short name (`RUNNER~1`), or in a POSIX shell, where the
+/// backslash escapes the next character.
+fn argumento_em(texto: &str, windows: bool) -> String {
+    let simples = |c: char| {
+        c.is_ascii_alphanumeric() || "-_./:,+=@%".contains(c) || (windows && "\\~".contains(c))
+    };
     if !texto.is_empty() && texto.chars().all(simples) {
         texto.to_owned()
     } else {
@@ -142,5 +152,18 @@ mod tests {
         assert_eq!(argumento("Pedido 1"), "'Pedido 1'");
         assert_eq!(argumento("d'água"), r"'d'\''água'");
         assert_eq!(argumento(""), "''");
+    }
+
+    #[test]
+    fn a_path_of_windows_is_quoted_only_where_the_backslash_escapes() {
+        let caminho = r"C:\Users\RUNNER~1\AppData\Local\Temp\.tmp35pZ0H\config\config.toml";
+        assert_eq!(argumento_em(caminho, true), caminho);
+        assert_eq!(argumento_em(caminho, false), format!("'{caminho}'"));
+        // A space still needs the quotes.
+        assert_eq!(
+            argumento_em(r"C:\Minha pasta\config.toml", true),
+            r"'C:\Minha pasta\config.toml'"
+        );
+        assert_eq!(argumento_em("~/config.toml", false), "'~/config.toml'");
     }
 }
