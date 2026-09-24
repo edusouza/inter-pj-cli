@@ -43,7 +43,10 @@ pub(crate) use pix_automatico::{
     CobrRetentativaArgs, ContatoDevedorArgs, LocrecCommand, LocrecConsultarArgs,
     LocrecDesvincularArgs, LocrecListarArgs, PixAutomaticoCommand, Prazo, RecCancelarArgs,
     RecCommand, RecConsultarArgs, RecCriarArgs, RecListarArgs, RecRevisarArgs,
-    SolicitacaoCancelarArgs, SolicitacaoCommand, SolicitacaoConsultarArgs, SolicitacaoCriarArgs,
+    SandboxPagarCobrArgs, SandboxPixAutomaticoCommand, SandboxStatusCobrArgs, SandboxStatusRecArgs,
+    SandboxStatusSolicitacaoArgs, SolicitacaoCancelarArgs, SolicitacaoCommand,
+    SolicitacaoConsultarArgs, SolicitacaoCriarArgs, StatusRecSandboxArg,
+    StatusSolicitacaoSandboxArg,
 };
 pub(crate) use webhook::{
     CallbacksArgs, WebhookBankingCommand, WebhookCadastroArgs, WebhookCobrancaCommand,

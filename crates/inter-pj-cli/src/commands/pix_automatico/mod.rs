@@ -4,6 +4,7 @@
 mod cobr;
 mod locrec;
 mod rec;
+mod sandbox;
 mod solicitacao;
 
 use std::fmt::Write as _;
@@ -24,6 +25,7 @@ pub(super) async fn run(context: &Context, command: PixAutomaticoCommand) -> Res
         PixAutomaticoCommand::Solicitacao(command) => solicitacao::run(context, command).await,
         PixAutomaticoCommand::Cobr(command) => cobr::run(context, command).await,
         PixAutomaticoCommand::Locrec(command) => locrec::run(context, command).await,
+        PixAutomaticoCommand::Sandbox(command) => sandbox::run(context, command).await,
     }
 }
 
