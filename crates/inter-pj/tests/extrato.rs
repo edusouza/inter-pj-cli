@@ -185,8 +185,9 @@ async fn large_periods_switch_to_scroll_mode() {
         .and(path(COMPLETO))
         .and(query_param("scrollEnabled", "true"))
         .and(query_param("dataInicio", "2026-08-01"))
+        // The batches announce the transactions the scroll delivers.
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "totalElementos": 25_000, "numeroDeElementos": 2,
+            "totalElementos": 3, "numeroDeElementos": 2,
             "scrollId": "550e8400-e29b-41d4-a716-446655440000", "hasMore": true,
             "transacoes": [completa(1), completa(2)]
         })))
@@ -202,12 +203,75 @@ async fn large_periods_switch_to_scroll_mode() {
         .and(query_param("dataFim", "2026-08-31"))
         .and(query_param_is_missing("scrollEnabled"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "totalElementos": 25_000, "numeroDeElementos": 1, "hasMore": false,
+            "totalElementos": 3, "numeroDeElementos": 1, "hasMore": false,
             "transacoes": [completa(3)]
         })))
         .expect(1)
         .mount(&server)
         .await;
+
+    let transacoes = client(&server)
+        .banking()
+        .extrato_completo_todas(&FiltroExtrato::new(agosto()))
+        .await
+        .unwrap();
+    assert_eq!(ids(&transacoes), ["1", "2", "3"]);
+}
+
+/// Mounts a scroll of two batches announcing `total` transactions, with
+/// three in all and a last batch without `hasMore`.
+async fn mount_scroll_without_has_more(server: &MockServer, total: u64) {
+    Mock::given(method("GET"))
+        .and(path(COMPLETO))
+        .and(query_param("pagina", "0"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"totalElementos": 20_000, "transacoes": []})),
+        )
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(COMPLETO))
+        .and(query_param("scrollEnabled", "true"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "totalElementos": total, "scrollId": "abc", "hasMore": true,
+            "transacoes": [completa(1), completa(2)]
+        })))
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(COMPLETO))
+        .and(query_param("scrollId", "abc"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "totalElementos": total, "transacoes": [completa(3)]
+        })))
+        .mount(server)
+        .await;
+}
+
+#[tokio::test]
+async fn scroll_that_ends_before_its_total_is_an_error() {
+    // A batch without `hasMore` must not end the statement in the middle.
+    let server = setup().await;
+    mount_scroll_without_has_more(&server, 5).await;
+
+    let err = client(&server)
+        .banking()
+        .extrato_completo_todas(&FiltroExtrato::new(agosto()))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::Decode { .. }), "{err:?}");
+    assert!(
+        err.to_string()
+            .contains("o modo scroll terminou com 3 de 5 transações"),
+        "{err}"
+    );
+}
+
+#[tokio::test]
+async fn scroll_without_has_more_ends_once_complete() {
+    let server = setup().await;
+    mount_scroll_without_has_more(&server, 3).await;
 
     let transacoes = client(&server)
         .banking()
