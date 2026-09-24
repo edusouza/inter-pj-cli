@@ -91,7 +91,9 @@ macro_rules! identificador {
 mod cobr;
 mod locrec;
 mod rec;
+mod sandbox;
 mod solicrec;
+mod webhook;
 
 pub use cobr::{
     AtualizacaoCobR, AtualizacaoTentativa, CalendarioCobR, CobR, CobRSolicitada, ContaRecebedor,
@@ -108,11 +110,14 @@ pub use rec::{
     RecebedorRec, RejeicaoRec, StatusRec, TipoJornada, ValorRec, ValorRecGerado, VinculoRec,
     VinculoRecGerado,
 };
+pub use sandbox::{RazaoCancelamentoCobR, RazaoCancelamentoRec};
 pub use solicrec::{
     AtualizacaoSolicRec, CalendarioSolicRec, DestinatarioSolicRec, DestinatarioSolicRecGerado,
     IdSolicRec, IdSolicRecError, MAX_AGENCIA, MAX_CONTA, SolicRec, SolicRecSolicitada,
     StatusSolicRec,
 };
+
+pub use webhook::{NotificacaoCobsR, NotificacaoRecs, TipoWebhookPixAutomatico};
 
 use crate::client::InterClient;
 use crate::error::{Error, Result};

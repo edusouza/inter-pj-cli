@@ -12,15 +12,19 @@ use std::collections::BTreeSet;
 use chrono::{DateTime, NaiveDate};
 use inter_pj::cobranca::Uf;
 use inter_pj::endpoint;
-use inter_pj::pix::{Devedor, ITENS_POR_PAGINA_MAXIMO_PIX, TXID_MAXIMO, TXID_MINIMO};
+use inter_pj::pix::{
+    Devedor, ITENS_POR_PAGINA_MAXIMO_PIX, PagamentoSandbox, TXID_MAXIMO, TXID_MINIMO,
+};
 use inter_pj::pix_automatico::{
     AtivacaoSolicitada, CalendarioRec, CobR, CobRSolicitada, ContaRecebedor, DestinatarioSolicRec,
     DevedorCobR, ID_TAMANHO, LocationRec, MAX_AGENCIA, MAX_CONTA, MAX_CONTRATO, MAX_CONVENIO,
-    MAX_INFO_ADICIONAL, MAX_NOME_DEVEDOR, MAX_OBJETO, PaginaCobsR, PaginaLocsRec, PaginaRecs,
-    Periodicidade, PoliticaRetentativa, Rec, RecRevisada, RecSolicitada, SolicRec,
+    MAX_INFO_ADICIONAL, MAX_NOME_DEVEDOR, MAX_OBJETO, NotificacaoCobsR, NotificacaoRecs,
+    PaginaCobsR, PaginaLocsRec, PaginaRecs, Periodicidade, PoliticaRetentativa,
+    RazaoCancelamentoCobR, RazaoCancelamentoRec, Rec, RecRevisada, RecSolicitada, SolicRec,
     SolicRecSolicitada, StatusCobR, StatusRec, StatusSolicRec, StatusTentativa, TipoContaRecebedor,
-    TipoJornada, TipoTentativa, ValorRec, VinculoRec,
+    TipoJornada, TipoTentativa, TipoWebhookPixAutomatico, ValorRec, VinculoRec,
 };
+use inter_pj::webhook::Webhook;
 use serde_json::{Value, json};
 use spec::{
     assert_documentado, caminhos, documentados, enum_de, example_for_schema, parameter_names,
@@ -742,4 +746,136 @@ fn recurring_charge_parameters_are_documented() {
     assert_eq!(data["schema"]["format"], "date");
     // A retry is asked for without a body.
     assert!(spec::operation(&endpoint::pix_automatico::RETENTATIVA_COBR)["requestBody"].is_null());
+}
+
+// --- webhooks and sandbox -----------------------------------------------------------
+
+fn endpoints_do_webhook(tipo: TipoWebhookPixAutomatico) -> [inter_pj::endpoint::Endpoint; 3] {
+    match tipo {
+        TipoWebhookPixAutomatico::Recorrencia => [
+            endpoint::pix_automatico::WEBHOOK_REC_CADASTRAR,
+            endpoint::pix_automatico::WEBHOOK_REC_CONSULTAR,
+            endpoint::pix_automatico::WEBHOOK_REC_EXCLUIR,
+        ],
+        _ => [
+            endpoint::pix_automatico::WEBHOOK_COBR_CADASTRAR,
+            endpoint::pix_automatico::WEBHOOK_COBR_CONSULTAR,
+            endpoint::pix_automatico::WEBHOOK_COBR_EXCLUIR,
+        ],
+    }
+}
+
+#[test]
+fn webhooks_are_the_documented_ones() {
+    for tipo in TipoWebhookPixAutomatico::TODOS {
+        let [cadastrar, consultar, excluir] = endpoints_do_webhook(tipo);
+        assert_eq!(cadastrar.path, format!("/pix/v2/{}", tipo.as_str()));
+        let operacao = spec::operation(&cadastrar);
+        let corpo = spec::resolve(
+            &spec::resolve(&operacao["requestBody"])["content"]["application/json"]["schema"],
+        );
+        let mut campos = BTreeSet::new();
+        documentados(corpo, "", &mut campos);
+        assert_eq!(campos, strings(&["webhookUrl"]), "{tipo}");
+        // Inter posts the notifications to the address plus the suffix.
+        let callbacks = operacao["callbacks"].as_object().unwrap();
+        let (_, callback) = callbacks.iter().next().unwrap();
+        let destino = callback.as_object().unwrap().keys().next().unwrap();
+        assert_eq!(
+            destino,
+            &format!("{{$request.body#/webhookUrl}}{}", tipo.sufixo())
+        );
+
+        let resposta = &spec::operation(&consultar)["responses"];
+        assert!(resposta["404"].is_object(), "{tipo}: 404 documentado");
+        let exemplo = &spec::resolve(&resposta["200"])["content"]["application/json"]["examples"];
+        for (_, exemplo) in exemplo.as_object().unwrap() {
+            let exemplo = &spec::resolve(exemplo)["value"];
+            let webhook: Webhook = serde_json::from_value(exemplo.clone()).unwrap();
+            assert_eq!(&serde_json::to_value(&webhook).unwrap(), exemplo, "{tipo}");
+        }
+        assert!(spec::operation(&excluir)["responses"]["204"].is_object());
+    }
+}
+
+#[test]
+fn notifications_survive_a_round_trip() {
+    let exemplo = example("recWebhookNotification1");
+    let recs: NotificacaoRecs = serde_json::from_value(exemplo.clone()).unwrap();
+    assert_eq!(recs.recs.len(), 1);
+    assert_eq!(serde_json::to_value(&recs).unwrap(), como_escrita(&exemplo));
+    let exemplo = example("cobRWebhookNotification1");
+    let cobsr: NotificacaoCobsR = serde_json::from_value(exemplo.clone()).unwrap();
+    assert_eq!(cobsr.cobsr.len(), 1);
+    assert_eq!(
+        serde_json::to_value(&cobsr).unwrap(),
+        como_escrita(&exemplo)
+    );
+}
+
+#[test]
+fn notifications_keep_every_documented_field() {
+    let rec: Rec = serde_json::from_value(example_for_schema("RecNotification")).unwrap();
+    assert_lidos("RecNotification", &serde_json::to_value(&rec).unwrap(), &[]);
+    let cobr: CobR = serde_json::from_value(example_for_schema("CobRNotification")).unwrap();
+    assert_lidos(
+        "CobRNotification",
+        &serde_json::to_value(&cobr).unwrap(),
+        &[],
+    );
+}
+
+#[test]
+fn sandbox_bodies_are_the_documented_ones() {
+    let rec = schema("ChangeStatusRec");
+    assert_eq!(
+        enum_de(propriedade(rec, "status").unwrap()),
+        strings(&[StatusRec::Aprovada.as_str(), StatusRec::Cancelada.as_str()])
+    );
+    assert_eq!(
+        enum_de(propriedade(rec, "razao").unwrap()),
+        codigos(
+            RazaoCancelamentoRec::DOCUMENTADOS,
+            RazaoCancelamentoRec::as_str
+        )
+    );
+    assert_eq!(
+        enum_de(propriedade(schema("ChangeStatusSolicRec"), "status").unwrap()),
+        strings(&[
+            StatusSolicRec::Aceita.as_str(),
+            StatusSolicRec::Rejeitada.as_str()
+        ])
+    );
+    let cobr = schema("ChangeStatusCobr");
+    assert_eq!(
+        enum_de(propriedade(cobr, "status").unwrap()),
+        strings(&[StatusCobR::Cancelada.as_str()])
+    );
+    assert_eq!(
+        enum_de(propriedade(cobr, "razao").unwrap()),
+        codigos(
+            RazaoCancelamentoCobR::DOCUMENTADOS,
+            RazaoCancelamentoCobR::as_str
+        )
+    );
+    assert_eq!(cobr["required"], json!(["status", "razao"]));
+
+    let pagamento = schema("MakePaymentCobr");
+    let mut campos = BTreeSet::new();
+    documentados(pagamento, "", &mut campos);
+    assert_eq!(campos, strings(&["chave", "cpfCnpj", "txId", "valor"]));
+    // The amount goes as a number.
+    assert_eq!(propriedade(pagamento, "valor").unwrap()["type"], "number");
+    let pago: PagamentoSandbox =
+        serde_json::from_value(example_for_schema("MakePaymentCobrResponse")).unwrap();
+    assert!(pago.end_to_end_id().is_some());
+
+    // The path of the charge names its parameter `txId`, which the
+    // parameter list calls `txid`.
+    assert!(
+        endpoint::pix_automatico::SANDBOX_STATUS_COBR
+            .path
+            .contains("{txId}")
+    );
+    assert!(parametro(&endpoint::pix_automatico::SANDBOX_STATUS_COBR, "txid").is_object());
 }
