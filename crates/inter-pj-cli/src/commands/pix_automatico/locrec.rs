@@ -91,7 +91,7 @@ async fn listar(context: &Context, args: &LocrecListarArgs) -> Result<(), CliErr
             if locs.is_empty() {
                 texto.push_str("Nenhuma location encontrada.");
             } else {
-                texto.push_str(&tabela(&locs).texto());
+                texto.push_str(&tabela(&locs).texto_colorido());
                 let vinculadas = locs.iter().filter(|loc| loc.id_rec.is_some()).count();
                 let quantas = match locs.len() {
                     1 => "1 location".to_owned(),

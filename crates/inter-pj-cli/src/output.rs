@@ -3,10 +3,12 @@
 use std::borrow::Cow;
 use std::io::{self, Write};
 
+use anstream::AutoStream;
 use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, TimeZone};
 use rust_decimal::{Decimal, RoundingStrategy};
 use serde::Serialize;
 
+use crate::cores;
 use crate::error::CliError;
 
 /// Formats a monetary value in Brazilian reais: `R$ 1.234,56` / `-R$ 10,00`.
@@ -108,14 +110,47 @@ pub(crate) fn key_values_left(rows: &[(&str, String)]) -> String {
         .join("\n")
 }
 
+/// Like [`sem_controle`], but keeps the color codes the CLI writes
+/// ([`cores::CODIGOS`]): any other escape sequence has its escape replaced
+/// like the other control characters. A code in the data itself could at
+/// most change a color: data reaches the renderers cleaned by [`limpo`].
+pub(crate) fn sem_controle_exceto_cores(texto: &str) -> Cow<'_, str> {
+    let controle = |c: char| c.is_control() && c != '\n';
+    if !texto.chars().any(controle) {
+        return Cow::Borrowed(texto);
+    }
+    let mut limpo = String::with_capacity(texto.len());
+    let mut resto = texto;
+    while let Some(c) = resto.chars().next() {
+        let codigo = cores::CODIGOS
+            .iter()
+            .find(|codigo| resto.starts_with(**codigo));
+        if let Some(codigo) = codigo {
+            limpo.push_str(codigo);
+            resto = &resto[codigo.len()..];
+        } else {
+            limpo.push(if controle(c) { '\u{FFFD}' } else { c });
+            resto = &resto[c.len_utf8()..];
+        }
+    }
+    Cow::Owned(limpo)
+}
+
 /// Prints `text` and a newline to stdout. A closed pipe is not an error.
 ///
 /// Control characters other than line breaks never reach the terminal,
-/// whatever the renderer did with the data.
+/// whatever the renderer did with the data; with the colors on, but for
+/// the codes of [`cores`]. On Windows, those go through the console's
+/// ANSI mode (or its API, in an old console).
 pub(crate) fn print(text: &str) -> Result<(), CliError> {
-    let text = sem_controle(text);
-    let mut stdout = io::stdout().lock();
-    match writeln!(stdout, "{text}").and_then(|()| stdout.flush()) {
+    let escrito = if cores::ativas() {
+        let mut stdout = AutoStream::always(io::stdout().lock());
+        writeln!(stdout, "{}", sem_controle_exceto_cores(text)).and_then(|()| stdout.flush())
+    } else {
+        let mut stdout = io::stdout().lock();
+        writeln!(stdout, "{}", sem_controle(text)).and_then(|()| stdout.flush())
+    };
+    match escrito {
         Err(err) if err.kind() != io::ErrorKind::BrokenPipe => {
             Err(CliError::io("falha ao escrever na saída padrão", err))
         }
@@ -282,6 +317,25 @@ mod tests {
         ];
         assert_eq!(key_values_left(&rows).lines().count(), 2);
         assert_eq!(key_values(&rows).lines().count(), 2);
+    }
+
+    #[test]
+    fn only_the_color_codes_of_the_cli_pass() {
+        let texto =
+            "\u{1b}[1mData\u{1b}[0m  \u{1b}[31m-R$ 2,50\u{1b}[0m\nLoja\u{1b}[2K\r\u{1b}[8m\t";
+        assert_eq!(
+            sem_controle_exceto_cores(texto),
+            "\u{1b}[1mData\u{1b}[0m  \u{1b}[31m-R$ 2,50\u{1b}[0m\nLoja\u{FFFD}[2K\u{FFFD}\u{FFFD}[8m\u{FFFD}"
+        );
+        // A code split or with other parameters is not one of them.
+        assert_eq!(
+            sem_controle_exceto_cores("\u{1b}[31;1m\u{1b}["),
+            "\u{FFFD}[31;1m\u{FFFD}["
+        );
+        assert!(matches!(
+            sem_controle_exceto_cores("sem controle"),
+            Cow::Borrowed(_)
+        ));
     }
 
     #[test]

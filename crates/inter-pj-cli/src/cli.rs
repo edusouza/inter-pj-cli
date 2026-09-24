@@ -135,6 +135,7 @@ pub(crate) struct Cli {
 /// Options accepted by every command.
 #[derive(Debug, Args)]
 #[command(next_help_heading = "Opções globais")]
+#[allow(clippy::struct_excessive_bools)] // the fields are the flags, --json, --sem-*
 pub(crate) struct GlobalArgs {
     /// Perfil do arquivo de configuração
     #[arg(
@@ -233,6 +234,11 @@ pub(crate) struct GlobalArgs {
         hide_default_value = true
     )]
     pub(crate) separador: Separador,
+
+    // Read before the parser too (`cores::sem_cor_pedido`), for the help.
+    /// Sem cores nas tabelas (o mesmo que a variável NO_COLOR); fora de um terminal, nunca há cores
+    #[arg(long, global = true)]
+    pub(crate) sem_cor: bool,
 
     /// Tentativas por requisição em falhas temporárias (429, 5xx, rede) [padrão: 3]
     #[arg(

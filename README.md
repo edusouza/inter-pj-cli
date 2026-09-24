@@ -1073,6 +1073,8 @@ O período segue as regras das listagens Pix (padrão: últimos 30 dias), e `--f
 
 Para o Excel em português, use `--formato csv --separador ';'`: ponto e vírgula, vírgula decimal e UTF-8 com BOM. Textos vindos de terceiros que começam com `=`, `+`, `-` ou `@` (ex.: a mensagem de um Pix) recebem um apóstrofo no CSV, para não serem executados como fórmula pela planilha.
 
+**Cores**: num terminal, as tabelas das listagens e consultas destacam o cabeçalho, os valores negativos (em vermelho) e o status de cada linha pelo seu tom: verde para pago, recebido ou aprovado; amarelo para agendado, em processamento ou aguardando alguém; vermelho para cancelado, rejeitado, expirado ou com erro. Fora de um terminal (num arquivo ou em outro programa) não há cores; no terminal, desative-as com `--sem-cor` ou com a variável `NO_COLOR` (com qualquer valor não vazio), que valem também para a ajuda. `CLICOLOR_FORCE=1` força as cores mesmo fora de um terminal. Resumos, confirmações e erros, em `stderr`, não têm cores, e JSON e CSV nunca.
+
 ### Retentativas
 
 Consultas que falham por limite de requisições (`429`), instabilidade do servidor (`500`, `502`, `503`, `504`) ou falha de conexão são repetidas automaticamente, com espera crescente (1 s, 2 s, ...) e respeitando o cabeçalho `Retry-After`. O padrão é de 3 tentativas; ajuste com `--tentativas N` (ou `INTER_TENTATIVAS`) ou desative com `--sem-retentativa`. Com `-v`, cada nova tentativa aparece em `stderr`. O envio de Pix, os pagamentos, a emissão de cobranças, a criação e a alteração de cobranças Pix e as devoluções só são repetidos quando certamente não foram processados (`429` ou conexão recusada); o Pix, sempre com a mesma chave de idempotência, e a devolução, com o mesmo id.

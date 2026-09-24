@@ -183,6 +183,10 @@ Não há ambiente padrão: sandbox ou produção precisa ser escolhido. A resolu
 
 A biblioteca expõe erros tipados (`Error::{Config, Identity, Auth, Api, Transport, Decode}`) com a categoria HTTP (`ApiErrorKind`). A CLI traduz cada categoria para um código de saída estável (ver README), útil em scripts.
 
+### Cores só na saída padrão, decididas uma vez
+
+As tabelas são texto simples por padrão (`Tabela::texto`), o que vale para os resumos e os erros, em stderr, e para os testes; as listagens e consultas pedem as cores (`Tabela::texto_colorido`), que só existem se a saída padrão for um terminal que as aceita. A decisão é tomada no início, com as regras do `anstream` (já presente pelo clap): `NO_COLOR` desliga, `CLICOLOR_FORCE` liga, `TERM=dumb` e um pipe desligam; `--sem-cor` é visto antes do parser, para valer também na ajuda. O filtro de caracteres de controle da saída deixa passar só os códigos de cor da CLI (`cores::CODIGOS`), escritos em volta de textos já filtrados; no Windows, eles passam pelo modo ANSI do console (ou pela API dele, num console antigo). O tom de cada status é decidido junto da sua descrição, em cada comando, e um status desconhecido fica sem cor.
+
 ### Idioma
 
 Código, comentários e rustdoc em inglês (padrão do ecossistema Rust). Tudo que o usuário lê — ajuda, mensagens, documentação — em português, e os modelos usam os nomes de campo da API (`disponivel`, `bloqueadoCheque`), preservando a linguagem do domínio.

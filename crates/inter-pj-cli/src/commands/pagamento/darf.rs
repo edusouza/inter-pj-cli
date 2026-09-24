@@ -9,7 +9,7 @@ use inter_pj::banking::{
 use inter_pj::{Environment, endpoint};
 use serde_json::json;
 
-use super::{data, data_br, descrever_status};
+use super::{celula_status, data, data_br};
 use crate::arquivo::{self, CAMPOS_DARF, Campos};
 use crate::cli::{DarfCommand, DarfListarArgs, DarfPagarArgs, Formato, PeriodoArgs};
 use crate::commands::{Context, hoje, intervalo, simulacao};
@@ -295,12 +295,12 @@ fn render_lista(filtro: &FiltroDarf, darfs: &[Darf]) -> String {
             Celula::texto(d.codigo_receita.as_deref()),
             data(d.periodo_apuracao.as_deref()),
             data(d.data_vencimento.as_deref()),
-            Celula::texto(d.status_pagamento.as_ref().map(descrever_status)),
+            celula_status(d.status_pagamento.as_ref()),
             Celula::dinheiro(d.valor_total.or(d.valor)),
             Celula::texto(d.codigo_solicitacao.as_deref()),
         ]);
     }
-    texto.push_str(&tabela.texto());
+    texto.push_str(&tabela.texto_colorido());
     let plural = if darfs.len() == 1 { "DARF" } else { "DARFs" };
     let _ = write!(texto, "\n\n{} {plural}", darfs.len());
     texto

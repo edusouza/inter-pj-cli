@@ -27,6 +27,7 @@ use crate::commands::pix::{antes_e_depois, documento, pagina, periodo, pessoa};
 use crate::commands::qrcode::OpcoesQr;
 use crate::commands::{Context, simulacao};
 use crate::confirmacao::{Stdio, Terminal, confirmar, descrever_ambiente, pode_confirmar};
+use crate::cores::Tom;
 use crate::error::{CliError, resultado_incerto};
 use crate::output::{self, data_br, horario_em, secao};
 use crate::tabela::{Celula, Coluna, Tabela};
@@ -460,6 +461,18 @@ fn curto(status: &StatusRec) -> &str {
     }
 }
 
+/// The status of a recurrence in a table: awaiting the payer, approved or
+/// ended.
+fn celula_status(status: Option<&StatusRec>) -> Celula {
+    let tom = status.and_then(|status| match status {
+        StatusRec::Criada => Some(Tom::Pendente),
+        StatusRec::Aprovada => Some(Tom::Positivo),
+        StatusRec::Rejeitada | StatusRec::Expirada | StatusRec::Cancelada => Some(Tom::Negativo),
+        _ => None,
+    });
+    Celula::situacao(status.map(curto), tom)
+}
+
 async fn listar(context: &Context, args: &RecListarArgs) -> Result<(), CliError> {
     let mut filtro = FiltroRecs::new(periodo(args.periodo)?);
     filtro.devedor.clone_from(&args.documento);
@@ -502,7 +515,7 @@ async fn listar(context: &Context, args: &RecListarArgs) -> Result<(), CliError>
             if recs.is_empty() {
                 texto.push_str("Nenhuma recorrência encontrada.");
             } else {
-                texto.push_str(&tabela(&recs).texto());
+                texto.push_str(&tabela(&recs).texto_colorido());
                 let _ = write!(texto, "\n\n{}", totais(&recs));
             }
             if let Some((numero, paginacao)) = pagina_pedida {
@@ -556,7 +569,7 @@ fn tabela(recs: &[Rec]) -> Tabela {
     for rec in recs {
         let calendario = rec.calendario.as_ref();
         tabela.linha(vec![
-            Celula::texto(rec.status.as_ref().map(curto)),
+            celula_status(rec.status.as_ref()),
             Celula::texto(
                 rec.vinculo
                     .as_ref()
@@ -863,6 +876,24 @@ mod tests {
 
     use super::*;
     use crate::cli::{Cli, Command, PixAutomaticoCommand};
+
+    #[test]
+    fn every_documented_status_has_a_tone() {
+        for status in StatusRec::DOCUMENTADOS {
+            assert!(
+                matches!(celula_status(Some(status)), Celula::Situacao(..)),
+                "{status:?}"
+            );
+        }
+        assert_eq!(
+            celula_status(Some(&StatusRec::Criada)),
+            Celula::Situacao("criada".into(), Tom::Pendente)
+        );
+        assert_eq!(
+            celula_status(Some(&StatusRec::Aprovada)),
+            Celula::Situacao("aprovada".into(), Tom::Positivo)
+        );
+    }
     use crate::commands::testes;
     use crate::confirmacao::testes::TerminalFalso;
 
