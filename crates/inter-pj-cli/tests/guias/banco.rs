@@ -18,6 +18,7 @@
 
 mod automatico;
 mod cob;
+mod cobr;
 mod cobranca;
 mod cobrancas_pix;
 mod cobv;
@@ -68,6 +69,7 @@ impl Banco {
         let automatico = Arc::new(Mutex::new(automatico::Automatico::novo()));
         rec::montar(&servidor, &automatico).await;
         solicrec::montar(&servidor, &automatico).await;
+        cobr::montar(&servidor, &automatico).await;
         webhooks::montar(&servidor).await;
         Self { servidor }
     }

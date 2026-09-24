@@ -12,6 +12,7 @@ A API é só para CNPJs com pelo menos 6 meses de atividade. Os exemplos são da
 - [Alterar uma recorrência](#alterar-uma-recorrência)
 - [Cancelar uma recorrência](#cancelar-uma-recorrência)
 - [Pedir a aprovação](#pedir-a-aprovação)
+- [As cobranças recorrentes](#as-cobranças-recorrentes)
 
 ## Criar uma recorrência
 
@@ -457,4 +458,158 @@ $ inter-pj pix-automatico solicitacao criar --rec RR1234567820260901k7Tq2Wm9Zp4 
 erro: a recorrência já foi aprovada pelo pagador
 $ inter-pj pix-automatico solicitacao cancelar SC1234567820260901h3Rw8Kd5Nb2 --sim
 erro: a solicitação está aceita pelo pagador: só as criadas ou recebidas, ainda sem resposta, podem ser canceladas
+```
+
+## As cobranças recorrentes
+
+Aprovada a recorrência, cada pagamento é uma **cobrança recorrente**, uma por ciclo, que o banco do pagador debita no vencimento. A cobrança de outubro do plano básico do Fulano de Tal, com um txid da empresa:
+
+```console
+$ inter-pj pix-automatico cobr criar --rec RR1234567820260901k7Tq2Wm9Zp4 --valor 89,90 \
+    --vencimento 2026-10-10 --conta 1234567 --agencia 0001 --info "Plano básico de outubro" \
+    --txid fulano0042outubro2026planobasico
+*** PRODUÇÃO: o débito na conta do pagador é de verdade ***
+Cobrança recorrente a criar
+  Ambiente          PRODUÇÃO (conta real)
+  Recorrência       RR1234567820260901k7Tq2Wm9Zp4
+  Devedor           Fulano de Tal (123.456.789-09)
+  Contrato          plano-basico-0042
+  Objeto            Plano básico
+  Valor             R$ 89,90 (oitenta e nove reais e noventa centavos)
+  Vencimento        10/10/2026, ou o próximo dia útil
+  Conta que recebe  conta corrente 1234567, agência 0001
+  Informação        Plano básico de outubro
+  Retentativas      até 3 novas tentativas, em 7 dias
+  txid              fulano0042outubro2026planobasico
+Criar a cobrança recorrente? [s/N] s
+Cobrança recorrente criada: o banco do pagador agenda o débito para o vencimento.
+
+Cobrança recorrente fulano0042outubro2026planobasico
+  Status        criada (aguarda o banco do pagador)
+  Recorrência   RR1234567820260901k7Tq2Wm9Zp4
+  Valor         R$ 89,90
+  Vencimento    10/10/2026, ou o próximo dia útil
+  Criada em     24/09/2026
+  Retentativas  até 3 novas tentativas, em 7 dias
+  Recebedor     Empresa Exemplo Ltda (11.444.777/0001-61), conta corrente 1234567, agência 0001
+  Informação    Plano básico de outubro
+
+Histórico
+  24/09/2026 10:55:00  criada
+
+Acompanhe com: inter-pj pix-automatico cobr consultar fulano0042outubro2026planobasico
+```
+
+A CLI consulta a recorrência antes: um valor diferente do fixo dela e um vencimento fora do seu período viram avisos no resumo. `--conta` é a conta que recebe, com o dígito verificador (sem ela, a de `--conta-corrente`, que pode vir da configuração), `--tipo-conta` é `corrente` (o padrão), `poupanca` ou `pagamento`, e `--devedor-email`, `--devedor-endereco`, `--devedor-cidade`, `--devedor-uf` e `--devedor-cep` completam os dados do pagador, que é o da recorrência. Sem `--txid`, a CLI gera um; com o mesmo txid, a API não cria uma segunda cobrança, então um resultado incerto vem com o comando que a confere e com o txid para repetir sem risco. Criar e cancelar precisam do escopo `cobr.write`, e consultar e listar, do `cobr.read`, além do `rec.read` para a consulta da recorrência.
+
+O banco do pagador agenda o débito. Um vencimento em fim de semana ou feriado, pelos feriados da cidade do pagador, vai para o próximo dia útil, a não ser com `--sem-ajuste-dia-util`: o dia 10 de outubro é um sábado, e o dia 12, feriado, então o débito fica para o dia 13:
+
+```console
+$ inter-pj pix-automatico cobr consultar fulano0042outubro2026planobasico
+Cobrança recorrente fulano0042outubro2026planobasico
+  Status        ativa (débito agendado)
+  Recorrência   RR1234567820260901k7Tq2Wm9Zp4
+  Valor         R$ 89,90
+  Vencimento    10/10/2026, ou o próximo dia útil
+  Criada em     24/09/2026
+  Retentativas  até 3 novas tentativas, em 7 dias
+  Recebedor     Empresa Exemplo Ltda (11.444.777/0001-61), conta corrente 1234567, agência 0001
+  Informação    Plano básico de outubro
+
+Tentativas de liquidação
+Liquidação  Tipo         Status    endToEndId                        Motivo
+13/10/2026  agendamento  agendada  E87654321202610130300Rw5Hn8Tc1Kz
+
+Histórico
+  24/09/2026 10:55:00  criada
+  24/09/2026 10:55:05  ativa
+```
+
+Só uma recorrência aprovada pelo pagador aceita cobranças:
+
+```console
+$ inter-pj pix-automatico cobr criar --rec RR1234567820260924Qm4Tz8Kd2Wb --valor 149,90 \
+    --vencimento 2026-10-15 --conta 1234567 --agencia 0001 --sim
+erro: a recorrência está criada (aguarda a aprovação do pagador): só uma recorrência aprovada pelo pagador aceita cobranças
+```
+
+`cobr listar` mostra as cobranças criadas num período, por padrão os últimos 30 dias até agora, com os filtros de recorrência (`--rec`), devedor (`--documento`), status (`--status criada|ativa|concluida|expirada|rejeitada|cancelada`) e `--convenio`:
+
+```console
+$ inter-pj pix-automatico cobr listar --inicio 2026-09-01 --fim 2026-09-24
+Cobranças recorrentes criadas de 01/09/2026 00:00 a 24/09/2026 23:59
+
+Vencimento  Status       Valor  Recorrência                    txid
+10/09/2026  expirada  R$ 89,90  RR1234567820260901k7Tq2Wm9Zp4  fulano0042setembro2026planobasico
+10/10/2026  ativa     R$ 89,90  RR1234567820260901k7Tq2Wm9Zp4  fulano0042outubro2026planobasico
+
+2 cobranças · R$ 179,80
+```
+
+A cobrança de setembro do Fulano de Tal não foi paga. `cobr consultar` mostra as tentativas de liquidação, com o motivo de cada recusa, e o histórico:
+
+```console
+$ inter-pj pix-automatico cobr consultar fulano0042setembro2026planobasico
+Cobrança recorrente fulano0042setembro2026planobasico
+  Status        expirada sem pagamento
+  Recorrência   RR1234567820260901k7Tq2Wm9Zp4
+  Valor         R$ 89,90
+  Vencimento    10/09/2026, ou o próximo dia útil
+  Criada em     03/09/2026
+  Retentativas  até 3 novas tentativas, em 7 dias
+  Recebedor     Empresa Exemplo Ltda (11.444.777/0001-61), conta corrente 1234567, agência 0001
+  Informação    Plano básico de setembro
+
+Tentativas de liquidação
+Liquidação  Tipo            Status     endToEndId                        Motivo
+10/09/2026  agendamento     rejeitada  E87654321202609100300Ac6Bq2Lx9Mz  AC06, Conta transacional do usuário pagador bloqueada
+11/09/2026  nova tentativa  rejeitada  E87654321202609110300Hd4Wn7Ts2Ky  AC06, Conta transacional do usuário pagador bloqueada
+14/09/2026  nova tentativa  rejeitada  E87654321202609140300Mv8Rc3Pz6Lf  AC06, Conta transacional do usuário pagador bloqueada
+16/09/2026  nova tentativa  rejeitada  E87654321202609160300Qx1Gj5Nb8Wt  AC06, Conta transacional do usuário pagador bloqueada
+
+Histórico
+  03/09/2026 09:00:00  criada
+  03/09/2026 09:00:05  ativa
+  18/09/2026 00:00:00  expirada
+```
+
+Quando o débito falha e a recorrência permite novas tentativas, `cobr retentativa` pede uma, para outro dia, até 7 dias depois da liquidação prevista, e no máximo 3: a CLI confere a política da recorrência e o prazo antes de enviar, e avisa quando já há uma tentativa naquele dia ou quando as 3 já foram pedidas. Na cobrança de setembro, as 3 foram pedidas, e ela expirou:
+
+```console
+$ inter-pj pix-automatico cobr retentativa fulano0042setembro2026planobasico --data 2026-09-25 --sim
+erro: a cobrança está expirada sem pagamento: não há o que tentar de novo
+```
+
+O Fulano de Tal vai pagar outubro na loja: a cobrança de outubro é cancelada, e a recorrência continua para os meses seguintes. `cobr cancelar` mostra a cobrança e pede confirmação; pelas regras do Banco Central, o cancelamento vale até as 22h do dia anterior à liquidação, e depois disso o resumo avisa que o banco pode recusá-lo:
+
+```console
+$ inter-pj pix-automatico cobr cancelar fulano0042outubro2026planobasico
+Cobrança recorrente fulano0042outubro2026planobasico a cancelar
+  Ambiente     PRODUÇÃO (conta real)
+  Status       ativa (débito agendado)
+  Recorrência  RR1234567820260901k7Tq2Wm9Zp4
+  Valor        R$ 89,90
+  Vencimento   10/10/2026, ou o próximo dia útil
+Cancelar a cobrança recorrente? [s/N] s
+Cobrança recorrente cancelada: o débito não será feito.
+
+Cobrança recorrente fulano0042outubro2026planobasico
+  Status        cancelada
+  Recorrência   RR1234567820260901k7Tq2Wm9Zp4
+  Valor         R$ 89,90
+  Vencimento    10/10/2026, ou o próximo dia útil
+  Criada em     24/09/2026
+  Retentativas  até 3 novas tentativas, em 7 dias
+  Recebedor     Empresa Exemplo Ltda (11.444.777/0001-61), conta corrente 1234567, agência 0001
+  Informação    Plano básico de outubro
+  Encerramento  cancelada pelo recebedor: SLCR, Cancelamento solicitado pelo usuário recebedor
+
+Tentativas de liquidação
+Liquidação  Tipo         Status     endToEndId                        Motivo
+13/10/2026  agendamento  cancelada  E87654321202610130300Rw5Hn8Tc1Kz
+
+Histórico
+  24/09/2026 10:55:00  criada
+  24/09/2026 10:55:05  ativa
+  24/09/2026 11:00:00  cancelada
 ```
