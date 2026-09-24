@@ -74,7 +74,7 @@ async fn criar(
         Some(context.client(&settings)?)
     };
     let ambiente = settings.ambiente.as_ref().map(|setting| setting.value);
-    eprintln!("{}", resumo(&cobv, &txid, hoje, ambiente));
+    output::eprint(&resumo(&cobv, &txid, hoje, ambiente));
 
     let Some(client) = client else {
         return simulacao::mostrar_em(
@@ -326,7 +326,7 @@ async fn revisar(
     alteravel(cobv.status.as_ref())?;
     let revisao = revisao_das_opcoes(args, &Atual::de(&cobv), hoje)?;
     let ambiente = settings.ambiente.as_ref().map(|setting| setting.value);
-    eprintln!("{}", resumo_revisao(&cobv, &revisao, ambiente));
+    output::eprint(&resumo_revisao(&cobv, &revisao, ambiente));
     let pergunta = if revisao.remover {
         "Remover a cobrança?"
     } else {
@@ -739,7 +739,7 @@ async fn listar(context: &Context, args: &PixCobvListarArgs) -> Result<(), CliEr
     };
     match context.formato() {
         Formato::Json => output::print_json(&json!({ "cobs": cobs })),
-        Formato::Csv => output::print_raw(&csv(&cobs).csv(context.separador())),
+        Formato::Csv => output::print_csv(&csv(&cobs), context.separador()),
         Formato::Texto => {
             context.warn_if_sandbox(&settings);
             let lote: Vec<String> = args

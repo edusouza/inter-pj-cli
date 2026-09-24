@@ -47,7 +47,7 @@ async fn pagar(
         Some(context.client(&settings)?)
     };
     let ambiente = settings.ambiente.as_ref().map(|setting| setting.value);
-    eprintln!("{}", resumo(&darf, hoje(), ambiente));
+    output::eprint(&resumo(&darf, hoje(), ambiente));
 
     let Some(client) = client else {
         return simulacao::mostrar(
@@ -235,7 +235,7 @@ async fn listar(context: &Context, args: &DarfListarArgs) -> Result<(), CliError
     let darfs = client.banking().darfs(&filtro).await?;
     match context.formato() {
         Formato::Json => output::print_json(&json!({ "darfs": darfs })),
-        Formato::Csv => output::print_raw(&csv(&darfs).csv(context.separador())),
+        Formato::Csv => output::print_csv(&csv(&darfs), context.separador()),
         Formato::Texto => {
             context.warn_if_sandbox(&settings);
             output::print(&render_lista(&filtro, &darfs))

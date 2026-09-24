@@ -188,7 +188,7 @@ pub(super) async fn listar(
             }
             None => output::print_json(&json!({ "callbacks": mostrados })),
         },
-        Formato::Csv => output::print_raw(&csv(api, &mostrados).csv(context.separador())),
+        Formato::Csv => output::print_csv(&csv(api, &mostrados), context.separador()),
         Formato::Texto => {
             context.warn_if_sandbox(&settings);
             let mut texto = format!("{}\n\n", titulo(api, &filtro, args.falhas));
@@ -423,12 +423,12 @@ pub(super) async fn reenviar(
     let client = context.client(&settings)?;
     let espera = blocos.len() > REENVIOS_POR_MINUTO;
     if espera {
-        eprintln!(
+        output::eprint_linha(&format!(
             "aviso: {} operações vão em {} blocos de até {MAX_IDS_REENVIO}; o Inter aceita {REENVIOS_POR_MINUTO} pedidos de reenvio por minuto, então a CLI espera {} s entre eles",
             unicos.len(),
             blocos.len(),
             intervalo.as_secs()
-        );
+        ));
     }
     let mut encontrados: Vec<String> = Vec::new();
     for (numero, bloco) in blocos.iter().enumerate() {

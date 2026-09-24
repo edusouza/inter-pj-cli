@@ -58,10 +58,10 @@ pub(super) fn run(
     } else {
         (None, None)
     };
-    eprintln!(
+    output::eprint_linha(&format!(
         "Assistente de configuração do inter-pj: {}. O client_secret não é perguntado; ele fica fora do arquivo.",
         caminho.display()
-    );
+    ));
     let base = std::env::current_dir()
         .map_err(|err| CliError::io("não foi possível ler o diretório atual", err))?;
     let perfil = perguntar_perfil(terminal, existentes.as_deref(), &base)?;
@@ -124,7 +124,7 @@ fn perguntar_perfil(
             let pem = fs::read(&lido)
                 .map_err(|err| format!("não foi possível ler {}: {err}", lido.display()))?;
             let info = CertificateInfo::from_pem(&pem).map_err(|err| err.to_string())?;
-            eprintln!("  {}", descrever(&info));
+            output::eprint_linha(&format!("  {}", descrever(&info)));
             Ok((escrito, lido))
         })?;
     let chave_privada = perguntar(terminal, "Chave privada (.key)", None, |texto| {
@@ -179,7 +179,7 @@ fn perguntar<T>(
         };
         match validar(resposta) {
             Ok(valor) => return Ok(valor),
-            Err(problema) => eprintln!("  {problema}"),
+            Err(problema) => output::eprint_linha(&format!("  {problema}")),
         }
     }
     Err(CliError::Usage(format!(

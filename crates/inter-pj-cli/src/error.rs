@@ -5,6 +5,8 @@ use std::io;
 use inter_pj::banking::PeriodoError;
 use inter_pj::{ApiError, ApiErrorKind, Error as InterError};
 
+use crate::output;
+
 /// Documented exit codes.
 pub(crate) mod exit {
     pub(crate) const UNEXPECTED: u8 = 1;
@@ -346,10 +348,43 @@ fn problem_type(api: &ApiError) -> Option<&str> {
 }
 
 /// Prints the error (and hints) to stderr. Messages of the API reach the
-/// terminal without control characters.
+/// terminal without control characters, and the lines after the first are
+/// indented: only the CLI's own lines (`erro:`, `dica:`) start at the
+/// margin, whatever a text of the API brings.
 pub(crate) fn report(err: &CliError) {
-    eprintln!("erro: {}", crate::output::sem_controle(&err.to_string()));
+    eprintln!(
+        "erro: {}",
+        continuacao(&output::sem_controle(&err.to_string()))
+    );
     for hint in err.hints() {
-        eprintln!("dica: {hint}");
+        eprintln!("dica: {}", output::limpo(&hint));
+    }
+}
+
+/// `texto` with its lines after the first indented, when they are not.
+fn continuacao(texto: &str) -> String {
+    let mut linhas = texto.lines();
+    let mut saida = linhas.next().unwrap_or_default().to_owned();
+    for linha in linhas {
+        saida.push('\n');
+        if !linha.is_empty() && !linha.starts_with(char::is_whitespace) {
+            saida.push_str("  ");
+        }
+        saida.push_str(linha);
+    }
+    saida
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_the_first_line_of_a_message_starts_at_the_margin() {
+        assert_eq!(continuacao("uma linha"), "uma linha");
+        assert_eq!(
+            continuacao("arquivo inválido:\n  - linha 2\ndica: falsa\n\nerro: outra"),
+            "arquivo inválido:\n  - linha 2\n  dica: falsa\n\n  erro: outra"
+        );
     }
 }

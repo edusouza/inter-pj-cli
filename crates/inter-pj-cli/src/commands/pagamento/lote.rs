@@ -20,7 +20,7 @@ use crate::commands::{Context, hoje, simulacao};
 use crate::confirmacao::{Terminal, confirmar, descrever_ambiente, verificar_limite};
 use crate::cores::Tom;
 use crate::error::{CliError, resultado_incerto};
-use crate::output::{self, data_hora_br};
+use crate::output::{self, data_hora_br, limpo};
 use crate::tabela::{Celula, Coluna, Tabela};
 use crate::valor::por_extenso;
 
@@ -76,7 +76,7 @@ async fn enviar(
     };
     let ambiente = settings.ambiente.as_ref().map(|setting| setting.value);
     let origem = arquivo::nome(&args.arquivo);
-    eprintln!("{}", resumo(&origem, &arquivo, &lote, hoje, ambiente));
+    output::eprint(&resumo(&origem, &arquivo, &lote, hoje, ambiente));
 
     let Some(client) = client else {
         return simulacao::mostrar(
@@ -348,7 +348,7 @@ async fn aguardar(
                 .status
                 .as_ref()
                 .map_or_else(|| "sem status".to_owned(), descrever_status_lote);
-            eprintln!("aguardando: {texto}");
+            output::eprint_linha(&format!("aguardando: {texto}"));
             anterior.clone_from(&lote.status);
         }
         tokio::time::sleep(intervalo.min(prazo - agora)).await;
@@ -416,7 +416,7 @@ fn render_lote(lote: &Lote) -> String {
         linhas.push(("Pagamentos", quantidade.to_string()));
     }
     let mut texto = match &lote.id_lote {
-        Some(id) => format!("Lote {id}"),
+        Some(id) => format!("Lote {}", limpo(id)),
         None => "Lote".to_owned(),
     };
     for linha in output::key_values_left(&linhas).lines() {

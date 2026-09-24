@@ -29,7 +29,7 @@ use crate::commands::{Context, simulacao};
 use crate::confirmacao::{Stdio, Terminal, confirmar, descrever_ambiente, pode_confirmar};
 use crate::cores::Tom;
 use crate::error::{CliError, resultado_incerto};
-use crate::output::{self, data_br, horario_em, secao};
+use crate::output::{self, data_br, horario_em, limpo, secao};
 use crate::tabela::{Celula, Coluna, Tabela};
 use crate::valor::por_extenso;
 
@@ -69,7 +69,7 @@ async fn criar(
         Some(context.client(&settings)?)
     };
     let ambiente = settings.ambiente.as_ref().map(|setting| setting.value);
-    eprintln!("{}", resumo(&rec, ambiente));
+    output::eprint(&resumo(&rec, ambiente));
 
     let Some(client) = client else {
         return simulacao::mostrar(
@@ -341,7 +341,10 @@ where
     if let Some(encerramento) = rec.encerramento.as_ref().and_then(encerramento) {
         linhas.push(("Encerramento", encerramento));
     }
-    let titulo = format!("Recorrência {}", rec.id_rec.as_deref().unwrap_or_default());
+    let titulo = format!(
+        "Recorrência {}",
+        limpo(rec.id_rec.as_deref().unwrap_or_default())
+    );
     let mut texto = secao(titulo.trim(), &linhas);
     for secao in [historico(rec, fuso), solicitacoes(rec, fuso)]
         .into_iter()
@@ -355,7 +358,7 @@ where
         .and_then(|qr| qr.pix_copia_e_cola.as_deref())
         .filter(|texto| !texto.is_empty())
     {
-        let _ = write!(texto, "\n\nCopia e cola  {copia_e_cola}");
+        let _ = write!(texto, "\n\nCopia e cola  {}", limpo(copia_e_cola));
     }
     texto
 }
@@ -508,7 +511,7 @@ async fn listar(context: &Context, args: &RecListarArgs) -> Result<(), CliError>
     };
     match context.formato() {
         Formato::Json => output::print_json(&json!({ "recs": recs })),
-        Formato::Csv => output::print_raw(&csv(&recs).csv(context.separador())),
+        Formato::Csv => output::print_csv(&csv(&recs), context.separador()),
         Formato::Texto => {
             context.warn_if_sandbox(&settings);
             let mut texto = format!("{}\n\n", titulo(&filtro));
@@ -712,7 +715,7 @@ async fn revisar(
         .await?;
     alteravel(&atual, &revisao)?;
     let ambiente = settings.ambiente.as_ref().map(|setting| setting.value);
-    eprintln!("{}", resumo_revisao(&atual, &revisao, ambiente));
+    output::eprint(&resumo_revisao(&atual, &revisao, ambiente));
     confirmar(terminal, args.sim, "Alterar a recorrência?")?;
 
     let revisada = client
@@ -823,7 +826,7 @@ async fn cancelar(
         )));
     }
     let ambiente = settings.ambiente.as_ref().map(|setting| setting.value);
-    eprintln!("{}", resumo_cancelamento(&atual, ambiente));
+    output::eprint(&resumo_cancelamento(&atual, ambiente));
     confirmar(terminal, args.sim, "Cancelar a recorrência?")?;
 
     let cancelada = client
