@@ -1,5 +1,6 @@
-//! `inter-pj webhook banking|cobranca|pix`: the webhooks, the addresses
-//! Inter calls when something happens in the account. Registering or
+//! `inter-pj webhook banking|cobranca|pix|recorrencia|cobranca-recorrente`:
+//! the webhooks, the addresses Inter calls when something happens in the
+//! account. Registering or
 //! removing one shows the current webhook and asks for confirmation: a new
 //! address receives the notifications of the account's payments.
 
@@ -11,6 +12,7 @@ use std::time::Duration;
 
 use chrono::{Local, TimeZone};
 use inter_pj::pix::ChavePix;
+use inter_pj::pix_automatico::TipoWebhookPixAutomatico;
 use inter_pj::webhook::{TipoWebhookBanking, Webhook, WebhookUrl};
 use inter_pj::{Environment, Error as InterError, InterClient};
 use serde_json::{Map, Value, json};
@@ -19,7 +21,7 @@ use self::callbacks::Api;
 use super::cobranca::argumento;
 use crate::cli::{
     Formato, WebhookBankingCommand, WebhookCadastroArgs, WebhookCobrancaCommand, WebhookCommand,
-    WebhookExclusaoArgs, WebhookPixCommand,
+    WebhookExclusaoArgs, WebhookPixAutomaticoCommand, WebhookPixCommand,
 };
 use crate::commands::Context;
 use crate::confirmacao::{Stdio, Terminal, confirmar, descrever_ambiente, pode_confirmar};
@@ -35,6 +37,14 @@ pub(super) async fn run(context: &Context, command: WebhookCommand) -> Result<()
         WebhookCommand::Banking(command) => banking(context, command).await,
         WebhookCommand::Cobranca(command) => cobranca(context, command).await,
         WebhookCommand::Pix(command) => pix(context, command).await,
+        WebhookCommand::Recorrencia(command) => {
+            let alvo = Alvo::PixAutomatico(TipoWebhookPixAutomatico::Recorrencia);
+            pix_automatico(context, &alvo, command).await
+        }
+        WebhookCommand::CobrancaRecorrente(command) => {
+            let alvo = Alvo::PixAutomatico(TipoWebhookPixAutomatico::CobrancaRecorrente);
+            pix_automatico(context, &alvo, command).await
+        }
     }
 }
 
@@ -120,6 +130,25 @@ async fn pix(context: &Context, command: WebhookPixCommand) -> Result<(), CliErr
     }
 }
 
+/// The webhook of the recurrences or of the recurring charges.
+async fn pix_automatico(
+    context: &Context,
+    alvo: &Alvo,
+    command: WebhookPixAutomaticoCommand,
+) -> Result<(), CliError> {
+    match command {
+        WebhookPixAutomaticoCommand::Cadastrar(args) => {
+            cadastrar(context, alvo, &args, &mut Stdio).await
+        }
+        WebhookPixAutomaticoCommand::Consultar => {
+            consultar(context, std::slice::from_ref(alvo)).await
+        }
+        WebhookPixAutomaticoCommand::Excluir(args) => {
+            excluir(context, alvo, &args, &mut Stdio).await
+        }
+    }
+}
+
 /// The filter of a Banking history: the `endToEnd` of a Pix sent or the
 /// code of the transaction of a boleto paid, each for its kind.
 fn identificador_banking(
@@ -142,13 +171,14 @@ fn identificador_banking(
     }
 }
 
-/// Which webhook: of a kind of the Banking API, of the Cobrança API or of a
-/// Pix key.
+/// Which webhook: of a kind of the Banking API, of the Cobrança API, of a
+/// Pix key or of Pix Automático.
 #[derive(Debug, Clone)]
 enum Alvo {
     Banking(TipoWebhookBanking),
     Cobranca,
     Pix(ChavePix),
+    PixAutomatico(TipoWebhookPixAutomatico),
 }
 
 impl Alvo {
@@ -158,6 +188,10 @@ impl Alvo {
             Self::Banking(tipo) => format!("do tipo {tipo}"),
             Self::Cobranca => "de cobranças".to_owned(),
             Self::Pix(chave) => format!("da chave {chave}"),
+            Self::PixAutomatico(TipoWebhookPixAutomatico::Recorrencia) => {
+                "de recorrências".to_owned()
+            }
+            Self::PixAutomatico(_) => "de cobranças recorrentes".to_owned(),
         }
     }
 
@@ -167,6 +201,21 @@ impl Alvo {
             Self::Banking(tipo) => tipo.descricao(),
             Self::Cobranca => "cobranças recebidas, canceladas e expiradas",
             Self::Pix(_) => "cobranças Pix pagas (imediatas e com vencimento)",
+            Self::PixAutomatico(TipoWebhookPixAutomatico::Recorrencia) => {
+                "mudanças de status das recorrências do Pix Automático"
+            }
+            Self::PixAutomatico(_) => {
+                "mudanças de status das cobranças recorrentes do Pix Automático"
+            }
+        }
+    }
+
+    /// Where the notifications arrive, when Inter adds a path to the
+    /// address: `https://api.empresa.example/inter/rec`.
+    fn entrega(&self, url: &str) -> Option<String> {
+        match self {
+            Self::PixAutomatico(tipo) => Some(format!("{url}{}", tipo.sufixo())),
+            _ => None,
         }
     }
 
@@ -178,6 +227,10 @@ impl Alvo {
             Self::Pix(chave) => {
                 format!("inter-pj webhook pix {acao} {}", argumento(chave.as_str()))
             }
+            Self::PixAutomatico(TipoWebhookPixAutomatico::Recorrencia) => {
+                format!("inter-pj webhook recorrencia {acao}")
+            }
+            Self::PixAutomatico(_) => format!("inter-pj webhook cobranca-recorrente {acao}"),
         }
     }
 
@@ -186,6 +239,7 @@ impl Alvo {
             Self::Banking(tipo) => client.banking().consultar_webhook(*tipo).await,
             Self::Cobranca => client.cobranca().consultar_webhook().await,
             Self::Pix(chave) => client.pix().consultar_webhook(chave).await,
+            Self::PixAutomatico(tipo) => client.pix_automatico().consultar_webhook(*tipo).await,
         }
     }
 
@@ -194,6 +248,9 @@ impl Alvo {
             Self::Banking(tipo) => client.banking().cadastrar_webhook(*tipo, url).await,
             Self::Cobranca => client.cobranca().cadastrar_webhook(url).await,
             Self::Pix(chave) => client.pix().cadastrar_webhook(chave, url).await,
+            Self::PixAutomatico(tipo) => {
+                client.pix_automatico().cadastrar_webhook(*tipo, url).await
+            }
         }
     }
 
@@ -202,6 +259,7 @@ impl Alvo {
             Self::Banking(tipo) => client.banking().excluir_webhook(*tipo).await,
             Self::Cobranca => client.cobranca().excluir_webhook().await,
             Self::Pix(chave) => client.pix().excluir_webhook(chave).await,
+            Self::PixAutomatico(tipo) => client.pix_automatico().excluir_webhook(*tipo).await,
         }
     }
 }
@@ -285,7 +343,8 @@ async fn cadastrar(
         Formato::Texto | Formato::Csv => output::print(&format!(
             "Webhook cadastrado: o Inter passa a notificar {} em {}.\n\nConfira com: {}",
             alvo.notifica(),
-            args.url,
+            alvo.entrega(args.url.as_str())
+                .unwrap_or_else(|| args.url.to_string()),
             alvo.comando("consultar")
         )),
     }
@@ -350,6 +409,9 @@ fn resumo(
         linhas.push(("URL atual", limpo(atual).into_owned()));
     }
     linhas.push(("Nova URL", nova.to_string()));
+    if let Some(entrega) = alvo.entrega(nova.as_str()) {
+        linhas.push(("Entrega em", entrega));
+    }
     let acao = if atual.is_some() {
         "a trocar"
     } else {
@@ -413,6 +475,9 @@ where
     let mut linhas = vec![("Notifica", alvo.notifica().to_owned())];
     if let Some(url) = &webhook.webhook_url {
         linhas.push(("URL", limpo(url).into_owned()));
+        if let Some(entrega) = alvo.entrega(url) {
+            linhas.push(("Entrega em", limpo(&entrega).into_owned()));
+        }
     }
     if let Some(criacao) = &webhook.criacao {
         linhas.push(("Cadastrado em", horario_em(criacao, fuso)));
@@ -511,6 +576,44 @@ Webhook da chave pix@empresa.example
   Nenhum webhook cadastrado: o Inter não notifica cobranças Pix pagas (imediatas e com vencimento).
   Para cadastrar: inter-pj webhook pix cadastrar pix@empresa.example --url https://..."
         );
+    }
+
+    #[test]
+    fn pix_automatico_webhooks_say_where_the_notifications_arrive() {
+        let recorrencias = Alvo::PixAutomatico(TipoWebhookPixAutomatico::Recorrencia);
+        let atual = webhook(json!({"webhookUrl": URL, "criacao": "2026-09-01T12:00:00Z"}));
+        assert_eq!(
+            render_em(&recorrencias, Some(&atual), &brasilia()),
+            "\
+Webhook de recorrências
+  Notifica       mudanças de status das recorrências do Pix Automático
+  URL            https://api.empresa.example/inter/webhook
+  Entrega em     https://api.empresa.example/inter/webhook/rec
+  Cadastrado em  01/09/2026 09:00:00"
+        );
+        let cobrancas = Alvo::PixAutomatico(TipoWebhookPixAutomatico::CobrancaRecorrente);
+        assert_eq!(
+            render_em(&cobrancas, None, &brasilia()),
+            "\
+Webhook de cobranças recorrentes
+  Nenhum webhook cadastrado: o Inter não notifica mudanças de status das cobranças recorrentes do Pix Automático.
+  Para cadastrar: inter-pj webhook cobranca-recorrente cadastrar --url https://..."
+        );
+        let nova: WebhookUrl = "https://api.empresa.example/pix-automatico"
+            .parse()
+            .unwrap();
+        assert!(
+            resumo(&cobrancas, None, &nova, None)
+                .ends_with("\n  Entrega em  https://api.empresa.example/pix-automatico/cobr"),
+            "{}",
+            resumo(&cobrancas, None, &nova, None)
+        );
+        assert_eq!(
+            recorrencias.comando("excluir"),
+            "inter-pj webhook recorrencia excluir"
+        );
+        // The other webhooks get their notifications at the address itself.
+        assert_eq!(Alvo::Cobranca.entrega(URL), None);
     }
 
     #[test]

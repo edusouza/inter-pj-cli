@@ -42,6 +42,13 @@ pub(crate) enum PixAutomaticoCommand {
         subcommand_value_name = "COMANDO"
     )]
     Cobr(CobrCommand),
+    /// Locations de recorrências: os endereços dos QR Codes com que o pagador aprova uma recorrência
+    #[command(
+        subcommand,
+        subcommand_help_heading = "Comandos",
+        subcommand_value_name = "COMANDO"
+    )]
+    Locrec(LocrecCommand),
 }
 
 #[derive(Debug, Subcommand)]
@@ -625,6 +632,68 @@ pub(crate) struct CobrRetentativaArgs {
     /// Dia da nova tentativa (AAAA-MM-DD): até 7 dias depois da liquidação prevista, em um dia sem outra tentativa
     #[arg(long, value_name = "AAAA-MM-DD", value_parser = parse_data)]
     pub(crate) data: NaiveDate,
+
+    /// Confirma sem perguntar (para scripts)
+    #[arg(long, help_heading = "Segurança")]
+    pub(crate) sim: bool,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum LocrecCommand {
+    /// Cria uma location, o endereço do QR Code de uma recorrência, para usar depois com `rec criar --loc`
+    Criar(LocrecCriarArgs),
+    /// Locations de recorrências criadas em um período (padrão: últimos 30 dias), com filtros
+    Listar(LocrecListarArgs),
+    /// Mostra uma location e a recorrência vinculada a ela
+    Consultar(LocrecConsultarArgs),
+    /// Desvincula a recorrência de uma location, após mostrá-la e pedir confirmação
+    Desvincular(LocrecDesvincularArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct LocrecCriarArgs {}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct LocrecListarArgs {
+    #[command(flatten)]
+    pub(crate) periodo: PeriodoPixArgs,
+
+    /// Apenas as locations com uma recorrência vinculada
+    #[arg(long, conflicts_with = "sem_recorrencia")]
+    pub(crate) com_recorrencia: bool,
+
+    /// Apenas as locations livres
+    #[arg(long)]
+    pub(crate) sem_recorrencia: bool,
+
+    /// Apenas deste convênio, até 60 caracteres
+    #[arg(long, value_name = "CONVENIO")]
+    pub(crate) convenio: Option<String>,
+
+    /// Traz só esta página (a primeira é 0), em vez de todas
+    #[arg(long, value_name = "N")]
+    pub(crate) pagina: Option<u32>,
+
+    /// Itens por página com --pagina, de 1 a 1000 [padrão da API: 100]
+    #[arg(long, value_name = "N", requires = "pagina")]
+    pub(crate) itens_por_pagina: Option<u32>,
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct LocrecConsultarArgs {
+    /// id da location, mostrado por `pix-automatico locrec criar` e `listar`
+    #[arg(value_name = "ID")]
+    pub(crate) id: u64,
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct LocrecDesvincularArgs {
+    /// id da location
+    #[arg(value_name = "ID")]
+    pub(crate) id: u64,
 
     /// Confirma sem perguntar (para scripts)
     #[arg(long, help_heading = "Segurança")]
