@@ -6,6 +6,7 @@ mod config;
 mod extrato;
 mod pagamento;
 mod pix;
+mod qrcode;
 mod saldo;
 mod simulacao;
 
@@ -278,5 +279,89 @@ mod tests {
         assert_eq!(source_of(&m, "ambiente", "INTER_AMBIENTE"), None);
         let cli = Cli::from_arg_matches(&m).unwrap();
         assert!(cli.global.ambiente.is_none());
+    }
+}
+
+/// A command against a mock API, with a sandbox profile and a token with
+/// the scopes the test needs.
+#[cfg(test)]
+pub(crate) mod testes {
+    use std::collections::HashMap;
+    use std::fs;
+
+    use clap::{CommandFactory, FromArgMatches};
+    use serde_json::json;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    use super::{Context, Env};
+    use crate::cli::{Cli, Command};
+
+    struct EnvFalso(HashMap<&'static str, String>);
+
+    impl Env for EnvFalso {
+        fn var(&self, name: &str) -> Option<String> {
+            self.0.get(name).cloned()
+        }
+    }
+
+    pub(crate) struct Cenario {
+        pub(crate) server: MockServer,
+        pub(crate) context: Context,
+        _dir: tempfile::TempDir,
+    }
+
+    /// The scenario and the command of `inter-pj <args>`, with a token for
+    /// `escopos`.
+    pub(crate) async fn cenario(args: &[&str], escopos: &str) -> (Cenario, Command) {
+        let server = MockServer::start().await;
+        let dir = tempfile::tempdir().unwrap();
+        let rcgen::CertifiedKey { cert, signing_key } =
+            rcgen::generate_simple_self_signed(vec!["cliente.teste".to_owned()]).unwrap();
+        let certificado = dir.path().join("certificado.crt");
+        let chave = dir.path().join("chave.key");
+        fs::write(&certificado, cert.pem()).unwrap();
+        fs::write(&chave, signing_key.serialize_pem()).unwrap();
+        let config = dir.path().join("config.toml");
+        fs::write(
+            &config,
+            format!(
+                "[perfis.padrao]\nambiente = \"sandbox\"\nclient_id = \"id-de-teste\"\ncertificado = '{}'\nchave_privada = '{}'\n",
+                certificado.display(),
+                chave.display()
+            ),
+        )
+        .unwrap();
+        let config = config.display().to_string();
+        let mut full = vec!["inter-pj", "--config", &config];
+        full.extend_from_slice(args);
+        let matches = Cli::command().try_get_matches_from(&full).unwrap();
+        let cli = Cli::from_arg_matches(&matches).unwrap();
+        let env = EnvFalso(HashMap::from([
+            ("INTER_CLIENT_SECRET", "segredo-de-teste".to_owned()),
+            ("INTER_BASE_URL", server.uri()),
+            (
+                "INTER_CACHE_DIR",
+                dir.path().join("cache").display().to_string(),
+            ),
+        ]));
+        let context = Context::new(cli.global, &matches, &env).unwrap();
+        Mock::given(method("POST"))
+            .and(path("/oauth/v2/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "access_token": "tok",
+                "expires_in": 3600,
+                "scope": escopos
+            })))
+            .mount(&server)
+            .await;
+        (
+            Cenario {
+                server,
+                context,
+                _dir: dir,
+            },
+            cli.command,
+        )
     }
 }

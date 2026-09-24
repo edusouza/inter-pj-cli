@@ -21,10 +21,27 @@ pub(super) fn mostrar(
     cabecalhos: &[(&str, String)],
     corpo: &impl Serialize,
 ) -> Result<(), CliError> {
+    mostrar_em(context, settings, endpoint, &[], cabecalhos, corpo)
+}
+
+/// [`mostrar`] for an endpoint whose path has `{placeholders}`, filled with
+/// `parametros`.
+pub(super) fn mostrar_em(
+    context: &Context,
+    settings: &Settings,
+    endpoint: Endpoint,
+    parametros: &[(&str, &str)],
+    cabecalhos: &[(&str, String)],
+    corpo: &impl Serialize,
+) -> Result<(), CliError> {
     let base = settings
         .effective_base_url()
         .unwrap_or_else(|| "<URL do ambiente>".to_owned());
-    let url = format!("{}{}", base.trim_end_matches('/'), endpoint.path);
+    let mut caminho = endpoint.path.to_owned();
+    for (nome, valor) in parametros {
+        caminho = caminho.replace(&format!("{{{nome}}}"), valor);
+    }
+    let url = format!("{}{caminho}", base.trim_end_matches('/'));
     let corpo = serde_json::to_value(corpo)
         .map_err(|err| CliError::io("falha ao gerar JSON", std::io::Error::other(err)))?;
     let mut todos = Map::new();

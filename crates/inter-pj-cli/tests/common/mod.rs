@@ -19,6 +19,10 @@ pub const CLIENT_ID: &str = "client-id-e2e-0000-1111";
 pub const CLIENT_SECRET: &str = "segredo-e2e-que-nunca-deve-vazar";
 pub const TOKEN: &str = "token-e2e-que-nunca-deve-vazar";
 
+/// The example of the Banco Central's manual of the BR Code, with a valid
+/// CRC.
+pub const COPIA_E_COLA: &str = "00020126580014br.gov.bcb.pix0136123e4567-e12b-12d1-a456-4266554400005204000053039865802BR5913Fulano de Tal6008BRASILIA62070503***63041D3D";
+
 pub struct TestEnv {
     pub dir: TempDir,
     pub server: MockServer,
@@ -137,4 +141,35 @@ pub fn stdout_of(assert: &Assert) -> String {
 
 pub fn stderr_of(assert: &Assert) -> String {
     String::from_utf8(assert.get_output().stderr.clone()).unwrap()
+}
+
+/// The modules of the QR Code drawn without colors (light modules drawn),
+/// read back as a phone would.
+pub fn ler_qr_code(texto: &str) -> String {
+    const PX: usize = 4;
+    let linhas: Vec<&str> = texto
+        .lines()
+        .filter(|linha| !linha.is_empty() && linha.chars().all(|c| "█▀▄ ".contains(c)))
+        .collect();
+    assert!(!linhas.is_empty(), "sem QR Code:\n{texto}");
+    let lado = linhas[0].chars().count();
+    let mut escuros = vec![vec![false; lado]; linhas.len() * 2];
+    for (i, linha) in linhas.iter().enumerate() {
+        for (x, c) in linha.chars().enumerate() {
+            let (cima, baixo) = match c {
+                '█' => (true, true),
+                '▀' => (true, false),
+                '▄' => (false, true),
+                _ => (false, false),
+            };
+            escuros[2 * i][x] = !cima;
+            escuros[2 * i + 1][x] = !baixo;
+        }
+    }
+    let mut imagem = rqrr::PreparedImage::prepare_from_greyscale(lado * PX, lado * PX, |x, y| {
+        if escuros[y / PX][x / PX] { 0 } else { 255 }
+    });
+    let grades = imagem.detect_grids();
+    assert_eq!(grades.len(), 1, "QR Code não encontrado:\n{texto}");
+    grades[0].decode().unwrap().1
 }
