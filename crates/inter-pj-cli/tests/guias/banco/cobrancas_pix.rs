@@ -1,9 +1,11 @@
 //! The Pix charges of the account, immediate ([`cob`](super::cob)) and with
-//! a due date ([`cobv`](super::cobv)), and their locations
-//! ([`loc`](super::loc)), in one state: a location serves one charge after
-//! another, and a charge created without one gets its own. The ids of the
-//! locations follow the order they were created in, and what is created
-//! today takes the next time of one clock, 7 minutes after the one before.
+//! a due date ([`cobv`](super::cobv)), their locations ([`loc`](super::loc))
+//! and the batches that create charges ([`lote_cobv`](super::lote_cobv)),
+//! in one state: a location serves one charge after another, a charge
+//! created without one gets its own, and a batch creates charges as they
+//! are created alone. The ids of the locations follow the order they were
+//! created in, and what is created today takes the next time of one clock,
+//! 7 minutes after the one before.
 
 use std::collections::HashMap;
 
@@ -17,6 +19,8 @@ use crate::sessao::HOJE;
 pub(super) struct Cobrancas {
     pub(super) cobs: Vec<Value>,
     pub(super) cobvs: Vec<Value>,
+    /// The batches, with the situation of each of their charges.
+    pub(super) lotes: Vec<Value>,
     /// The locations without a charge.
     livres: Vec<Value>,
     /// The id of the next location.
@@ -41,6 +45,7 @@ impl Cobrancas {
         Self {
             cobs,
             cobvs,
+            lotes: Vec::new(),
             livres: Vec::new(),
             proxima,
             criadas: 0,
@@ -94,6 +99,17 @@ impl Cobrancas {
         });
         self.proxima += 1;
         loc
+    }
+
+    /// The txids of the charges the batch `lote` created.
+    pub(super) fn do_lote(&self, lote: u64) -> Vec<String> {
+        self.lotes
+            .iter()
+            .filter(|cada| cada["id"] == lote)
+            .flat_map(|cada| cada["cobsv"].as_array().unwrap())
+            .filter(|cobv| cobv["status"] == "CRIADA")
+            .map(|cobv| cobv["txid"].as_str().unwrap().to_owned())
+            .collect()
     }
 
     /// A location the charge leaves, which becomes free.

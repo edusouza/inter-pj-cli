@@ -220,62 +220,7 @@ Emitir cobranças, que são boletos com Pix para os clientes da empresa, está n
 
 ### Cobranças Pix
 
-A API Pix cria cobranças com QR Code dinâmico, que o cliente paga pelo app de qualquer banco. A cobrança imediata (`pix cob`), para pagar na hora, até expirar, e a cobrança com vencimento (`pix cobv`), o boleto do Pix, com multa, juros, abatimento e desconto, estão no guia [Cobranças Pix](docs/guias/cobrancas-pix.md): a criação, pelas opções ou por um arquivo JSON com os campos da API (`pix cobv modelo`), com o resumo e a confirmação, o txid que torna segura a repetição, a validade depois do vencimento e os encargos, a alteração e a remoção, uma cobrança paga com os seus Pix, a conferência de uma criação de resultado incerto e a listagem de um período com os seus filtros; e as locations, os endereços dos QR Codes, que podem ser criadas antes (`pix loc`) e servir a uma cobrança depois da outra. Criar e alterar precisam do escopo `cob.write` ou `cobv.write`; consultar e listar, do `cob.read` ou `cobv.read`.
-
-Muitas cobranças com vencimento podem ser criadas ou alteradas de uma vez, em um lote, a partir de um arquivo JSON (nos campos da API) ou de uma planilha CSV (uma cobrança por linha; as colunas têm os caminhos dos campos da API, como `valor.multa.valorPerc`). Antes de enviar, a CLI confere todas as cobranças e, se alguma tiver problema, recusa o arquivo inteiro, apontando a linha e o campo de cada uma:
-
-```console
-$ inter-pj pix lote-cobv modelo csv > lote.csv     # ou "modelo" para JSON; dados fictícios, vencendo em 30 dias
-$ inter-pj pix lote-cobv criar 42 --arquivo lote.csv --descricao "Mensalidades de outubro"
-Lote de cobranças com vencimento a criar
-  Ambiente     sandbox (dados fictícios)
-  Lote         42
-  Descrição    Mensalidades de outubro
-  Cobranças    2
-  Valor total  R$ 239,90
-  Vencimentos  23/10/2026
-
-  txid                          Vencimento      Valor  Devedor
-  mensalidade202610cliente0001  23/10/2026  R$ 150,00  Cliente Exemplo Ltda
-  mensalidade202610cliente0002  23/10/2026   R$ 89,90  Fulano de Tal
-Criar o lote de 2 cobranças? [s/N] s
-Lote 42 recebido: as 2 cobranças são criadas em instantes.
-
-Acompanhe com: inter-pj pix lote-cobv consultar 42 --aguardar
-
-$ inter-pj pix lote-cobv criar 43 --arquivo ruim.csv --descricao "Teste" --sim
-erro: ruim.csv: 3 cobranças com problema; nada foi enviado:
-  linha 2, campo "calendario.dataDeVencimento": obrigatório
-  linha 3, campo "calendario.dataDeVencimento": obrigatório
-  linha 4, campo "txid": txid inválido: use de 26 a 35 letras e dígitos, sem acentos, espaços, hífens ou símbolos
-```
-
-O id do lote é um número escolhido por você, e cada cobrança tem o seu txid, que não pode se repetir no arquivo; com o mesmo txid, a API não cria outra cobrança, e por isso repetir um lote de resultado incerto não duplica nada. Cada cobrança é conferida como em `pix cobv criar`, e vencimentos que já passaram são recusados. A descrição vem do arquivo JSON ou de `--descricao` (obrigatória com CSV). No CSV, o Excel costuma estragar números longos (notação científica) e tirar zeros à esquerda de CPF, CNPJ e CEP: a mensagem diz quando isso aconteceu. As informações adicionais só existem no JSON.
-
-`revisar` envia as mudanças de cobranças do lote, no mesmo formato: só muda o que estiver no arquivo (uma célula vazia não muda nada), e `status` com `REMOVIDA_PELO_USUARIO_RECEBEDOR` remove a cobrança. Um calendário novo precisa do vencimento, porque a CLI não consulta cada cobrança. Os dois pedem confirmação (sem terminal, ou com `--arquivo -`, exigem `--sim`) e aceitam `--simular`.
-
-O lote é processado depois do pedido, e cada cobrança é criada ou negada:
-
-```console
-$ inter-pj pix lote-cobv consultar 42
-Lote 42: Mensalidades de outubro
-  Criado em  24/09/2026 10:10:00
-  Cobranças  2 · 1 criada · 1 negada
-
-txid                          Situação  Criada em
-mensalidade202610cliente0001  criada    24/09/2026 10:10:03
-mensalidade202610cliente0002  negada
-
-Problemas
-  mensalidade202610cliente0002  Cobrança inválida. cobv.devedor.nome: O campo cobv.devedor.nome não respeita o schema.
-
-$ inter-pj pix lote-cobv consultar 42 --aguardar      # até nenhuma estar em processamento
-$ inter-pj pix lote-cobv sumario 42                   # totais do processamento
-$ inter-pj pix lote-cobv situacao 42 negada           # em-processamento, criada ou negada
-$ inter-pj pix lote-cobv listar --inicio 2026-09-01   # lotes do período, em texto, JSON ou CSV
-```
-
-Com `--aguardar`, a consulta sai com o código 0 se todas as cobranças foram criadas, 5 se alguma foi negada e 8 se o tempo acabou (padrão: 60s). Os escopos são `lotecobv.write` e `lotecobv.read`.
+A API Pix cria cobranças com QR Code dinâmico, que o cliente paga pelo app de qualquer banco. A cobrança imediata (`pix cob`), para pagar na hora, até expirar, e a cobrança com vencimento (`pix cobv`), o boleto do Pix, com multa, juros, abatimento e desconto, estão no guia [Cobranças Pix](docs/guias/cobrancas-pix.md): a criação, pelas opções ou por um arquivo JSON com os campos da API (`pix cobv modelo`), com o resumo e a confirmação, o txid que torna segura a repetição, a validade depois do vencimento e os encargos, a alteração e a remoção, uma cobrança paga com os seus Pix, a conferência de uma criação de resultado incerto e a listagem de um período com os seus filtros; as locations, os endereços dos QR Codes, que podem ser criadas antes (`pix loc`) e servir a uma cobrança depois da outra; e os lotes de cobranças com vencimento (`pix lote-cobv`), criados ou alterados a partir de uma planilha ou de um JSON, com a conferência do arquivo inteiro antes do envio e o processamento de cada cobrança. Criar e alterar precisam do escopo `cob.write` ou `cobv.write`; consultar e listar, do `cob.read` ou `cobv.read`.
 
 No sandbox, as cobranças podem ser pagas pela CLI, para testar o fluxo inteiro (criar, pagar, consultar e, com um webhook cadastrado, receber a notificação):
 

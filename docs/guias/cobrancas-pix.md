@@ -17,6 +17,10 @@ Os exemplos são da Empresa Exemplo Ltda, uma empresa fictícia, no perfil de pr
   - [Alterar uma cobrança com vencimento](#alterar-uma-cobrança-com-vencimento)
   - [As cobranças com vencimento de um período](#as-cobranças-com-vencimento-de-um-período)
 - [Locations](#locations)
+- [Lotes de cobranças com vencimento](#lotes-de-cobranças-com-vencimento)
+  - [Um lote com problemas](#um-lote-com-problemas)
+  - [O processamento](#o-processamento)
+  - [Alterar as cobranças de um lote](#alterar-as-cobranças-de-um-lote)
 
 ## Criar uma cobrança imediata
 
@@ -587,3 +591,154 @@ Criada em              id  Tipo  txid                          Location
 ```
 
 A listagem filtra por `--tipo cob` ou `cobv` e por `--com-cobranca` ou `--sem-cobranca`, em texto, JSON ou CSV com os nomes da API.
+
+## Lotes de cobranças com vencimento
+
+Muitas cobranças com vencimento podem ser criadas ou alteradas de uma vez, num lote, a partir de uma planilha CSV, com uma cobrança por linha e as colunas nos caminhos dos campos da API (`valor.multa.valorPerc`), ou de um arquivo JSON com os campos da API. `pix lote-cobv modelo csv` imprime uma planilha de exemplo, de dados fictícios, vencendo em 30 dias, separada por `;`, como o Excel em português a grava (`pix lote-cobv modelo`, o mesmo lote em JSON):
+
+```console
+$ inter-pj pix lote-cobv modelo csv > lote.csv
+```
+
+As mensalidades de novembro ficam assim, com um erro de copiar e colar: a linha do Fulano de Tal ficou com o txid da mensalidade de outubro, que já existe:
+
+<!-- guia: arquivo lote.csv -->
+```csv
+txid;calendario.dataDeVencimento;devedor.cpf;devedor.nome;valor.original;valor.multa.modalidade;valor.multa.valorPerc;valor.juros.modalidade;valor.juros.valorPerc;chave;solicitacaoPagador
+mensalidade202611beltranadetal;2026-11-10;012.345.678-90;Beltrana de Tal;450,00;1;9,00;1;0,15;pix@empresa.example;Mensalidade de novembro
+mensalidade202610fulanodetal;2026-11-10;123.456.789-09;Fulano de Tal;450,00;1;9,00;1;0,15;pix@empresa.example;Mensalidade de novembro
+mensalidade202611sicranodetal;2026-11-10;119.000.000-83;Sicrano de Tal;450,00;1;9,00;1;0,15;pix@empresa.example;Mensalidade de novembro
+```
+
+O id do lote é um número escolhido por você, e a descrição vem de `--descricao` (ou do arquivo JSON). O resumo mostra os totais e as cobranças, e a confirmação é a de sempre:
+
+```console
+$ inter-pj pix lote-cobv criar 202611 --arquivo lote.csv --descricao "Mensalidades de novembro"
+*** PRODUÇÃO: as cobranças valem de verdade ***
+Lote de cobranças com vencimento a criar
+  Ambiente     PRODUÇÃO (conta real)
+  Lote         202611
+  Descrição    Mensalidades de novembro
+  Cobranças    3
+  Valor total  R$ 1.350,00
+  Vencimentos  10/11/2026
+
+  txid                            Vencimento      Valor  Devedor
+  mensalidade202611beltranadetal  10/11/2026  R$ 450,00  Beltrana de Tal
+  mensalidade202610fulanodetal    10/11/2026  R$ 450,00  Fulano de Tal
+  mensalidade202611sicranodetal   10/11/2026  R$ 450,00  Sicrano de Tal
+Criar o lote de 3 cobranças? [s/N] s
+Lote 202611 recebido: as 3 cobranças são criadas em instantes.
+
+Acompanhe com: inter-pj pix lote-cobv consultar 202611 --aguardar
+```
+
+Cada cobrança tem o seu txid, que não pode se repetir no arquivo, e com o mesmo txid a API não cria outra cobrança: repetir um lote de resultado incerto não duplica nada. Criar e alterar precisam do escopo `lotecobv.write`, e consultar e listar, do `lotecobv.read`.
+
+### Um lote com problemas
+
+Antes de enviar, a CLI confere cada cobrança como em `pix cobv criar`. Se alguma tiver problema, recusa o arquivo inteiro, aponta a linha e o campo de cada problema e não envia nada:
+
+<!-- guia: arquivo ruim.csv -->
+```csv
+txid;calendario.dataDeVencimento;devedor.cpf;devedor.nome;valor.original;chave
+mensalidade202611beltrana;2026-11-10;012.345.678-90;Beltrana de Tal;450,00;pix@empresa.example
+mensalidade202611fulanodetal;2026-09-10;123.456.789-09;Fulano de Tal;450,00;pix@empresa.example
+mensalidade202611sicranodetal;2026-11-10;119.000.000-38;Sicrano de Tal;450,00;pix@empresa.example
+```
+
+```console
+$ inter-pj pix lote-cobv criar 202612 --arquivo ruim.csv --descricao "Teste" --sim
+erro: ruim.csv: 3 cobranças com problema; nada foi enviado:
+  linha 2, campo "txid": txid inválido: use de 26 a 35 letras e dígitos, sem acentos, espaços, hífens ou símbolos
+  linha 3, campo "calendario.dataDeVencimento": o vencimento (10/09/2026) já passou: a cobrança vence hoje ou depois
+  linha 4, campo "devedor.cpf": CPF/CNPJ inválido (dígitos verificadores não conferem)
+```
+
+### O processamento
+
+O lote é processado depois do pedido, e cada cobrança é criada ou negada. `pix lote-cobv consultar` mostra a situação de cada uma, e com `--aguardar` consulta de novo a cada 6 segundos, até nenhuma estar em processamento:
+
+```console
+$ inter-pj pix lote-cobv consultar 202611 --aguardar
+Lote 202611: Mensalidades de novembro
+  Criado em  24/09/2026 10:47:12
+  Cobranças  3 · 2 criadas · 1 negada
+
+txid                            Situação  Criada em
+mensalidade202611beltranadetal  criada    24/09/2026 10:47:15
+mensalidade202610fulanodetal    negada
+mensalidade202611sicranodetal   criada    24/09/2026 10:47:21
+
+Problemas
+  mensalidade202610fulanodetal  Cobrança inválida. cobv.txid: O txid informado já foi utilizado.
+erro: o lote foi processado com erro: 1 de 3 cobranças negadas
+```
+
+A API negou a cobrança do txid repetido, que a CLI não tinha como conferir: ela recusa um txid repetido dentro do arquivo, mas não conhece as cobranças que já existem. As outras duas foram criadas, como as de `pix cobv criar`. Com `--aguardar`, a consulta sai com o código 0 se todas as cobranças foram criadas, 5 se alguma foi negada e 8 se o tempo acabou (`--timeout`, de 60 segundos por padrão). A cobrança negada não entra no lote: a do Fulano vai com o txid certo em outro lote, ou com `pix cobv criar`.
+
+`pix lote-cobv sumario` mostra os totais do processamento, e `pix lote-cobv situacao 202611 negada` (ou `criada`, ou `em-processamento`), só as cobranças numa situação:
+
+```console
+$ inter-pj pix lote-cobv sumario 202611
+Lote 202611
+  Processamento  finalizado
+  Iniciado em    24/09/2026 10:47:12
+  Cobranças      3
+  Criadas        2
+  Negadas        1
+
+Veja por quê: inter-pj pix lote-cobv situacao 202611 negada
+```
+
+### Alterar as cobranças de um lote
+
+`pix lote-cobv revisar` envia mudanças de cobranças do lote, no mesmo formato: só muda o que estiver no arquivo, e uma célula vazia não muda nada. O Sicrano de Tal cancelou a assinatura, e a mensalidade de novembro dele é removida (`status` com `REMOVIDA_PELO_USUARIO_RECEBEDOR`):
+
+<!-- guia: arquivo revisao.csv -->
+```csv
+txid;status
+mensalidade202611sicranodetal;REMOVIDA_PELO_USUARIO_RECEBEDOR
+```
+
+```console
+$ inter-pj pix lote-cobv revisar 202611 --arquivo revisao.csv
+*** PRODUÇÃO: as cobranças valem de verdade ***
+Lote de cobranças com vencimento a alterar
+  Ambiente   PRODUÇÃO (conta real)
+  Lote       202611
+  Cobranças  1
+  Removidas  1
+
+  txid                           O que muda
+  mensalidade202611sicranodetal  remover (deixa de poder ser paga)
+Alterar 1 cobrança do lote? [s/N] s
+Lote 202611 recebido: as alterações de 1 cobrança são feitas em instantes.
+
+Acompanhe com: inter-pj pix lote-cobv consultar 202611 --aguardar
+```
+
+Um calendário novo precisa do vencimento, porque a CLI não consulta cada cobrança. Como `criar`, `revisar` pede confirmação (sem terminal, ou com `--arquivo -`, exige `--sim`) e aceita `--simular`. As cobranças de um lote aparecem em `pix cobv listar --lote`:
+
+```console
+$ inter-pj pix cobv listar --inicio 2026-09-24 --fim 2026-09-24 --lote 202611
+Cobranças Pix com vencimento criadas de 24/09/2026 00:00 a 24/09/2026 23:59 (lote 202611)
+
+Vencimento  Status                       Valor  Devedor          txid
+10/11/2026  ativa                    R$ 450,00  Beltrana de Tal  mensalidade202611beltranadetal
+10/11/2026  removida pelo recebedor  R$ 450,00  Sicrano de Tal   mensalidade202611sicranodetal
+
+2 cobranças · R$ 900,00
+```
+
+`pix lote-cobv listar` mostra os lotes criados num período, por padrão os últimos 30 dias até agora, com as cobranças criadas e negadas de cada um:
+
+```console
+$ inter-pj pix lote-cobv listar --inicio 2026-09-24 --fim 2026-09-24
+Lotes de cobranças com vencimento criados de 24/09/2026 00:00 a 24/09/2026 23:59
+
+Criado em                id  Descrição                 Cobranças  Criadas  Negadas
+24/09/2026 10:47:12  202611  Mensalidades de novembro          3        2        1
+
+1 lote · 3 cobranças
+```
