@@ -13,6 +13,7 @@ A API é só para CNPJs com pelo menos 6 meses de atividade. Os exemplos são da
 - [Cancelar uma recorrência](#cancelar-uma-recorrência)
 - [Pedir a aprovação](#pedir-a-aprovação)
 - [As cobranças recorrentes](#as-cobranças-recorrentes)
+- [O QR Code da recorrência](#o-qr-code-da-recorrência)
 
 ## Criar uma recorrência
 
@@ -612,4 +613,119 @@ Histórico
   24/09/2026 10:55:00  criada
   24/09/2026 10:55:05  ativa
   24/09/2026 11:00:00  cancelada
+```
+
+## O QR Code da recorrência
+
+Além da solicitação de confirmação, o pagador pode aprovar a recorrência pelo QR Code dela, lido no app do banco. O QR Code leva a uma **location de recorrência**, criada antes e ligada à recorrência na criação (`rec criar --loc`) ou depois (`rec revisar --loc`). Criar e desvincular uma location precisam do escopo `payloadlocationrec.write`, e consultar e listar, do `payloadlocationrec.read`.
+
+```console
+$ inter-pj pix-automatico locrec criar
+Location criada.
+
+Location 8101
+  Criada em    24/09/2026 11:05:00
+  Location     qrcodepix.inter.example/qr/v2/rec/8101
+  Recorrência  nenhuma
+
+Use com: inter-pj pix-automatico rec criar ... --loc 8101
+```
+
+A Beltrana de Tal prefere aprovar a mensalidade pelo QR Code. A location vai para a recorrência dela, que aguarda a aprovação:
+
+```console
+$ inter-pj pix-automatico rec revisar RR1234567820260924Bw2Jy6Fs9Nt --loc 8101
+Recorrência RR1234567820260924Bw2Jy6Fs9Nt a alterar
+  Ambiente  PRODUÇÃO (conta real)
+  Status    criada (aguarda a aprovação do pagador)
+  Devedor   Beltrana de Tal
+  Location  → 8101
+Alterar a recorrência? [s/N] s
+Recorrência alterada.
+
+Recorrência RR1234567820260924Bw2Jy6Fs9Nt
+  Status         criada (aguarda a aprovação do pagador)
+  Devedor        Beltrana de Tal (012.345.678-90)
+  Contrato       mensalidade-beltrana-2026
+  Objeto         Mensalidade
+  Periodicidade  mensal, a partir de 10/11/2026, sem fim
+  Valor          R$ 450,00 em cada pagamento
+  Retentativas   até 3 novas tentativas, em 7 dias
+  Recebedor      Empresa Exemplo Ltda (11.444.777/0001-61)
+  Location       qrcodepix.inter.example/qr/v2/rec/8101
+
+Histórico
+  24/09/2026 10:35:00  criada
+```
+
+A consulta da recorrência traz então o QR Code, com o código copia e cola dele. `--qrcode` o desenha no terminal, e `--qrcode-png` o grava numa imagem, para enviar à Beltrana:
+
+```console
+$ inter-pj pix-automatico rec consultar RR1234567820260924Bw2Jy6Fs9Nt --qrcode-png mensalidade-beltrana.png
+Recorrência RR1234567820260924Bw2Jy6Fs9Nt
+  Status         criada (aguarda a aprovação do pagador)
+  Devedor        Beltrana de Tal (012.345.678-90)
+  Contrato       mensalidade-beltrana-2026
+  Objeto         Mensalidade
+  Periodicidade  mensal, a partir de 10/11/2026, sem fim
+  Valor          R$ 450,00 em cada pagamento
+  Retentativas   até 3 novas tentativas, em 7 dias
+  Recebedor      Empresa Exemplo Ltda (11.444.777/0001-61)
+  Location       qrcodepix.inter.example/qr/v2/rec/8101
+
+Histórico
+  24/09/2026 10:35:00  criada
+
+Copia e cola  00020126180014br.gov.bcb.pix5204000053039865802BR5920EMPRESA EXEMPLO LTDA6014BELO HORIZONTE62070503***80600014br.gov.bcb.pix2538qrcodepix.inter.example/qr/v2/rec/81016304C2C7
+QR Code salvo em mensalidade-beltrana.png (25,9 KB)
+```
+
+O QR Code de uma recorrência rejeitada, expirada ou cancelada não serve mais, e a CLI não o desenha.
+
+`locrec listar` mostra as locations criadas num período, com a recorrência de cada uma; os filtros são `--com-recorrencia`, `--sem-recorrencia` e `--convenio`:
+
+```console
+$ inter-pj pix-automatico locrec listar --inicio 2026-09-01 --fim 2026-09-24
+Locations de recorrências criadas de 01/09/2026 00:00 a 24/09/2026 23:59
+
+Criada em              id  Recorrência                    Location
+10/09/2026 14:31:02  8100  RN1234567820260910m2Hc6Vy8Qd1  qrcodepix.inter.example/qr/v2/rec/8100
+24/09/2026 11:05:00  8101  RR1234567820260924Bw2Jy6Fs9Nt  qrcodepix.inter.example/qr/v2/rec/8101
+
+2 locations · 2 com recorrência
+```
+
+A location 8100 é a do contrato de suporte que a Cliente Exemplo Ltda recusou em setembro. A recorrência rejeitada não muda mais, mas o QR Code ainda leva a ela. `locrec consultar` mostra uma location:
+
+```console
+$ inter-pj pix-automatico locrec consultar 8100
+Location 8100
+  Criada em    10/09/2026 14:31:02
+  Location     qrcodepix.inter.example/qr/v2/rec/8100
+  Recorrência  RN1234567820260910m2Hc6Vy8Qd1
+```
+
+`locrec desvincular` solta a recorrência da location, depois de mostrá-las e pedir confirmação. O QR Code deixa de levar à recorrência, que continua como está, sem a location:
+
+```console
+$ inter-pj pix-automatico locrec desvincular 8100
+Location 8100 a desvincular
+  Ambiente     PRODUÇÃO (conta real)
+  Location     qrcodepix.inter.example/qr/v2/rec/8100
+  Recorrência  RN1234567820260910m2Hc6Vy8Qd1
+aviso: o QR Code desta location deixa de levar à recorrência RN1234567820260910m2Hc6Vy8Qd1, que continua como está
+Desvincular a recorrência? [s/N] s
+Recorrência RN1234567820260910m2Hc6Vy8Qd1 desvinculada: a location está livre.
+
+Location 8100
+  Criada em    10/09/2026 14:31:02
+  Location     qrcodepix.inter.example/qr/v2/rec/8100
+  Recorrência  nenhuma
+```
+
+A location livre serve a outra recorrência, com `--loc`, e o QR Code dela, se já foi impresso ou enviado, passa então a levar à nova. Uma location sem recorrência não tem o que desvincular:
+
+```console
+$ inter-pj pix-automatico locrec desvincular 8100 --sim
+erro: a location 8100 não tem recorrência vinculada: não há o que desvincular
 ```
