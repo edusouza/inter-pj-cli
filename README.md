@@ -320,7 +320,7 @@ Cobrança recorrente criada: o banco do pagador agenda o débito para o vencimen
 
 `pix-automatico cobr listar` mostra as cobranças recorrentes criadas em um período (padrão: últimos 30 dias), com filtros de recorrência (`--rec`), devedor (`--documento`), status (`--status criada|ativa|concluida|expirada|rejeitada|cancelada`) e `--convenio`, em texto, JSON ou CSV com os nomes da API. `cobr consultar <txid>` mostra a cobrança com as tentativas de liquidação (a data, o tipo, o status e o motivo de uma rejeição), o histórico e o Pix que a pagou. `cobr cancelar <txid>` a cancela depois de mostrá-la e pedir confirmação; pelas regras do Banco Central, isso vale até as 22h do dia anterior à liquidação, e depois disso o resumo avisa que o banco pode recusar. Quando o débito falha e a recorrência permite novas tentativas, `cobr retentativa <txid> --data AAAA-MM-DD` pede uma: a CLI confere a política e o prazo (até 7 dias depois da liquidação prevista) antes de enviar, e avisa quando já há uma tentativa naquele dia ou quando as 3 permitidas já foram pedidas. Cobranças pagas, expiradas, rejeitadas ou canceladas são recusadas sem nenhuma alteração. Os escopos são `cobr.write` e `cobr.read`, além de `rec.read` para a consulta da recorrência.
 
-As **locations de recorrências** são os endereços dos QR Codes com que o pagador aprova uma recorrência. `pix-automatico locrec criar` cria uma, para usar com `rec criar --loc`; `locrec listar` mostra as de um período (padrão: últimos 30 dias), com os filtros `--com-recorrencia`, `--sem-recorrencia` e `--convenio`, em texto, JSON ou CSV; `locrec consultar <id>` mostra uma e a recorrência vinculada; e `locrec desvincular <id>`, depois de mostrá-la e pedir confirmação, a solta da recorrência: o QR Code deixa de levar a ela, que continua como está. Os escopos são `payloadlocationrec.write` e `payloadlocationrec.read`. As mudanças das recorrências e das cobranças recorrentes chegam pelos webhooks do Pix Automático (veja [Webhooks](#webhooks)).
+As **locations de recorrências** são os endereços dos QR Codes com que o pagador aprova uma recorrência. `pix-automatico locrec criar` cria uma, para usar com `rec criar --loc`; `locrec listar` mostra as de um período (padrão: últimos 30 dias), com os filtros `--com-recorrencia`, `--sem-recorrencia` e `--convenio`, em texto, JSON ou CSV; `locrec consultar <id>` mostra uma e a recorrência vinculada; e `locrec desvincular <id>`, depois de mostrá-la e pedir confirmação, a solta da recorrência: o QR Code deixa de levar a ela, que continua como está. Os escopos são `payloadlocationrec.write` e `payloadlocationrec.read`. As mudanças das recorrências e das cobranças recorrentes chegam pelos webhooks do Pix Automático (veja o guia [Webhooks](docs/guias/webhooks.md#pix-automático)).
 
 No **sandbox**, `pix-automatico sandbox` faz o papel do pagador e do banco dele, para testar o fluxo inteiro:
 
@@ -351,77 +351,7 @@ Em produção, todos são recusados antes de qualquer requisição.
 
 ### Webhooks
 
-Webhooks são os endereços que o Inter chama quando algo acontece na conta. Cada API tem os seus:
-
-| Comando | O Inter notifica | Escopos |
-| --- | --- | --- |
-| `webhook banking ... pix-pagamento` | os Pix enviados pela conta | `webhook-banking.write` e `webhook-banking.read` |
-| `webhook banking ... boleto-pagamento` | os boletos pagos pela conta | `webhook-banking.write` e `webhook-banking.read` |
-| `webhook cobranca ...` | as cobranças recebidas, canceladas e expiradas | `boleto-cobranca.write` e `boleto-cobranca.read` |
-| `webhook pix ... CHAVE` | as cobranças Pix pagas, com um webhook por chave Pix | `webhook.write` e `webhook.read` |
-| `webhook recorrencia ...` | as mudanças de status das recorrências do Pix Automático, em `URL/rec` | `webhookrec.write` e `webhookrec.read` |
-| `webhook cobranca-recorrente ...` | as mudanças de status das cobranças recorrentes do Pix Automático, em `URL/cobr` | `webhookcobr.write` e `webhookcobr.read` |
-
-```console
-$ inter-pj webhook cobranca cadastrar --url https://novo.empresa.example/inter/cobrancas
-Webhook de cobranças a trocar
-  Ambiente   sandbox (dados fictícios)
-  Notifica   cobranças recebidas, canceladas e expiradas
-  URL atual  https://api.empresa.example/inter/cobrancas
-  Nova URL   https://novo.empresa.example/inter/cobrancas
-aviso: as notificações passam a ir para novo.empresa.example, e não mais para api.empresa.example
-Trocar a URL do webhook? [s/N] s
-Webhook cadastrado: o Inter passa a notificar cobranças recebidas, canceladas e expiradas em https://novo.empresa.example/inter/cobrancas.
-
-Confira com: inter-pj webhook cobranca consultar
-
-$ inter-pj webhook pix cadastrar pix@empresa.example --url https://api.empresa.example/inter/pix-cobrancas
-$ inter-pj webhook pix consultar pix@empresa.example
-Webhook da chave pix@empresa.example
-  Notifica       cobranças Pix pagas (imediatas e com vencimento)
-  URL            https://api.empresa.example/inter/pix-cobrancas
-  Cadastrado em  24/09/2026 10:15:00
-
-$ inter-pj webhook banking consultar                  # os dois tipos
-$ inter-pj webhook banking excluir pix-pagamento
-Webhook do tipo pix-pagamento a excluir
-  Ambiente       sandbox (dados fictícios)
-  Notifica       Pix enviados pela conta
-  URL            https://api.empresa.example/inter/pix
-  Cadastrado em  01/09/2026 09:00:00
-aviso: o Inter deixa de notificar Pix enviados pela conta
-Excluir o webhook? [s/N] s
-Webhook excluído: o Inter deixa de notificar Pix enviados pela conta.
-```
-
-A URL precisa começar com `https://`, e o Inter precisa alcançá-la pela internet: a CLI a confere antes de qualquer requisição e avisa quando ela aponta para um endereço local ou de rede privada. `cadastrar` consulta o webhook atual e mostra o antes e o depois, porque a nova URL passa a receber as notificações dos pagamentos da conta; cadastrar a mesma URL não muda nada. `cadastrar` e `excluir` pedem confirmação (sem terminal, `--sim`). Quando o servidor do webhook não aceita uma notificação, o Inter tenta de novo até 4 vezes: 20, 30, 60 e 120 minutos depois (no Banking, 5, 10, 30 e 60). Nos dois webhooks do Pix Automático, o Inter entrega as notificações no endereço cadastrado seguido de `/rec` ou `/cobr`, e a CLI mostra esse endereço de entrega no resumo e na consulta; eles não têm histórico de callbacks nem reenvio.
-
-Cada tentativa fica no histórico dos callbacks, com o status HTTP que o servidor respondeu, e as que falharam podem ser pedidas de novo:
-
-```console
-$ inter-pj webhook cobranca callbacks --inicio 2026-09-24 --fim 2026-09-24
-Callbacks do webhook de cobranças de 24/09/2026 00:00 a 24/09/2026 23:59
-
-Disparo              Tentativa  Entregue  HTTP  Código da cobrança                    Erro
-24/09/2026 11:05:00          2  sim        200  0b7e4c1a-5d3f-4a2b-9c8d-7e6f5a4b3c2d
-24/09/2026 11:05:01          2  não        503  1c8f5d2b-6e4a-4b3c-8d9e-8f7a6b5c4d3e  Service Unavailable
-24/09/2026 10:45:00          1  não        503  0b7e4c1a-5d3f-4a2b-9c8d-7e6f5a4b3c2d  Service Unavailable
-24/09/2026 10:45:01          1  não        503  1c8f5d2b-6e4a-4b3c-8d9e-8f7a6b5c4d3e  Service Unavailable
-
-4 tentativas · 1 entregue · 3 falharam
-
-Sem entrega no período: 1 operação. Para pedir o reenvio:
-  inter-pj webhook cobranca reenviar 1c8f5d2b-6e4a-4b3c-8d9e-8f7a6b5c4d3e
-
-$ inter-pj webhook cobranca reenviar 1c8f5d2b-6e4a-4b3c-8d9e-8f7a6b5c4d3e
-Reenvio pedido para 1 de 1 operação: o Inter vai enviar os callbacks de novo.
-
-$ inter-pj webhook banking callbacks pix-pagamento --end-to-end E00416968202609241310abcdEFGH123
-$ inter-pj webhook pix callbacks --txid 7978c0c97ea847e78e8849634473c1f1 --falhas
-$ inter-pj webhook pix reenviar pix@empresa.example 7978c0c97ea847e78e8849634473c1f1
-```
-
-O período segue as regras das listagens Pix (padrão: últimos 30 dias), e `--falhas` mostra só as tentativas que falharam; todas as páginas são lidas, ou só uma com `--pagina`. O comando sugerido considera todas as tentativas do período, então uma operação entregue numa tentativa posterior não entra nele. `reenviar` recebe os mesmos códigos que o histórico mostra: o código da solicitação dos Pix enviados (`pix-pagamento`) ou o da transação dos boletos pagos (`boleto-pagamento`), o código das cobranças e, no Pix, a chave e os txids das cobranças. Todos são conferidos antes de qualquer requisição, os repetidos vão uma vez e mais de 50 vão em blocos de 50; como o Inter aceita 5 pedidos de reenvio por minuto, com mais de 5 blocos a CLI espera 12 segundos entre eles. As operações não encontradas são listadas, e, se um bloco falhar, a dica traz o comando que pede o reenvio das que faltam.
+Os webhooks, os endereços que o Inter chama quando algo acontece na conta, estão no guia [Webhooks](docs/guias/webhooks.md): os dois do Banking, para os Pix enviados e os boletos pagos pela conta, o das cobranças, um por chave Pix para as cobranças Pix pagas e os dois do Pix Automático, que entregam as notificações em `/rec` e `/cobr`. `cadastrar` mostra o webhook atual e o novo, avisa quando as notificações passam a ir para outro servidor ou para um endereço que o Inter não alcança e pede confirmação (ou `--sim`), como `excluir`; o histórico das tentativas de entrega (`callbacks`) aponta as operações que ficaram sem entrega e o comando que pede o reenvio delas (`reenviar`). O guia diz os escopos de cada API, de leitura e de escrita.
 
 ### Formatos de saída
 
