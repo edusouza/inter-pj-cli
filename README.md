@@ -723,6 +723,21 @@ Cobrança cobvexemplo0000000000000000001 desvinculada: a location está livre.
 
 A listagem filtra por `--tipo cob` ou `cobv` e por `--com-cobranca` ou `--sem-cobranca`. `desvincular` consulta a location antes, recusa sem nenhuma alteração uma location sem cobrança e pede confirmação (sem terminal, `--sim`), porque o QR Code impresso deixa de levar à cobrança. Os escopos são `payloadlocation.write` e `payloadlocation.read`.
 
+No sandbox, as cobranças podem ser pagas pela CLI, para testar o fluxo inteiro (criar, pagar, consultar e, com um webhook cadastrado, receber a notificação):
+
+```console
+$ inter-pj pix cob pagar 7978c0c97ea847e78e8849634473c1f1                 # pelo valor da cobrança
+Pago no sandbox: R$ 149,90.
+endToEndId  E00416968202609241310abcdEFGH123
+
+Confira com: inter-pj pix cob consultar 7978c0c97ea847e78e8849634473c1f1
+
+$ inter-pj pix cobv pagar cobvexemplo0000000000000000001 --valor 153,00     # outro valor
+$ inter-pj pix sandbox pagar-qrcode --copia-e-cola '00020101021226...6304ABCD'  # como um cliente pagaria o QR Code
+```
+
+Sem `--valor`, `pagar` usa o valor da cobrança, e `pagar-qrcode`, o do código, conferido (CRC16) antes do envio. Em produção, quem paga é o cliente: os três comandos são recusados antes de qualquer requisição. Pagar precisa do escopo `pix.write` (e de `cob.read` ou `cobv.read` para buscar o valor), e a API aceita até 10 pagamentos por minuto.
+
 ### Pix recebidos e devoluções
 
 Os Pix que a conta recebeu, com ou sem cobrança, ficam na API Pix, com as suas devoluções:

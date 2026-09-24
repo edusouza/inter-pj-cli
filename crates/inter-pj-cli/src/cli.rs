@@ -32,8 +32,9 @@ pub(crate) use pix::{
     PixDevolucaoCommand, PixDevolucaoConsultarArgs, PixDevolucaoSolicitarArgs, PixLocCommand,
     PixLocConsultarArgs, PixLocCriarArgs, PixLocDesvincularArgs, PixLocListarArgs,
     PixLoteCobvArquivoArgs, PixLoteCobvCommand, PixLoteCobvConsultarArgs, PixLoteCobvIdArgs,
-    PixLoteCobvListarArgs, PixLoteCobvSituacaoArgs, PixRecebidoConsultarArgs, PixRecebidosCommand,
-    PixRecebidosListarArgs, SimNao, StatusCobArg,
+    PixLoteCobvListarArgs, PixLoteCobvSituacaoArgs, PixPagarQrcodeArgs, PixRecebidoConsultarArgs,
+    PixRecebidosCommand, PixRecebidosListarArgs, PixSandboxCommand, PixSandboxPagarArgs, SimNao,
+    StatusCobArg,
 };
 
 const AFTER_HELP: &str = "\
@@ -554,6 +555,13 @@ pub(crate) enum PixCommand {
         subcommand_value_name = "COMANDO"
     )]
     LoteCobv(PixLoteCobvCommand),
+    /// Sandbox: pagamentos de cobranças Pix, para testar o fluxo completo (recusados em produção)
+    #[command(
+        subcommand,
+        subcommand_help_heading = "Comandos",
+        subcommand_value_name = "COMANDO"
+    )]
+    Sandbox(PixSandboxCommand),
 }
 
 #[derive(Debug, Args)]

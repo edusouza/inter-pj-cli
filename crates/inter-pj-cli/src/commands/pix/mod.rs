@@ -10,6 +10,7 @@ mod enviar;
 mod loc;
 mod lote_cobv;
 mod recebidos;
+mod sandbox;
 
 use std::fmt::Write as _;
 
@@ -42,6 +43,7 @@ pub(super) async fn run(context: &Context, command: PixCommand) -> Result<(), Cl
         PixCommand::Devolucao(command) => devolucao::run(context, command).await,
         PixCommand::Loc(command) => loc::run(context, command).await,
         PixCommand::LoteCobv(command) => lote_cobv::run(context, command).await,
+        PixCommand::Sandbox(command) => sandbox::run(context, command).await,
     }
 }
 
