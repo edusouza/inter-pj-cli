@@ -8,7 +8,8 @@ use inter_pj::banking::{
     ItemLote, Lote, LotePagamentos, PagamentoDoLote, SolicitacaoLote, StatusBoletoDoLote,
     StatusDarfDoLote, StatusLote,
 };
-use inter_pj::boleto::TipoCodigo;
+use inter_pj::boleto::{CodigoBarras, TipoCodigo};
+use inter_pj::documento::Documento;
 use inter_pj::{Environment, InterClient, endpoint};
 
 use super::{darf, pagar};
@@ -65,11 +66,10 @@ async fn enviar(
     // With --sim, a warning would not stop a payment made twice.
     let repetidos = repetidos(&arquivo.pagamentos);
     if !repetidos.is_empty() && !args.permitir_repetidos {
-        return Err(CliError::Usage(format!(
-            "pagamentos repetidos em {}:\n  {}\nse forem mesmo pagamentos distintos, use --permitir-repetidos",
-            arquivo::nome(&args.arquivo),
-            repetidos.join("\n  ")
-        )));
+        return Err(CliError::PagamentosRepetidos {
+            arquivo: arquivo::nome(&args.arquivo),
+            repetidos,
+        });
     }
     let settings = context.settings()?;
     // The limit is per payment, as for single payments.
@@ -436,6 +436,7 @@ fn render_lote(lote: &Lote) -> String {
     }
     let mut tabela = Tabela::new(vec![
         Coluna::texto("Tipo", ""),
+        Coluna::texto("Documento", ""),
         Coluna::texto("Status", ""),
         Coluna::valor("Valor", ""),
         Coluna::texto("Código", ""),
@@ -464,6 +465,7 @@ fn render_lote(lote: &Lote) -> String {
         };
         tabela.linha(vec![
             Celula::texto(Some(tipo)),
+            Celula::texto(documento(pagamento).as_deref()),
             status,
             Celula::dinheiro(valor),
             Celula::texto(codigo),
@@ -472,6 +474,42 @@ fn render_lote(lote: &Lote) -> String {
     }
     let _ = write!(texto, "\n\n{}", tabela.texto_colorido());
     texto
+}
+
+/// Which payment a row is, as in the summary of `enviar`: the typed line
+/// of the code, or the revenue code and the taxpayer of the DARF. Payments
+/// of the same amount are told apart only so.
+fn documento(pagamento: &PagamentoDoLote) -> Option<String> {
+    match pagamento {
+        PagamentoDoLote::Boleto(boleto) => {
+            let codigo = boleto.cod_barra_linha_digitavel.as_deref()?;
+            Some(
+                CodigoBarras::parse(codigo)
+                    .map_or_else(|_| codigo.to_owned(), |codigo| codigo.linha_formatada()),
+            )
+        }
+        PagamentoDoLote::Darf(darf) => {
+            let documento = darf.cnpj_cpf.as_deref().map(|documento| {
+                Documento::parse(documento)
+                    .map_or_else(|_| documento.to_owned(), |documento| documento.formatado())
+            });
+            let contribuinte = match (&darf.nome_empresa, documento) {
+                (Some(nome), Some(documento)) => Some(format!("{nome} ({documento})")),
+                (nome, documento) => nome.clone().or(documento),
+            };
+            let partes: Vec<String> = [
+                darf.codigo_receita
+                    .as_ref()
+                    .map(|codigo| format!("receita {codigo}")),
+                contribuinte,
+            ]
+            .into_iter()
+            .flatten()
+            .collect();
+            (!partes.is_empty()).then(|| partes.join(" · "))
+        }
+        _ => None,
+    }
 }
 
 fn descrever_status_lote(status: &StatusLote) -> String {
@@ -738,8 +776,9 @@ Acompanhe com: inter-pj pagamento lote consultar {ID_LOTE} --aguardar"
             "contaCorrente": "7654321",
             "dataCriacao": "2026-10-01T10:00:00",
             "pagamentos": [
-                {"tipoPagamento": "BOLETO", "status": "AGENDADO", "valorPagar": 30.1, "codigoTransacao": "3414f226-36fb-4d87-811e-cfd99911d845"},
-                {"tipoPagamento": "DARF", "status": "ERRO_PAGAMENTO", "valorTotal": 47.14, "detalhe": "Saldo insuficiente"},
+                {"tipoPagamento": "BOLETO", "status": "AGENDADO", "valorPagar": 30.1, "codigoTransacao": "3414f226-36fb-4d87-811e-cfd99911d845", "codBarraLinhaDigitavel": "07791159500000030107777011678471159007112634"},
+                {"tipoPagamento": "DARF", "status": "ERRO_PAGAMENTO", "valorTotal": 47.14, "detalhe": "Saldo insuficiente", "codigoReceita": "0220", "nomeEmpresa": "Empresa Exemplo", "cnpjCpf": "12345678000195"},
+                {"tipoPagamento": "DARF", "status": "PAGO", "valorTotal": 10, "cnpjCpf": "123"},
                 {"tipoPagamento": "PIX", "valor": 1}
             ]
         }))
@@ -755,15 +794,16 @@ Lote {ID_LOTE}
   Criado em          01/10/2026 10:00:00
   Pagamentos         3
 
-Tipo    Status                Valor  Código                                Detalhe
-boleto  agendado           R$ 30,10  3414f226-36fb-4d87-811e-cfd99911d845
-DARF    erro no pagamento  R$ 47,14                                        Saldo insuficiente
+Tipo    Documento                                               Status                Valor  Código                                Detalhe
+boleto  07797.77705 11678.471159 90071.126347 1 15950000003010  agendado           R$ 30,10  3414f226-36fb-4d87-811e-cfd99911d845
+DARF    receita 0220 · Empresa Exemplo (12.345.678/0001-95)     erro no pagamento  R$ 47,14                                        Saldo insuficiente
+DARF    123                                                     pago               R$ 10,00
 PIX"
             )
         );
         // The account of the batch is the user's own: never shown.
         assert!(!texto.contains("7654321"), "{texto}");
-        assert_eq!(falhas(&lote), "1 de 3 pagamentos não foi feito");
+        assert_eq!(falhas(&lote), "1 de 4 pagamentos não foi feito");
     }
 
     #[test]

@@ -27,6 +27,14 @@ pub(crate) enum CliError {
     /// Invalid usage detected after argument parsing.
     #[error("{0}")]
     Usage(String),
+    /// `pagamento lote enviar`: the same payment more than once in the
+    /// file, which `--permitir-repetidos` allows.
+    #[error("pagamentos repetidos em {arquivo}:\n  {}", .repetidos.join("\n  "))]
+    PagamentosRepetidos {
+        arquivo: String,
+        /// Where each payment repeats, and why it matters.
+        repetidos: Vec<String>,
+    },
     /// Invalid statement period.
     #[error("{erro}")]
     Periodo {
@@ -170,7 +178,7 @@ impl CliError {
 
     pub(crate) fn exit_code(&self) -> u8 {
         match self {
-            Self::Usage(_) | Self::Periodo { .. } => exit::USAGE,
+            Self::Usage(_) | Self::PagamentosRepetidos { .. } | Self::Periodo { .. } => exit::USAGE,
             Self::Config(_) => exit::CONFIG,
             Self::Io { .. } => exit::UNEXPECTED,
             Self::Cancelado | Self::AssistenteInterrompido => exit::CANCELLED,
@@ -213,6 +221,9 @@ impl CliError {
     pub(crate) fn hints(&self) -> Vec<String> {
         match self {
             Self::Inter(err) => dicas_da_api(err),
+            Self::PagamentosRepetidos { .. } => {
+                vec!["se forem mesmo pagamentos distintos, use --permitir-repetidos".to_owned()]
+            }
             Self::Periodo {
                 dica: Some(dica), ..
             } => vec![(*dica).to_owned()],
