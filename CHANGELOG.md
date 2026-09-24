@@ -6,6 +6,10 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+## [0.8.0] - 2026-09-24
+
+Pix Automático: as recorrências que o pagador autoriza uma vez no banco dele, as solicitações de confirmação, as cobranças recorrentes de cada ciclo, as locations dos QR Codes, os webhooks e o sandbox que simula o pagador e o banco dele.
+
 ### Adicionado
 
 - `inter-pj pix-automatico rec criar`: cria uma recorrência do Pix Automático, a autorização que o pagador dá uma vez para as cobranças de um contrato, pelas opções ou por `--arquivo` (JSON com os campos da API, ou `-` para a entrada padrão, com `pix-automatico rec modelo` de exemplo): devedor e contrato, objeto, primeiro e último pagamento, periodicidade, valor fixo (`--valor`), mínimo (`--valor-minimo`) ou o de cada cobrança, retentativas (`--retentativas`), location e cobrança de ativação, conferidos antes de qualquer requisição. Resumo, confirmação, `--sim` e `--simular`; como a API não tem chave de idempotência, um resultado incerto vem com o comando que confere a recorrência antes de uma nova tentativa. Depois de criada, a CLI diz como o pagador a aprova (#46).
