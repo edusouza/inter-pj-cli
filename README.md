@@ -220,22 +220,7 @@ Emitir cobranças, que são boletos com Pix para os clientes da empresa, está n
 
 ### Cobranças Pix
 
-A API Pix cria cobranças com QR Code dinâmico, que o cliente paga pelo app de qualquer banco. A cobrança imediata (`pix cob`), para pagar na hora, até expirar, e a cobrança com vencimento (`pix cobv`), o boleto do Pix, com multa, juros, abatimento e desconto, estão no guia [Cobranças Pix](docs/guias/cobrancas-pix.md): a criação, pelas opções ou por um arquivo JSON com os campos da API (`pix cobv modelo`), com o resumo e a confirmação, o txid que torna segura a repetição, a validade depois do vencimento e os encargos, a alteração e a remoção, uma cobrança paga com os seus Pix, a conferência de uma criação de resultado incerto e a listagem de um período com os seus filtros; as locations, os endereços dos QR Codes, que podem ser criadas antes (`pix loc`) e servir a uma cobrança depois da outra; e os lotes de cobranças com vencimento (`pix lote-cobv`), criados ou alterados a partir de uma planilha ou de um JSON, com a conferência do arquivo inteiro antes do envio e o processamento de cada cobrança. Criar e alterar precisam do escopo `cob.write` ou `cobv.write`; consultar e listar, do `cob.read` ou `cobv.read`.
-
-No sandbox, as cobranças podem ser pagas pela CLI, para testar o fluxo inteiro (criar, pagar, consultar e, com um webhook cadastrado, receber a notificação):
-
-```console
-$ inter-pj pix cob pagar 7978c0c97ea847e78e8849634473c1f1                 # pelo valor da cobrança
-Pago no sandbox: R$ 149,90.
-endToEndId  E00416968202609241310abcdEFGH123
-
-Confira com: inter-pj pix cob consultar 7978c0c97ea847e78e8849634473c1f1
-
-$ inter-pj pix cobv pagar cobvexemplo0000000000000000001 --valor 153,00     # outro valor
-$ inter-pj pix sandbox pagar-qrcode --copia-e-cola '00020101021226...6304ABCD'  # como um cliente pagaria o QR Code
-```
-
-Sem `--valor`, `pagar` usa o valor da cobrança, e `pagar-qrcode`, o do código, conferido (CRC16) antes do envio. Em produção, quem paga é o cliente: os três comandos são recusados antes de qualquer requisição. Pagar precisa do escopo `pix.write` (e de `cob.read` ou `cobv.read` para buscar o valor), e a API aceita até 10 pagamentos por minuto.
+A API Pix cria cobranças com QR Code dinâmico, que o cliente paga pelo app de qualquer banco. A cobrança imediata (`pix cob`), para pagar na hora, até expirar, e a cobrança com vencimento (`pix cobv`), o boleto do Pix, com multa, juros, abatimento e desconto, estão no guia [Cobranças Pix](docs/guias/cobrancas-pix.md): a criação, pelas opções ou por um arquivo JSON com os campos da API (`pix cobv modelo`), com o resumo e a confirmação, o txid que torna segura a repetição, a validade depois do vencimento e os encargos, a alteração e a remoção, uma cobrança paga com os seus Pix, a conferência de uma criação de resultado incerto e a listagem de um período com os seus filtros; as locations, os endereços dos QR Codes, que podem ser criadas antes (`pix loc`) e servir a uma cobrança depois da outra; os lotes de cobranças com vencimento (`pix lote-cobv`), criados ou alterados a partir de uma planilha ou de um JSON, com a conferência do arquivo inteiro antes do envio e o processamento de cada cobrança; e o pagamento de teste no sandbox (`pix cob pagar`, `pix cobv pagar` e `pix sandbox pagar-qrcode`). Cada parte do guia diz os escopos de que os seus comandos precisam: os de `cob`, `cobv`, `payloadlocation` e `lotecobv`, de leitura e de escrita, e, para pagar no sandbox, o `pix.write`.
 
 ### Pix recebidos e devoluções
 
