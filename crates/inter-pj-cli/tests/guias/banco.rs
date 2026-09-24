@@ -2,12 +2,14 @@
 //! fictitious company, Empresa Exemplo Ltda, one module per API: [`conta`],
 //! the balance and the statements from June to September 2026, [`pix`], the
 //! Pix the account sends, [`recebidos`], the Pix it received and their
-//! refunds, and [`pagamentos`], the boletos, bills and taxes it pays. The
-//! data tell one story: the balance follows from the statement, the Pix
-//! received and the bills paid before are those of the statement, and what
-//! is sent, refunded or paid can be queried. Every name, document, key and
-//! amount is synthetic.
+//! refunds, [`pagamentos`], the boletos, bills and taxes it pays, and
+//! [`cobranca`], the charges it issues to its clients. The data tell one
+//! story: the balance follows from the statement, the Pix received, the
+//! bills paid and the charge received before are those of the statement,
+//! and what is sent, refunded, paid or issued can be queried. Every name,
+//! document, key and amount is synthetic.
 
+mod cobranca;
 mod conta;
 mod pagamentos;
 mod pix;
@@ -38,6 +40,7 @@ impl Banco {
         pix::montar(&servidor).await;
         recebidos::montar(&servidor).await;
         pagamentos::montar(&servidor).await;
+        cobranca::montar(&servidor).await;
         Self { servidor }
     }
 

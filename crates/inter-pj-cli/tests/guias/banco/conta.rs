@@ -125,7 +125,7 @@ fn extrato_pdf(request: &Request) -> ResponseTemplate {
     ResponseTemplate::new(200).set_body_json(json!({ "pdf": BASE64.encode(pdf(&titulo)) }))
 }
 
-fn pdf(titulo: &str) -> Vec<u8> {
+pub(super) fn pdf(titulo: &str) -> Vec<u8> {
     let conteudo = format!("BT /F1 14 Tf 56 780 Td ({titulo}) Tj ET");
     let objetos = [
         "<< /Type /Catalog /Pages 2 0 R >>".to_owned(),
