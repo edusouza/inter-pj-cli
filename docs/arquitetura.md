@@ -9,7 +9,7 @@
 │ commands/     saldo, extrato, pix, pix_automatico, pagamento, cobranca, webhook,          │
 │               auth, config                                                                │
 │ token_store   cache de tokens em arquivo (600, gravação atômica)                          │
-│ confirmacao   resumo + [s/N] antes de mover dinheiro (só com stdin em terminal)           │
+│ confirmacao   resumo + [s/N] antes de mover dinheiro (só com stdin e stderr em terminal)  │
 │ arquivo/      pagamentos, cobranças e recorrências em arquivo: JSON da API e CSV          │
 │ valor.rs      valores em reais digitados (150,00 / 1.500,00) e por extenso                │
 │ tabela.rs     tabelas em texto alinhado e CSV (RFC 4180, modo Excel pt-BR)                │
@@ -99,7 +99,7 @@ Um lote reúne de 2 a 150 pagamentos (`ItemLote::Boleto` ou `ItemLote::Darf`), s
 
 ### Confirmação antes de mover dinheiro
 
-Comandos que movimentam dinheiro validam tudo localmente, mostram um resumo em `stderr` (destino, valor em reais e por extenso, data, ambiente e chave de idempotência) e só enviam depois de um `s` ou `sim`. A resposta só é lida quando o `stdin` é um terminal: `yes | inter-pj pix enviar ...` não paga nada, e scripts precisam dizer `--sim` explicitamente. O limite por operação do perfil vale mesmo com `--sim`.
+Comandos que movimentam dinheiro validam tudo localmente, mostram um resumo em `stderr` (destino, valor em reais e por extenso, data, ambiente e chave de idempotência) e só enviam depois de um `s` ou `sim`. A resposta só é lida quando o `stdin` e o `stderr` são terminais: `yes | inter-pj pix enviar ...` não paga nada, uma pergunta gravada num arquivo (`2> log`) não é respondida às cegas, e scripts precisam dizer `--sim` explicitamente. O limite por operação do perfil vale mesmo com `--sim`.
 
 A pergunta passa pelo trait `Terminal`. Os testes rodam o comando de verdade contra a API simulada com um terminal falso, para provar que uma resposta negativa não faz nenhuma requisição. Os testes E2E do binário cobrem `--simular`, a falta de terminal e o limite.
 
@@ -185,7 +185,7 @@ Não há ambiente padrão: sandbox ou produção precisa ser escolhido. A resolu
 
 ### Erros e códigos de saída
 
-A biblioteca expõe erros tipados (`Error::{Config, Identity, Auth, Api, Transport, Decode}`) com a categoria HTTP (`ApiErrorKind`). A CLI traduz cada categoria para um código de saída estável (ver README), útil em scripts.
+A biblioteca expõe erros tipados (`Error::{Config, Identity, Auth, Api, Transport, Decode}`) com a categoria HTTP (`ApiErrorKind`). A CLI traduz cada categoria para um código de saída estável (ver README), útil em scripts. Um envio cujo resultado ficou incerto (`error::resultado_incerto`: tempo esgotado, `5xx`, resposta ilegível) tem o seu próprio código, 9, e não o da categoria: um script precisa distinguir "pode ter sido feito" de "não foi feito" (um `429` ou uma conexão recusada, 6), que pode repetir.
 
 ### Cores só na saída padrão, decididas uma vez
 

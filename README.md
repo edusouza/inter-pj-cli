@@ -236,10 +236,10 @@ O destino é uma chave (`--chave`), um código copia e cola (`--copia-e-cola`) o
 
 Trilhos de segurança de todo envio:
 
-- **Resumo e confirmação**: antes de enviar, a CLI mostra destino, valor (também por extenso), data e ambiente (produção em destaque) e pergunta `[s/N]`; o padrão é não. `--sim` confirma sem perguntar. Respostas vindas de um *pipe* não valem: sem terminal e sem `--sim`, a CLI recusa (código 2).
-- **Validação local**: chave Pix (CPF/CNPJ com dígitos verificadores, e-mail, celular `+55DD9NNNNNNNN`, chave aleatória), valor maior que zero com até 2 casas, descrição de até 140 caracteres e data de agendamento. O valor aceita `150,00`, `1.500,00` e `150.00`; formas ambíguas como `1.500` são recusadas.
+- **Resumo e confirmação**: antes de enviar, a CLI mostra destino, valor (também por extenso), data e ambiente (produção em destaque) e pergunta `[s/N]`; o padrão é não. `--sim` confirma sem perguntar. Respostas vindas de um *pipe* não valem, nem uma pergunta que não se vê (a saída de erros num arquivo): sem terminal e sem `--sim`, a CLI recusa (código 2).
+- **Validação local**: chave Pix (CPF/CNPJ com dígitos verificadores, e-mail, celular `+55DD9NNNNNNNN`, chave aleatória), valor maior que zero com até 2 casas, descrição de até 140 caracteres e data de agendamento. As datas seguem o calendário do banco: "hoje" é o dia em Brasília, qualquer que seja o fuso da máquina, para que um agendamento para amanhã, pedido de um servidor em UTC perto da meia-noite, não seja pago hoje. O valor aceita `150,00`, `1.500,00` e `150.00`; formas ambíguas como `1.500` são recusadas.
 - **`--simular`**: valida e mostra a requisição (sem segredos), sem enviar nada.
-- **Idempotência**: cada envio leva uma chave (`x-id-idempotente`), mostrada no resumo. Se a resposta se perder (tempo esgotado, erro 5xx), o Pix pode ter sido feito: confira o extrato e, para repetir sem risco de pagar duas vezes, use `--id-idempotente <chave>`.
+- **Idempotência**: cada envio leva uma chave (`x-id-idempotente`), mostrada no resumo. Se a resposta se perder (tempo esgotado, erro 5xx), o Pix pode ter sido feito, e a CLI sai com o código 9: confira o extrato e, para repetir sem risco de pagar duas vezes, use `--id-idempotente <chave>`. Num script que repete envios que falharam, gere a chave antes (por exemplo, com `uuidgen`) e passe a mesma `--id-idempotente` em todas as tentativas; e nunca repita às cegas um comando que saiu com 9.
 - **Limite por operação**: com `limite_por_operacao` no perfil, valores acima dele são recusados, mesmo com `--sim`.
 - **Aprovação**: conforme a configuração da conta, o Pix aguarda aprovação no Internet Banking (Aprovar > Gestão de Aprovações); a CLI avisa quando for o caso.
 
@@ -373,7 +373,7 @@ O arquivo usa os nomes de campo da API. Em JSON, é um objeto com `pagamentos` e
 - `BOLETO` (boletos, contas e tributos com código de barras): `codBarraLinhaDigitavel` e, quando o código não os traz ou para pagar outro valor, `valorPagar` e `dataVencimento`; opcionalmente `dataPagamento` (agendamento) e `cpfCnpjBeneficiario`, como em `pagamento boleto pagar`;
 - `DARF`: os campos do arquivo de `pagamento darf pagar`.
 
-Antes de enviar, a CLI confere o lote inteiro com as validações de cada tipo (dígitos verificadores, datas, valores, CPF/CNPJ) e recusa campos desconhecidos ou de outro tipo; havendo problemas, lista todos, com a linha (CSV) ou a posição (JSON) e o campo, e não envia nada. O resumo mostra o total por tipo e por extenso, cada pagamento, e avisa sobre vencimentos passados, valores diferentes dos do código e pagamentos repetidos no arquivo. Os trilhos de segurança são os dos outros pagamentos: confirmação `[s/N]` ou `--sim`, `--simular` e o limite por operação do perfil, que vale para cada pagamento do lote (um lote não é recusado pelo total, e sim pelo pagamento que passa do limite).
+Antes de enviar, a CLI confere o lote inteiro com as validações de cada tipo (dígitos verificadores, datas, valores, CPF/CNPJ) e recusa campos desconhecidos ou de outro tipo; havendo problemas, lista todos, com a linha (CSV) ou a posição (JSON) e o campo, e não envia nada. O resumo mostra o total por tipo e por extenso, cada pagamento, e avisa sobre vencimentos passados e valores diferentes dos do código. Pagamentos repetidos no arquivo (o mesmo código, ou o mesmo DARF) são recusados, porque com `--sim` um aviso não impediria o pagamento em dobro; se forem mesmo pagamentos distintos, use `--permitir-repetidos`. Os trilhos de segurança são os dos outros pagamentos: confirmação `[s/N]` ou `--sim`, `--simular` e o limite por operação do perfil, que vale para cada pagamento do lote (um lote não é recusado pelo total, e sim pelo pagamento que passa do limite).
 
 O CSV aceita `,` ou `;` como separador (detectado pelo cabeçalho), UTF-8 com ou sem BOM e valores como `65,33`, como o Excel em português salva. Ao abrir um CSV, porém, o Excel converte o que parece número ou data: números longos viram notação científica e perdem dígitos (`1,36094E+16`), códigos perdem os zeros à esquerda (`0220` vira `220`) e datas mudam de formato (`30/10/2026`). Para editar no Excel, importe o arquivo (Dados > De Texto/CSV) sem detectar os tipos de dados, ou formate as colunas como texto antes de digitar; linhas digitáveis e CPF/CNPJ com pontuação, como no modelo, já ficam como texto. Se algo chegar estragado, a conferência recusa o arquivo e diz o que aconteceu, sem enviar nada.
 
@@ -1101,9 +1101,10 @@ $ curl --cert certificado.crt --key chave.key \
 | 3 | configuração ausente ou inválida (inclui certificado/chave) |
 | 4 | falha de autenticação ou acesso negado (credenciais, escopos, 401/403) |
 | 5 | requisição rejeitada pela API (400, 404, 409, 422); com `--aguardar`, Pix que terminou sem ser pago, lote processado com erro, cobrança que não foi emitida, alteração que não foi feita ou devolução não realizada |
-| 6 | serviço indisponível, limite de requisições (429), erro 5xx ou falha de rede |
+| 6 | serviço indisponível, limite de requisições (429), erro 5xx ou falha de rede, numa operação que certamente não foi feita (uma consulta, ou um envio que a API não recebeu) |
 | 7 | operação cancelada na confirmação (nada foi enviado) |
 | 8 | `pix consultar`, `pagamento lote consultar`, `cobranca emitir`, `cobranca editar`, `cobranca edicao`, `pix devolucao` ou `pix lote-cobv consultar` com `--aguardar`: tempo esgotado antes de um status final |
+| 9 | resultado incerto: um envio pode ter sido feito (tempo esgotado, erro 5xx ou resposta ilegível depois do envio). Confira com o comando da dica antes de tentar de novo; um script não deve repetir o comando às cegas |
 
 Mensagens de erro vão para `stderr`, em português, com a explicação da API e dicas. Com `-v`/`-vv` a CLI mostra detalhes das requisições (método, caminho, status e tempo) — nunca tokens, segredos ou corpos de resposta.
 

@@ -5,7 +5,7 @@
 
 mod common;
 
-use chrono::{Days, Local};
+use chrono::Days;
 use common::{TestEnv, stderr_of, stdout_of};
 use serde_json::{Value, json};
 use wiremock::matchers::{any, body_json, method, path, query_param};
@@ -112,7 +112,7 @@ Vencimento  Pagamento   Beneficiário        Status        Valor  Código da tra
 #[tokio::test(flavor = "multi_thread")]
 async fn lista_os_ultimos_30_dias_por_padrao() {
     let env = env("pagamento-boleto.read").await;
-    let hoje = Local::now().date_naive();
+    let hoje = common::hoje();
     let inicio = hoje.checked_sub_days(Days::new(29)).unwrap();
     Mock::given(method("GET"))
         .and(path(PAGAMENTO))
@@ -304,8 +304,7 @@ async fn ajuda_em_portugues() {
 // --- pagar -------------------------------------------------------------------------
 
 fn daqui_a(dias: u64) -> String {
-    Local::now()
-        .date_naive()
+    common::hoje()
         .checked_add_days(Days::new(dias))
         .unwrap()
         .format("%Y-%m-%d")
@@ -505,7 +504,7 @@ async fn resultado_incerto_orienta_a_conferir_antes_de_repetir() {
         .cmd()
         .args(["pagamento", "boleto", "pagar", BOLETO, "--sim"])
         .assert()
-        .code(6);
+        .code(9);
     let stderr = stderr_of(&assert);
     assert!(stderr.contains("pagar duas vezes"), "{stderr}");
     assert!(

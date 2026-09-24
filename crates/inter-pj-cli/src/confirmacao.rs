@@ -11,7 +11,9 @@ use crate::output;
 
 /// Where confirmations are asked: the process' terminal, or a fake in tests.
 pub(crate) trait Terminal {
-    /// Whether someone can answer, i.e. stdin is a terminal.
+    /// Whether someone can see the summary and answer: stdin and stderr
+    /// are terminals. With stderr in a file, the question would be
+    /// answered without being read.
     fn interativo(&self) -> bool;
 
     /// Shows `pergunta` on stderr and reads one line from stdin; `None` at
@@ -25,7 +27,7 @@ pub(crate) struct Stdio;
 
 impl Terminal for Stdio {
     fn interativo(&self) -> bool {
-        io::stdin().is_terminal()
+        io::stdin().is_terminal() && io::stderr().is_terminal()
     }
 
     fn perguntar(&mut self, pergunta: &str) -> io::Result<Option<String>> {
@@ -74,7 +76,7 @@ pub(crate) fn pode_confirmar(terminal: &dyn Terminal, sim: bool) -> Result<(), C
         Ok(())
     } else {
         Err(CliError::Usage(
-            "confirmação necessária: execute em um terminal para responder, ou use --sim para confirmar sem perguntar"
+            "confirmação necessária: execute em um terminal, sem redirecionar a entrada nem a saída de erros, para ver o resumo e responder; ou use --sim para confirmar sem perguntar"
                 .to_owned(),
         ))
     }

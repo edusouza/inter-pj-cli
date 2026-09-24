@@ -8,7 +8,7 @@ use std::fs;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
-use chrono::{Days, Local};
+use chrono::Days;
 use common::{COPIA_E_COLA, TestEnv, ler_qr_code, stderr_of, stdout_of};
 use serde_json::{Value, json};
 use wiremock::matchers::{
@@ -461,8 +461,7 @@ async fn filtros_invalidos_nao_chamam_a_api() {
 // --- emitir -------------------------------------------------------------------------
 
 fn daqui_a(dias: u64) -> String {
-    Local::now()
-        .date_naive()
+    common::hoje()
         .checked_add_days(Days::new(dias))
         .unwrap()
         .format("%Y-%m-%d")
@@ -761,7 +760,7 @@ async fn resultado_incerto_orienta_a_conferir_antes_de_emitir_de_novo() {
         .args(opcoes(&daqui_a(30)))
         .arg("--sim")
         .assert()
-        .code(6);
+        .code(9);
     let stderr = stderr_of(&assert);
     assert!(
         stderr.contains("dica: a cobrança pode ter sido emitida"),

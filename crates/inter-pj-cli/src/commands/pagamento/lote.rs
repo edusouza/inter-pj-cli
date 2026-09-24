@@ -62,6 +62,15 @@ async fn enviar(
     };
     lote.validar()
         .map_err(|err| CliError::Usage(err.to_string()))?;
+    // With --sim, a warning would not stop a payment made twice.
+    let repetidos = repetidos(&arquivo.pagamentos);
+    if !repetidos.is_empty() && !args.permitir_repetidos {
+        return Err(CliError::Usage(format!(
+            "pagamentos repetidos em {}:\n  {}\nse forem mesmo pagamentos distintos, use --permitir-repetidos",
+            arquivo::nome(&args.arquivo),
+            repetidos.join("\n  ")
+        )));
+    }
     let settings = context.settings()?;
     // The limit is per payment, as for single payments.
     for (onde, item) in &arquivo.pagamentos {

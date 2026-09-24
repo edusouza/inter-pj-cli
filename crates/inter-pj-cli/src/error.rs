@@ -17,6 +17,9 @@ pub(crate) mod exit {
     pub(crate) const UNAVAILABLE: u8 = 6;
     pub(crate) const CANCELLED: u8 = 7;
     pub(crate) const WAIT_TIMEOUT: u8 = 8;
+    /// The operation may have been processed (timeout, `5xx`, an
+    /// unreadable success): check before any new attempt.
+    pub(crate) const UNCERTAIN: u8 = 9;
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -177,16 +180,18 @@ impl CliError {
             | Self::EdicaoNaoFeita { .. }
             | Self::DevolucaoNaoRealizada { .. } => exit::REJECTED,
             Self::TempoEsgotado { .. } => exit::WAIT_TIMEOUT,
-            Self::Inter(err)
-            | Self::ResultadoIncerto { source: err, .. }
-            | Self::PagamentoIncerto { source: err, .. }
-            | Self::EmissaoIncerta { source: err, .. }
-            | Self::CriacaoIncerta { source: err, .. }
-            | Self::CobrancaPixIncerta { source: err, .. }
-            | Self::DevolucaoIncerta { source: err, .. }
-            | Self::LoteCobvIncerto { source: err, .. }
-            | Self::WebhookIncerto { source: err, .. }
-            | Self::ReenvioIncompleto { source: err, .. } => match err {
+            // Built only when the request may have been processed: a script
+            // must not repeat them blindly, unlike a `429` or a refused
+            // connection (6).
+            Self::ResultadoIncerto { .. }
+            | Self::PagamentoIncerto { .. }
+            | Self::EmissaoIncerta { .. }
+            | Self::CriacaoIncerta { .. }
+            | Self::CobrancaPixIncerta { .. }
+            | Self::DevolucaoIncerta { .. }
+            | Self::LoteCobvIncerto { .. }
+            | Self::WebhookIncerto { .. } => exit::UNCERTAIN,
+            Self::Inter(err) | Self::ReenvioIncompleto { source: err, .. } => match err {
                 InterError::InvalidInput(_) => exit::USAGE,
                 InterError::Config(_) | InterError::Identity(_) => exit::CONFIG,
                 InterError::Auth(_) => exit::AUTH,
