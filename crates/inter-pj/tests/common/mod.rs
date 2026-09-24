@@ -2,7 +2,9 @@
 
 #![allow(dead_code, unreachable_pub)]
 
-use inter_pj::{ClientIdentity, Credentials, InterClient, InterClientBuilder};
+use std::time::Duration;
+
+use inter_pj::{ClientIdentity, Credentials, InterClient, InterClientBuilder, RetryPolicy};
 use serde_json::{Value, json};
 use wiremock::matchers::{method, path};
 use wiremock::{Match, Mock, MockServer, Request, ResponseTemplate};
@@ -21,11 +23,19 @@ pub fn identity() -> ClientIdentity {
     .unwrap()
 }
 
+/// Default retry policy with millisecond delays, so retries do not slow tests.
+pub fn fast_retries(attempts: u32) -> RetryPolicy {
+    RetryPolicy::new(attempts)
+        .initial_delay(Duration::from_millis(2))
+        .max_delay(Duration::from_millis(10))
+}
+
 pub fn builder(server: &MockServer) -> InterClientBuilder {
     InterClient::builder()
         .base_url(server.uri())
         .credentials(Credentials::new(CLIENT_ID, CLIENT_SECRET))
         .identity(identity())
+        .retry_policy(fast_retries(RetryPolicy::DEFAULT_ATTEMPTS))
 }
 
 pub fn client(server: &MockServer) -> InterClient {

@@ -9,6 +9,7 @@ use std::path::PathBuf;
 
 use chrono::NaiveDate;
 use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
+use inter_pj::RetryPolicy;
 
 const AFTER_HELP: &str = "\
 Credenciais:
@@ -176,6 +177,23 @@ pub(crate) struct GlobalArgs {
     #[arg(long, global = true)]
     pub(crate) json: bool,
 
+    /// Tentativas por requisição em falhas temporárias (429, 5xx, rede) [padrão: 3]
+    #[arg(
+        long,
+        global = true,
+        env = "INTER_TENTATIVAS",
+        value_name = "N",
+        value_parser = clap::value_parser!(u32).range(1..=10),
+        default_value_t = RetryPolicy::DEFAULT_ATTEMPTS,
+        hide_default_value = true,
+        hide_env_values = true
+    )]
+    pub(crate) tentativas: u32,
+
+    /// Não repete requisições que falharam (o mesmo que --tentativas 1)
+    #[arg(long, global = true)]
+    pub(crate) sem_retentativa: bool,
+
     /// Não usa nem grava o cache local de tokens
     #[arg(long, global = true)]
     pub(crate) sem_cache: bool,
@@ -200,6 +218,15 @@ impl GlobalArgs {
             Formato::Json
         } else {
             self.formato
+        }
+    }
+
+    /// Retry policy chosen with `--tentativas` / `--sem-retentativa`.
+    pub(crate) fn retry_policy(&self) -> RetryPolicy {
+        if self.sem_retentativa {
+            RetryPolicy::disabled()
+        } else {
+            RetryPolicy::new(self.tentativas)
         }
     }
 }
@@ -358,6 +385,21 @@ mod tests {
             panic!("comando inesperado");
         };
         assert_eq!(args.escopos, ["extrato.read", "pix.read", "cob.read"]);
+    }
+
+    #[test]
+    fn retries_are_global_options() {
+        let cli = Cli::try_parse_from(["inter-pj", "saldo", "--tentativas", "5"]).unwrap();
+        assert_eq!(cli.global.retry_policy().max_attempts(), 5);
+        let cli = Cli::try_parse_from(["inter-pj", "saldo"]).unwrap();
+        assert_eq!(
+            cli.global.retry_policy().max_attempts(),
+            RetryPolicy::DEFAULT_ATTEMPTS
+        );
+        let cli = Cli::try_parse_from(["inter-pj", "saldo", "--sem-retentativa"]).unwrap();
+        assert_eq!(cli.global.retry_policy(), RetryPolicy::disabled());
+        assert!(Cli::try_parse_from(["inter-pj", "saldo", "--tentativas", "0"]).is_err());
+        assert!(Cli::try_parse_from(["inter-pj", "saldo", "--tentativas", "11"]).is_err());
     }
 
     #[test]
