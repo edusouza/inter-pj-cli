@@ -77,8 +77,9 @@ pub(crate) enum CliError {
     #[error("{source}")]
     CobrancaPixIncerta {
         source: InterError,
-        /// `cob` or `cobv`, as in the commands.
-        tipo: &'static str,
+        /// The command of the charges: `pix cob`, `pix cobv` or
+        /// `pix-automatico cobr`.
+        comando: &'static str,
         txid: String,
     },
     /// A refund whose outcome is unknown: the money may have left. With the
@@ -237,11 +238,11 @@ impl CliError {
                     format!("confira antes de tentar de novo: {consulta}"),
                 ]
             }
-            Self::CobrancaPixIncerta { tipo, txid, .. } => {
+            Self::CobrancaPixIncerta { comando, txid, .. } => {
                 vec![
                     "a cobrança pode ter sido criada; com o mesmo txid, a API não cria outra"
                         .to_owned(),
-                    format!("confira com: inter-pj pix {tipo} consultar {txid}"),
+                    format!("confira com: inter-pj {comando} consultar {txid}"),
                     format!("ou repita o comando com --txid {txid}"),
                 ]
             }
