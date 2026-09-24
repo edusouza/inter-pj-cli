@@ -11,6 +11,7 @@ A API é só para CNPJs com pelo menos 6 meses de atividade. Os exemplos são da
 - [Uma recorrência aprovada](#uma-recorrência-aprovada)
 - [Alterar uma recorrência](#alterar-uma-recorrência)
 - [Cancelar uma recorrência](#cancelar-uma-recorrência)
+- [Pedir a aprovação](#pedir-a-aprovação)
 
 ## Criar uma recorrência
 
@@ -274,4 +275,186 @@ Uma recorrência rejeitada, expirada ou cancelada não muda mais:
 ```console
 $ inter-pj pix-automatico rec cancelar RN1234567820260910m2Hc6Vy8Qd1 --sim
 erro: a recorrência já está rejeitada pelo pagador: não há o que cancelar
+```
+
+## Pedir a aprovação
+
+O pagador aprova a recorrência no banco dele. Para que o banco lhe peça isso, a empresa envia uma **solicitação de confirmação**, com a conta do pagador. A CLI consulta a recorrência antes e mostra o que o pagador vai aprovar:
+
+```console
+$ inter-pj pix-automatico solicitacao criar --rec RR1234567820260924Qm4Tz8Kd2Wb \
+    --documento 119.000.000-83 --ispb 87654321 --agencia 0001 --conta 1234567 --expiracao 2026-10-01
+*** PRODUÇÃO: o pedido chega ao pagador de verdade ***
+Solicitação de confirmação a enviar
+  Ambiente          PRODUÇÃO (conta real)
+  Recorrência       RR1234567820260924Qm4Tz8Kd2Wb
+  Devedor           Sicrano de Tal (119.000.000-83)
+  Contrato          plano-mensal-0107
+  Objeto            Plano mensal
+  Periodicidade     mensal, a partir de 15/10/2026, sem fim
+  Valor             R$ 149,90 em cada pagamento
+  Conta do pagador  119.000.000-83, banco com ISPB 87654321, agência 0001, conta 1234567
+  Expira em         01/10/2026 23:59:59
+Enviar a solicitação ao banco do pagador? [s/N] s
+Solicitação criada: o banco do pagador vai pedir que ele aprove a recorrência.
+
+Solicitação de confirmação SC1234567820260924Tq6Wn2Hy8Kd
+  Status            criada (aguarda o envio)
+  Recorrência       RR1234567820260924Qm4Tz8Kd2Wb
+  Conta do pagador  119.000.000-83, banco com ISPB 87654321, agência 0001, conta 1234567
+  Expira em         01/10/2026 23:59:59
+  Devedor           Sicrano de Tal (119.000.000-83)
+  Contrato          plano-mensal-0107
+  Objeto            Plano mensal
+  Periodicidade     mensal, a partir de 15/10/2026, sem fim
+  Valor             R$ 149,90 em cada pagamento
+
+Histórico
+  24/09/2026 10:40:00  criada (aguarda o envio)
+
+Acompanhe com: inter-pj pix-automatico solicitacao consultar SC1234567820260924Tq6Wn2Hy8Kd
+ou pela recorrência: inter-pj pix-automatico rec consultar RR1234567820260924Qm4Tz8Kd2Wb
+```
+
+`--ispb` é o código de 8 dígitos do banco do pagador (o do Inter é 00416968), `--conta` vai com o dígito verificador, e `--expiracao` é o prazo para ele responder: `2h`, `7d`, uma data, até o fim do dia, ou data e hora com fuso; sem ela, 7 dias. Os escopos são `solicrec.write` e `solicrec.read`, além do `rec.read`, com que a CLI consulta a recorrência antes de criar a solicitação. Como na recorrência, não há chave de idempotência: um resultado incerto vem com o comando que confere se a solicitação foi enviada.
+
+O banco do pagador recebe a solicitação, e ela fica à espera da resposta dele:
+
+```console
+$ inter-pj pix-automatico solicitacao consultar SC1234567820260924Tq6Wn2Hy8Kd
+Solicitação de confirmação SC1234567820260924Tq6Wn2Hy8Kd
+  Status            recebida pelo pagador
+  Recorrência       RR1234567820260924Qm4Tz8Kd2Wb
+  Conta do pagador  119.000.000-83, banco com ISPB 87654321, agência 0001, conta 1234567
+  Expira em         01/10/2026 23:59:59
+  Devedor           Sicrano de Tal (119.000.000-83)
+  Contrato          plano-mensal-0107
+  Objeto            Plano mensal
+  Periodicidade     mensal, a partir de 15/10/2026, sem fim
+  Valor             R$ 149,90 em cada pagamento
+
+Histórico
+  24/09/2026 10:40:00  criada (aguarda o envio)
+  24/09/2026 10:40:02  enviada ao pagador
+  24/09/2026 10:40:05  recebida pelo pagador
+```
+
+O Sicrano de Tal avisou que a conta dele é outra. Uma solicitação criada ou recebida, ainda sem resposta, pode ser cancelada:
+
+```console
+$ inter-pj pix-automatico solicitacao cancelar SC1234567820260924Tq6Wn2Hy8Kd
+Solicitação SC1234567820260924Tq6Wn2Hy8Kd a cancelar
+  Ambiente          PRODUÇÃO (conta real)
+  Status            recebida pelo pagador
+  Recorrência       RR1234567820260924Qm4Tz8Kd2Wb
+  Conta do pagador  119.000.000-83, banco com ISPB 87654321, agência 0001, conta 1234567
+Cancelar a solicitação? [s/N] s
+Solicitação cancelada.
+
+Solicitação de confirmação SC1234567820260924Tq6Wn2Hy8Kd
+  Status            cancelada
+  Recorrência       RR1234567820260924Qm4Tz8Kd2Wb
+  Conta do pagador  119.000.000-83, banco com ISPB 87654321, agência 0001, conta 1234567
+  Expira em         01/10/2026 23:59:59
+  Devedor           Sicrano de Tal (119.000.000-83)
+  Contrato          plano-mensal-0107
+  Objeto            Plano mensal
+  Periodicidade     mensal, a partir de 15/10/2026, sem fim
+  Valor             R$ 149,90 em cada pagamento
+
+Histórico
+  24/09/2026 10:40:00  criada (aguarda o envio)
+  24/09/2026 10:40:02  enviada ao pagador
+  24/09/2026 10:40:05  recebida pelo pagador
+  24/09/2026 10:45:00  cancelada
+```
+
+A nova, com a conta certa:
+
+```console
+$ inter-pj pix-automatico solicitacao criar --rec RR1234567820260924Qm4Tz8Kd2Wb \
+    --documento 119.000.000-83 --ispb 87654321 --agencia 0001 --conta 7654321 --expiracao 2026-10-01 --sim
+*** PRODUÇÃO: o pedido chega ao pagador de verdade ***
+Solicitação de confirmação a enviar
+  Ambiente          PRODUÇÃO (conta real)
+  Recorrência       RR1234567820260924Qm4Tz8Kd2Wb
+  Devedor           Sicrano de Tal (119.000.000-83)
+  Contrato          plano-mensal-0107
+  Objeto            Plano mensal
+  Periodicidade     mensal, a partir de 15/10/2026, sem fim
+  Valor             R$ 149,90 em cada pagamento
+  Conta do pagador  119.000.000-83, banco com ISPB 87654321, agência 0001, conta 7654321
+  Expira em         01/10/2026 23:59:59
+Solicitação criada: o banco do pagador vai pedir que ele aprove a recorrência.
+
+Solicitação de confirmação SC1234567820260924Lp3Rv9Jc5Xs
+  Status            criada (aguarda o envio)
+  Recorrência       RR1234567820260924Qm4Tz8Kd2Wb
+  Conta do pagador  119.000.000-83, banco com ISPB 87654321, agência 0001, conta 7654321
+  Expira em         01/10/2026 23:59:59
+  Devedor           Sicrano de Tal (119.000.000-83)
+  Contrato          plano-mensal-0107
+  Objeto            Plano mensal
+  Periodicidade     mensal, a partir de 15/10/2026, sem fim
+  Valor             R$ 149,90 em cada pagamento
+
+Histórico
+  24/09/2026 10:50:00  criada (aguarda o envio)
+
+Acompanhe com: inter-pj pix-automatico solicitacao consultar SC1234567820260924Lp3Rv9Jc5Xs
+ou pela recorrência: inter-pj pix-automatico rec consultar RR1234567820260924Qm4Tz8Kd2Wb
+```
+
+A consulta da recorrência mostra as solicitações dela:
+
+```console
+$ inter-pj pix-automatico rec consultar RR1234567820260924Qm4Tz8Kd2Wb
+Recorrência RR1234567820260924Qm4Tz8Kd2Wb
+  Status         criada (aguarda a aprovação do pagador)
+  Devedor        Sicrano de Tal (119.000.000-83)
+  Contrato       plano-mensal-0107
+  Objeto         Plano mensal
+  Periodicidade  mensal, a partir de 15/10/2026, sem fim
+  Valor          R$ 149,90 em cada pagamento
+  Retentativas   até 3 novas tentativas, em 7 dias
+  Recebedor      Empresa Exemplo Ltda (11.444.777/0001-61)
+
+Histórico
+  24/09/2026 10:20:00  criada
+
+Solicitações de confirmação
+  SC1234567820260924Tq6Wn2Hy8Kd  cancelada; expira em 01/10/2026 23:59:59
+  SC1234567820260924Lp3Rv9Jc5Xs  recebida pelo pagador; expira em 01/10/2026 23:59:59
+```
+
+A resposta do pagador aparece no status da solicitação e no da recorrência. Aceita a solicitação, a recorrência fica aprovada, como a do Fulano de Tal:
+
+```console
+$ inter-pj pix-automatico solicitacao consultar SC1234567820260901h3Rw8Kd5Nb2
+Solicitação de confirmação SC1234567820260901h3Rw8Kd5Nb2
+  Status            aceita pelo pagador
+  Recorrência       RR1234567820260901k7Tq2Wm9Zp4
+  Conta do pagador  123.456.789-09, banco com ISPB 87654321, agência 0001, conta 1234567
+  Expira em         07/09/2026 23:59:59
+  Devedor           Fulano de Tal (123.456.789-09)
+  Contrato          plano-basico-0042
+  Objeto            Plano básico
+  Periodicidade     mensal, a partir de 10/09/2026, sem fim
+  Valor             R$ 89,90 em cada pagamento
+
+Histórico
+  01/09/2026 10:12:04  criada (aguarda o envio)
+  01/09/2026 10:12:06  enviada ao pagador
+  01/09/2026 10:12:09  recebida pelo pagador
+  02/09/2026 08:42:17  aceita pelo pagador
+```
+
+Uma recorrência aprovada ou encerrada não recebe solicitação, e uma solicitação respondida não é cancelada. A CLI recusa as duas sem enviar nada:
+
+```console
+$ inter-pj pix-automatico solicitacao criar --rec RR1234567820260901k7Tq2Wm9Zp4 \
+    --documento 123.456.789-09 --ispb 87654321 --agencia 0001 --conta 1234567 --expiracao 2026-10-01 --sim
+erro: a recorrência já foi aprovada pelo pagador
+$ inter-pj pix-automatico solicitacao cancelar SC1234567820260901h3Rw8Kd5Nb2 --sim
+erro: a solicitação está aceita pelo pagador: só as criadas ou recebidas, ainda sem resposta, podem ser canceladas
 ```
