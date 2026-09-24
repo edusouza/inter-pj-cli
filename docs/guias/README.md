@@ -12,7 +12,7 @@ Como usar a `inter-pj` no dia a dia, um assunto por guia, com exemplos de termin
 | [Pix Automático](pix-automatico.md) | criar uma recorrência, a autorização das cobranças de um contrato, pelas opções ou por um arquivo, conferir uma criação de resultado incerto, as recorrências de um período, uma recorrência aprovada, alterar o primeiro pagamento e cancelar; pedir a aprovação ao banco do pagador, com uma solicitação de confirmação, acompanhá-la e cancelá-la; criar as cobranças recorrentes, o débito agendado para o dia útil, uma cobrança que não foi paga com as suas tentativas, a nova tentativa e o cancelamento; o QR Code da recorrência, pela location, numa imagem para o pagador, e o desvínculo da location; e testar no sandbox, com a CLI no papel do pagador e do banco dele |
 | [Webhooks](webhooks.md) | cadastrar, consultar e excluir os webhooks do Banking, das cobranças, das chaves Pix e do Pix Automático, com o antes e o depois de uma troca de URL; o histórico das tentativas de entrega das notificações e o reenvio das que não chegaram |
 
-A instalação e a configuração estão no [README](../../README.md#instalação).
+As [receitas](../receitas.md) juntam os comandos em rotinas: a conciliação do dia, as cobranças de uma planilha, o uso num cron ou num CI e o aviso das notificações que não chegaram. A instalação e a configuração estão no [README](../../README.md#instalação).
 
 ## Como ler os exemplos
 
