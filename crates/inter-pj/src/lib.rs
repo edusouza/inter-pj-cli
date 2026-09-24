@@ -35,6 +35,7 @@
 pub mod auth;
 pub mod banking;
 pub mod boleto;
+mod certificate;
 mod client;
 pub mod cobranca;
 mod credentials;
@@ -53,6 +54,7 @@ mod serde_util;
 pub mod webhook;
 
 pub use auth::{AccessToken, TokenStore};
+pub use certificate::{CertificateInfo, DistinguishedName};
 pub use client::{InterClient, InterClientBuilder};
 pub use credentials::Credentials;
 pub use environment::{Environment, ParseEnvironmentError};

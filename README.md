@@ -127,10 +127,29 @@ $ inter-pj saldo --json                 # JSON com os nomes de campo da API
 
 $ inter-pj auth token --escopo extrato.read      # valida credenciais e mostra a validade
 $ inter-pj auth limpar                           # apaga os tokens em cache do perfil
+$ inter-pj auth certificado                      # titular, emissor e validade do certificado
 
 $ inter-pj --perfil producao saldo
 $ inter-pj --help                                # ajuda de todos os comandos
 ```
+
+### Certificado
+
+Os certificados de produção valem um ano. `auth certificado` lê o do perfil (ou outro, com `--arquivo`, como um renovado antes de trocá-lo na configuração) e mostra o titular, o emissor, a validade e quantos dias faltam:
+
+```console
+$ inter-pj auth certificado
+Certificado da integração
+  Arquivo          /home/usuario/.config/inter-pj/certificado.crt
+  Titular          CN=Integração Exemplo, O=Empresa Exemplo Ltda
+  Emissor          CN=AC Exemplo, O=Banco Exemplo
+  Número de série  1A2B3C4D
+  Válido desde     05/12/2025 10:00:00
+  Válido até       05/12/2026 10:00:00
+  Situação         válido; faltam 72 dias, e a renovação já está aberta no Internet Banking PJ
+```
+
+Nos últimos 30 dias da validade, e depois dela, todo comando que acessa a API avisa em stderr. A renovação, no Internet Banking PJ, abre 90 dias antes do fim e mantém o `client_id` e o `client_secret`; `--json` traz a situação (`valido`, `renovavel`, `vencendo`, `vencido` ou `ainda-nao-vale`) e os dias restantes, para um monitoramento.
 
 ### Extrato
 
