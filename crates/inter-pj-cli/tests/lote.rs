@@ -271,7 +271,11 @@ async fn pagamentos_repetidos_sao_recusados() {
         stderr.contains("pagamentos repetidos em entrada padrão:\n  linha 2 e linha 5: o mesmo pagamento aparece mais de uma vez"),
         "{stderr}"
     );
-    assert!(stderr.contains("use --permitir-repetidos"), "{stderr}");
+    // A hint of its own, not a line of the list.
+    assert!(
+        stderr.contains("\ndica: se forem mesmo pagamentos distintos, use --permitir-repetidos"),
+        "{stderr}"
+    );
 
     let assert = env
         .cmd()
