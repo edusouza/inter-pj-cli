@@ -13,15 +13,15 @@ A instalação e a configuração estão no [README](../../README.md#instalaçã
 - Uma linha que começa com `$ ` é um comando. As linhas seguintes, até o próximo comando, são o que o terminal mostra: a saída do comando e as mensagens de erro e avisos, na ordem em que aparecem.
 - Um comando que pede confirmação aparece com a resposta: `Enviar o Pix? [s/N] s`.
 - Os exemplos rodam no perfil `padrao`, de produção, de uma empresa fictícia, a Empresa Exemplo Ltda. Nomes, documentos, chaves e valores são todos fictícios.
-- A pasta pessoal aparece como `/home/voce`.
+- Nos exemplos, hoje é 24/09/2026, e a pasta pessoal aparece como `/home/voce`.
 
 ## Como os exemplos são conferidos
 
 Os testes do projeto executam cada exemplo destes guias contra uma simulação da API do Inter, que tem os dados da empresa fictícia, e conferem que o comando imprime exatamente o que o guia mostra. Um guia desatualizado quebra o CI.
 
-Há duas exceções, e o texto do guia avisa quando um exemplo é uma delas:
+Os testes fixam o dia de hoje, para que as datas dos exemplos não envelheçam. Há duas exceções, e o texto do guia avisa quando um exemplo é uma delas:
 
-- os exemplos cuja saída depende do dia de hoje, como o extrato dos últimos 30 dias, são executados, mas a saída mostrada é só uma ilustração;
+- os exemplos cuja saída depende do relógio, como os dias que faltam para o certificado vencer, são executados, mas a saída mostrada é só uma ilustração;
 - os que usam outro programa, como o `jq`, não são executados.
 
 ## Para quem escreve um guia

@@ -16,7 +16,7 @@ mod simulacao;
 mod webhook;
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use chrono::{DateTime, Days, FixedOffset, NaiveDate, Utc};
@@ -117,6 +117,9 @@ impl Context {
         };
         let config_path = paths::config_file(global.config.as_deref())?;
         let cache_dir = paths::cache_dir(env.var(settings::ENV_CACHE_DIR).as_deref())?;
+        if let Some(dia) = hoje_fixo(env)? {
+            let _ = HOJE_FIXO.set(dia);
+        }
         Ok(Self {
             global,
             sources,
@@ -231,12 +234,44 @@ const BRASILIA: FixedOffset = match FixedOffset::west_opt(3 * 3600) {
     None => panic!("fuso de Brasília"),
 };
 
+/// The day `INTER_HOJE` fixes as today, once [`Context::new`] checked it.
+static HOJE_FIXO: OnceLock<NaiveDate> = OnceLock::new();
+
 /// Today in the bank's calendar. Scheduling dates, the checks of past
 /// dates and the default periods follow it: a machine in UTC, or in
 /// another time zone, near midnight would take a scheduling for tomorrow
 /// as a payment for today.
 fn hoje() -> NaiveDate {
-    hoje_em(Utc::now())
+    HOJE_FIXO
+        .get()
+        .copied()
+        .unwrap_or_else(|| hoje_em(Utc::now()))
+}
+
+/// `INTER_HOJE` (AAAA-MM-DD), the day taken as today, so that examples and
+/// tests with dates do not go stale. Like `INTER_BASE_URL`, which it needs,
+/// it exists for the tests against a local mock of the API: with the bank,
+/// a wrong today would schedule payments on the wrong day.
+fn hoje_fixo(env: &dyn Env) -> Result<Option<NaiveDate>, CliError> {
+    let Some(valor) = env.var(settings::ENV_HOJE) else {
+        return Ok(None);
+    };
+    let Some(url) = env.var(settings::ENV_BASE_URL) else {
+        return Err(CliError::Config(format!(
+            "{} só vale junto com {}, nos testes contra uma simulação local da API",
+            settings::ENV_HOJE,
+            settings::ENV_BASE_URL
+        )));
+    };
+    settings::servidor_local(&url)?;
+    NaiveDate::parse_from_str(valor.trim(), "%Y-%m-%d")
+        .map(Some)
+        .map_err(|_| {
+            CliError::Config(format!(
+                "{}: data inválida \"{valor}\": use o formato AAAA-MM-DD",
+                settings::ENV_HOJE
+            ))
+        })
 }
 
 fn hoje_em(agora: DateTime<Utc>) -> NaiveDate {
@@ -276,6 +311,36 @@ mod tests {
     use clap::{CommandFactory, FromArgMatches};
 
     use super::*;
+
+    #[test]
+    fn today_is_fixed_only_against_a_local_mock() {
+        struct Variaveis<'a>(&'a [(&'a str, &'a str)]);
+        impl Env for Variaveis<'_> {
+            fn var(&self, name: &str) -> Option<String> {
+                self.0
+                    .iter()
+                    .find(|(nome, _)| *nome == name)
+                    .map(|(_, valor)| (*valor).to_owned())
+            }
+        }
+        let local = ("INTER_BASE_URL", "http://127.0.0.1:9999");
+        assert_eq!(hoje_fixo(&Variaveis(&[local])).unwrap(), None);
+        assert_eq!(
+            hoje_fixo(&Variaveis(&[local, ("INTER_HOJE", "2026-09-24")])).unwrap(),
+            NaiveDate::from_ymd_opt(2026, 9, 24)
+        );
+        for variaveis in [
+            &[("INTER_HOJE", "2026-09-24")][..],
+            &[
+                ("INTER_BASE_URL", "https://cdpj.partners.bancointer.com.br"),
+                ("INTER_HOJE", "2026-09-24"),
+            ],
+            &[local, ("INTER_HOJE", "24/09/2026")],
+        ] {
+            let erro = hoje_fixo(&Variaveis(variaveis)).unwrap_err();
+            assert!(matches!(erro, CliError::Config(_)), "{variaveis:?}");
+        }
+    }
 
     #[test]
     fn today_is_the_bank_calendar_day() {

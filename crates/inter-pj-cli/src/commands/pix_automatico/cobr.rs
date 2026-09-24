@@ -4,7 +4,7 @@
 
 use std::fmt::Write as _;
 
-use chrono::{Days, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone};
+use chrono::{Days, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
 use inter_pj::cobranca::Uf;
 use inter_pj::pix::Txid;
 use inter_pj::pix_automatico::{
@@ -22,7 +22,7 @@ use crate::cli::{
     CobrRetentativaArgs, ContatoDevedorArgs, Formato,
 };
 use crate::commands::pix::{documento, endereco, incerta, pagina, periodo, pessoa, tabela_pix};
-use crate::commands::{Context, hoje, simulacao};
+use crate::commands::{BRASILIA, Context, hoje, simulacao};
 use crate::confirmacao::{Stdio, Terminal, confirmar, descrever_ambiente, pode_confirmar};
 use crate::cores::Tom;
 use crate::error::{CliError, resultado_incerto};
@@ -806,7 +806,9 @@ async fn cancelar(
         &format!("Cobrança recorrente {} a cancelar", args.txid),
         &linhas,
     );
-    if let Some(aviso) = prazo_do_cancelamento(&atual, Local::now().naive_local()) {
+    // The 22h of the Banco Central are those of Brasília.
+    let agora = Utc::now().with_timezone(&BRASILIA).naive_local();
+    if let Some(aviso) = prazo_do_cancelamento(&atual, agora) {
         let _ = write!(resumo, "\naviso: {aviso}");
     }
     output::eprint(&resumo);

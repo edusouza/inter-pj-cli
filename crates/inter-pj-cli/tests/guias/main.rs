@@ -8,8 +8,8 @@
 //! - A line `Pergunta? [s/N] s` is the answer to a confirmation: the command
 //!   runs with `--sim`, which prints the same without the question.
 //! - `<!-- guia: saída ilustrativa -->` before a block runs its commands
-//!   without comparing what they print (the statement of the last 30 days,
-//!   the days left of a certificate).
+//!   without comparing what they print (the days left of a certificate,
+//!   which follow the clock).
 //! - `<!-- guia: não executar -->` before a block skips it (installation, a
 //!   pipe to another program).
 //! - The keys and txids the CLI generates match any other of the same shape,
@@ -17,9 +17,9 @@
 //! - No command, in any block, may print the `client_secret`.
 //!
 //! The session is a home of its own (`/home/voce` in the guides), in Brasília
-//! time, with the profiles `padrao` (production) and `sandbox`, whose
-//! certificate and key are in `~/inter`. Every name, document and amount of
-//! the mock is synthetic.
+//! time and on the day [`sessao::HOJE`] (`INTER_HOJE`), with the profiles
+//! `padrao` (production) and `sandbox`, whose certificate and key are in
+//! `~/inter`. Every name, document and amount of the mock is synthetic.
 //!
 //! `ATUALIZAR_GUIAS=1 cargo test --test guias` writes in the guides what the
 //! commands print, for a new example or a change in the output; review the
