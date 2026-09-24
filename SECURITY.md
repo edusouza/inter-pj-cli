@@ -14,7 +14,7 @@ Esta CLI acessa uma conta bancária empresarial. Segurança e privacidade são r
 
 Outras proteções:
 
-- TLS com rustls, verificação de certificados pelo repositório do sistema, `https` obrigatório (exceto `localhost`, para testes) e sem seguir redirecionamentos. A variável `INTER_BASE_URL`, que troca o endereço da API, existe para testes e só aceita um servidor desta máquina: outro receberia o `client_secret` e todas as requisições, com os resumos ainda mostrando o ambiente do perfil.
+- TLS com rustls, verificação de certificados pelo repositório do sistema, `https` obrigatório (exceto `localhost`, para testes) e sem seguir redirecionamentos. A variável `INTER_BASE_URL`, que troca o endereço da API, existe para testes e só aceita um servidor desta máquina: outro receberia o `client_secret` e todas as requisições, com os resumos ainda mostrando o ambiente do perfil. `INTER_HOJE`, que fixa o dia de hoje para os testes, só vale junto com ela.
 - Logs (`-v`/`-vv`) restritos aos crates do projeto: bibliotecas de HTTP/TLS não registram nada, então cabeçalhos e corpos não vazam.
 - Erros de parse do arquivo de configuração indicam apenas a linha, sem reproduzir o conteúdo (que pode conter o segredo).
 - Operações que movimentam dinheiro (`pix enviar`, `pix devolucao solicitar`, `pagamento boleto pagar`, `pagamento darf pagar` e `pagamento lote enviar`) validam tudo localmente e mostram um resumo antes de enviar. Só enviam com confirmação explícita: `s`/`sim` digitado em um terminal que mostra o resumo (respostas vindas de um *pipe*, ou com a saída de erros num arquivo, não valem) ou `--sim`. O cancelamento de um agendamento também pede confirmação.

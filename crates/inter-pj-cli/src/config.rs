@@ -27,6 +27,7 @@ pub(crate) const DEFAULT_PROFILE: &str = "padrao";
 pub(crate) const ENV_CLIENT_SECRET: &str = "INTER_CLIENT_SECRET";
 pub(crate) const ENV_BASE_URL: &str = "INTER_BASE_URL";
 pub(crate) const ENV_CACHE_DIR: &str = "INTER_CACHE_DIR";
+pub(crate) const ENV_HOJE: &str = "INTER_HOJE";
 
 /// Template written by `inter-pj config init`.
 pub(crate) const TEMPLATE: &str = r#"# Configuração do inter-pj — CLI não oficial para a conta PJ do Inter Empresas.
@@ -496,7 +497,7 @@ fn permission_warnings(
 /// `client_secret`, the tokens and every request, while the summaries still
 /// named the environment of the profile ("sandbox") and the sandbox-only
 /// commands still ran.
-fn servidor_local(raw: &str) -> Result<(), CliError> {
+pub(crate) fn servidor_local(raw: &str) -> Result<(), CliError> {
     let local = Url::parse(raw.trim()).is_ok_and(|url| match url.host() {
         Some(Host::Domain(dominio)) => dominio.eq_ignore_ascii_case("localhost"),
         Some(Host::Ipv4(ip)) => ip.is_loopback(),
