@@ -321,6 +321,21 @@ pub struct Devolucao {
         deserialize_with = "lenient::string"
     )]
     pub motivo: Option<String>,
+    /// Which part of the Pix or why it was refunded (`ORIGINAL`,
+    /// `MED_FRAUDE`...), as the refunds of Pix Automático bring it.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient::string"
+    )]
+    pub natureza: Option<String>,
+    /// The text of the refund, as the refunds of Pix Automático bring it.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient::string"
+    )]
+    pub descricao: Option<String>,
 }
 
 /// When a refund was requested and settled (RFC 3339).

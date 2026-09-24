@@ -10,13 +10,16 @@ mod spec;
 use std::collections::BTreeSet;
 
 use chrono::{DateTime, NaiveDate};
+use inter_pj::cobranca::Uf;
 use inter_pj::endpoint;
 use inter_pj::pix::{Devedor, ITENS_POR_PAGINA_MAXIMO_PIX, TXID_MAXIMO, TXID_MINIMO};
 use inter_pj::pix_automatico::{
-    AtivacaoSolicitada, CalendarioRec, DestinatarioSolicRec, ID_TAMANHO, LocationRec, MAX_AGENCIA,
-    MAX_CONTA, MAX_CONTRATO, MAX_CONVENIO, MAX_NOME_DEVEDOR, MAX_OBJETO, PaginaLocsRec, PaginaRecs,
+    AtivacaoSolicitada, CalendarioRec, CobR, CobRSolicitada, ContaRecebedor, DestinatarioSolicRec,
+    DevedorCobR, ID_TAMANHO, LocationRec, MAX_AGENCIA, MAX_CONTA, MAX_CONTRATO, MAX_CONVENIO,
+    MAX_INFO_ADICIONAL, MAX_NOME_DEVEDOR, MAX_OBJETO, PaginaCobsR, PaginaLocsRec, PaginaRecs,
     Periodicidade, PoliticaRetentativa, Rec, RecRevisada, RecSolicitada, SolicRec,
-    SolicRecSolicitada, StatusRec, StatusSolicRec, TipoJornada, ValorRec, VinculoRec,
+    SolicRecSolicitada, StatusCobR, StatusRec, StatusSolicRec, StatusTentativa, TipoContaRecebedor,
+    TipoJornada, TipoTentativa, ValorRec, VinculoRec,
 };
 use serde_json::{Value, json};
 use spec::{
@@ -57,7 +60,8 @@ fn sinteticos(valor: &Value) -> Value {
 }
 
 /// An answer as the models write it back: the examples call the status of
-/// each change `nome`, as the schema does not.
+/// each change `nome`, as the schema does not, and write some account
+/// numbers as numbers.
 fn como_escrita(valor: &Value) -> Value {
     match valor {
         Value::Object(campos) => Value::Object(
@@ -68,6 +72,9 @@ fn como_escrita(valor: &Value) -> Value {
                         ("atualizacao", Value::Array(itens)) => {
                             Value::Array(itens.iter().map(status_por_nome).collect())
                         }
+                        // Account numbers are text, which some examples
+                        // write as numbers.
+                        ("conta", Value::Number(numero)) => json!(numero.to_string()),
                         _ => como_escrita(valor),
                     };
                     (nome.clone(), valor)
@@ -531,4 +538,208 @@ fn location_parameters_are_documented() {
     }
     // A location is created without a body.
     assert!(spec::operation(&endpoint::pix_automatico::CRIAR_LOCREC)["requestBody"].is_null());
+}
+
+// --- cobr -------------------------------------------------------------------------
+
+/// The recurring charge of a documented body, built with the public API.
+/// The example writes the account as a number and the CEP with a hyphen,
+/// which its own pattern (`[0-9]{8}`) refuses; the model sends them as
+/// the schema defines.
+fn cobr_do_exemplo(exemplo: &Value) -> CobRSolicitada {
+    let recebedor = como_escrita(&exemplo["recebedor"]);
+    let mut conta = ContaRecebedor::new(
+        texto(&recebedor["conta"]),
+        TipoContaRecebedor::from(texto(&recebedor["tipoConta"])),
+    );
+    conta.agencia = recebedor["agencia"].as_str().map(str::to_owned);
+    let mut cobr = CobRSolicitada::new(
+        texto(&exemplo["idRec"]).parse().unwrap(),
+        data(&exemplo["calendario"]["dataDeVencimento"]),
+        texto(&exemplo["valor"]["original"]).parse().unwrap(),
+        conta,
+    );
+    cobr.ajuste_dia_util = exemplo["ajusteDiaUtil"].as_bool().unwrap();
+    cobr.info_adicional = exemplo["infoAdicional"].as_str().map(str::to_owned);
+    let devedor = &exemplo["devedor"];
+    let mut contato = DevedorCobR::default();
+    contato.email = devedor["email"].as_str().map(str::to_owned);
+    contato.logradouro = devedor["logradouro"].as_str().map(str::to_owned);
+    contato.cidade = devedor["cidade"].as_str().map(str::to_owned);
+    contato.uf = devedor["uf"].as_str().map(|uf| uf.parse::<Uf>().unwrap());
+    contato.cep = devedor["cep"].as_str().map(|cep| cep.replace('-', ""));
+    cobr.devedor = Some(contato);
+    cobr
+}
+
+#[test]
+fn recurring_charges_are_the_documentation_examples() {
+    let exemplo = example("cobRBody1");
+    let cobr = cobr_do_exemplo(&exemplo);
+    cobr.validar().unwrap();
+    let mut esperado = como_escrita(&exemplo);
+    esperado["devedor"]["cep"] = json!(texto(&exemplo["devedor"]["cep"]).replace('-', ""));
+    let enviado = serde_json::to_value(&cobr).unwrap();
+    assert_eq!(enviado, esperado);
+    assert_documentado("CobRSolicitada", &enviado);
+
+    // The only revision is the cancellation, which `cancelar_cobr` sends as
+    // documented.
+    assert_eq!(example("cobRBody2"), json!({"status": "CANCELADA"}));
+    assert_eq!(
+        enum_de(propriedade(schema("CobRRevisada"), "status").unwrap()),
+        strings(&[StatusCobR::Cancelada.as_str()])
+    );
+}
+
+#[test]
+fn recurring_charge_answers_survive_a_round_trip() {
+    for nome in [
+        "cobRResponse1",
+        "cobRResponse2",
+        "cobRResponse3",
+        "cobRResponse4",
+    ] {
+        let exemplo = example(nome);
+        let cobr: CobR = serde_json::from_value(exemplo.clone()).unwrap();
+        assert_eq!(
+            serde_json::to_value(&cobr).unwrap(),
+            como_escrita(&exemplo),
+            "{nome}"
+        );
+    }
+    let exemplo = example("getCobR1");
+    let pagina: PaginaCobsR = serde_json::from_value(exemplo.clone()).unwrap();
+    assert_eq!(pagina.cobsr.len(), 1);
+    assert_eq!(
+        serde_json::to_value(&pagina).unwrap(),
+        como_escrita(&exemplo)
+    );
+}
+
+/// The generated example of a recurring charge, with an amount the
+/// specification does not exemplify.
+fn cobr_gerada(nome: &str) -> Value {
+    let mut cobr = example_for_schema(nome);
+    cobr["valor"]["original"] = json!("10.50");
+    cobr
+}
+
+#[test]
+fn recurring_charges_keep_every_documented_field() {
+    let completa = cobr_gerada("CobRCompleta");
+    let cobr: CobR = serde_json::from_value(completa.clone()).unwrap();
+    assert_lidos("CobRCompleta", &serde_json::to_value(&cobr).unwrap(), &[]);
+    let gerada: CobR = serde_json::from_value(cobr_gerada("CobRGerada")).unwrap();
+    assert_lidos("CobRGerada", &serde_json::to_value(&gerada).unwrap(), &[]);
+
+    // The charges of a page are generated apart: nested, the example stops
+    // before the refunds of their Pix.
+    let mut pagina = example_for_schema("CobsRConsultadas");
+    pagina["cobsr"] = json!([completa]);
+    let pagina: PaginaCobsR = serde_json::from_value(pagina).unwrap();
+    assert_lidos(
+        "CobsRConsultadas",
+        &serde_json::to_value(&pagina).unwrap(),
+        &[],
+    );
+}
+
+#[test]
+fn recurring_charge_codes_and_limits_are_the_documented_ones() {
+    let completa = schema("CobRCompleta");
+    let status = codigos(StatusCobR::DOCUMENTADOS, StatusCobR::as_str);
+    assert_eq!(status, enum_de(propriedade(completa, "status").unwrap()));
+    let atualizacao = propriedade(completa, "atualizacao").unwrap();
+    assert_eq!(
+        status,
+        enum_de(propriedade(&atualizacao["items"], "status").unwrap())
+    );
+    let listagem = parametro(&endpoint::pix_automatico::LISTAR_COBRS, "status");
+    assert_eq!(status, enum_de(&listagem["schema"]));
+    let tentativas = &propriedade(completa, "tentativas").unwrap()["items"];
+    assert_eq!(
+        codigos(TipoTentativa::DOCUMENTADOS, TipoTentativa::as_str),
+        enum_de(propriedade(tentativas, "tipo").unwrap())
+    );
+    let status_tentativa = codigos(StatusTentativa::DOCUMENTADOS, StatusTentativa::as_str);
+    assert_eq!(
+        status_tentativa,
+        enum_de(propriedade(tentativas, "status").unwrap())
+    );
+    let historico = propriedade(tentativas, "atualizacao").unwrap();
+    assert_eq!(
+        status_tentativa,
+        enum_de(propriedade(&historico["items"], "status").unwrap())
+    );
+
+    let solicitada = schema("CobRSolicitada");
+    let recebedor = propriedade(solicitada, "recebedor").unwrap();
+    assert_eq!(
+        codigos(TipoContaRecebedor::DOCUMENTADOS, TipoContaRecebedor::as_str),
+        enum_de(propriedade(recebedor, "tipoConta").unwrap())
+    );
+    assert_eq!(
+        propriedade(recebedor, "conta").unwrap()["maxLength"],
+        MAX_CONTA
+    );
+    assert_eq!(
+        propriedade(recebedor, "agencia").unwrap()["maxLength"],
+        MAX_AGENCIA
+    );
+    assert_eq!(
+        propriedade(solicitada, "infoAdicional").unwrap()["maxLength"],
+        MAX_INFO_ADICIONAL
+    );
+    let valor = propriedade(solicitada, "valor").unwrap();
+    assert_eq!(
+        propriedade(valor, "original").unwrap()["pattern"],
+        r"\d{1,10}\.\d{2}"
+    );
+    let devedor = propriedade(solicitada, "devedor").unwrap();
+    assert_eq!(propriedade(devedor, "cep").unwrap()["pattern"], "[0-9]{8}");
+    for campo in ["logradouro", "cidade"] {
+        assert_eq!(propriedade(devedor, campo).unwrap()["maxLength"], 200);
+    }
+}
+
+#[test]
+fn recurring_charge_parameters_are_documented() {
+    let documentados = parameter_names(&endpoint::pix_automatico::LISTAR_COBRS);
+    for nome in [
+        "inicio",
+        "fim",
+        "idRec",
+        "cpf",
+        "cnpj",
+        "status",
+        "convenio",
+        "paginacao.paginaAtual",
+        "paginacao.itensPorPagina",
+    ] {
+        assert!(documentados.contains(nome), "{nome}");
+    }
+    let listagem = parameters(&endpoint::pix_automatico::LISTAR_COBRS);
+    assert_eq!(listagem["convenio"]["schema"]["maxLength"], MAX_CONVENIO);
+    assert_eq!(
+        listagem["paginacao.itensPorPagina"]["schema"]["maximum"],
+        ITENS_POR_PAGINA_MAXIMO_PIX
+    );
+    for endpoint in [
+        endpoint::pix_automatico::CRIAR_COBR,
+        endpoint::pix_automatico::CONSULTAR_COBR,
+        endpoint::pix_automatico::REVISAR_COBR,
+        endpoint::pix_automatico::RETENTATIVA_COBR,
+    ] {
+        let txid = parametro(&endpoint, "txid");
+        assert_eq!(
+            txid["schema"]["pattern"],
+            format!("[a-zA-Z0-9]{{{TXID_MINIMO},{TXID_MAXIMO}}}"),
+            "{endpoint}"
+        );
+    }
+    let data = parametro(&endpoint::pix_automatico::RETENTATIVA_COBR, "data");
+    assert_eq!(data["schema"]["format"], "date");
+    // A retry is asked for without a body.
+    assert!(spec::operation(&endpoint::pix_automatico::RETENTATIVA_COBR)["requestBody"].is_null());
 }
