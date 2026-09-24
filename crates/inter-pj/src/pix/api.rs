@@ -6,7 +6,15 @@ use serde::Serialize;
 
 use super::cob::{Cob, CobRevisada, CobSolicitada, FiltroCobs, PaginaCobs};
 use super::cobv::{Cobv, CobvRevisada, CobvSolicitada, FiltroCobvs, PaginaCobvs};
-use super::comum::{ITENS_POR_PAGINA_MAXIMO_PIX, Paginacao};
+use super::comum::{ITENS_POR_PAGINA_MAXIMO_PIX, LocationPix, Paginacao, PeriodoPix, TipoCob};
+use super::loc::{
+    FiltroLocs, LocSolicitada, PagamentoCobSandbox, PagamentoQrCodeSandbox, PagamentoSandbox,
+    PaginaLocs,
+};
+use super::lote_cobv::{
+    LoteCobv, LoteCobvRevisado, LoteCobvSolicitado, PaginaLotesCobv, StatusCobvLote,
+    SumarioLoteCobv,
+};
 use super::recebido::{
     Devolucao, DevolucaoSolicitada, FiltroPixRecebidos, IdDevolucao, PaginaPixRecebidos,
     PixRecebido,
@@ -14,6 +22,7 @@ use super::recebido::{
 use super::txid::Txid;
 use crate::client::{ApiRequest, InterClient};
 use crate::endpoint;
+use crate::environment::Environment;
 use crate::error::{Error, Result};
 use crate::retry::RetryMode;
 
@@ -335,6 +344,279 @@ impl Pix<'_> {
             .path_param("e2eId", e2e_id(end_to_end_id)?)
             .path_param("id", id.as_str().to_owned());
         self.client.execute(request).await
+    }
+}
+
+impl Pix<'_> {
+    /// Creates a location for the payload of a charge of the kind `tipo`
+    /// (`POST /pix/v2/loc`, scope `payloadlocation.write`), to link to it
+    /// later.
+    ///
+    /// # Errors
+    ///
+    /// Failures to obtain a token, to send the request or to decode the
+    /// answer, and the API's error statuses.
+    pub async fn criar_loc(&self, tipo: &TipoCob) -> Result<LocationPix> {
+        let request = ApiRequest::new(endpoint::pix::CRIAR_LOC)
+            .json(corpo(&LocSolicitada {
+                tipo_cob: tipo.as_str(),
+            })?)
+            .retry(RetryMode::WhenNotProcessed);
+        self.client.execute(request).await
+    }
+
+    /// One page of the locations created in a period (`GET /pix/v2/loc`,
+    /// scope `payloadlocation.read`).
+    ///
+    /// # Errors
+    ///
+    /// Same as [`listar_cobs`](Self::listar_cobs).
+    pub async fn listar_locs(
+        &self,
+        filtro: &FiltroLocs,
+        pagina: u32,
+        itens_por_pagina: Option<u32>,
+    ) -> Result<PaginaLocs> {
+        let request = paginada(
+            ApiRequest::new(endpoint::pix::LISTAR_LOCS).queries(filtro.query()),
+            pagina,
+            itens_por_pagina,
+        )?;
+        self.client.execute(request).await
+    }
+
+    /// Every location of the period.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`listar_cobs`](Self::listar_cobs).
+    pub async fn listar_todas_locs(&self, filtro: &FiltroLocs) -> Result<Vec<LocationPix>> {
+        todas("locations", |numero| async move {
+            let pagina = self
+                .listar_locs(filtro, numero, Some(ITENS_POR_PAGINA_MAXIMO_PIX))
+                .await?;
+            Ok((pagina.loc, pagina.parametros.paginacao.unwrap_or_default()))
+        })
+        .await
+    }
+
+    /// A location, with the txid of the charge linked to it (`GET
+    /// /pix/v2/loc/{id}`, scope `payloadlocation.read`).
+    ///
+    /// # Errors
+    ///
+    /// Same as [`consultar_cob`](Self::consultar_cob).
+    pub async fn consultar_loc(&self, id: u64) -> Result<LocationPix> {
+        let request =
+            ApiRequest::new(endpoint::pix::CONSULTAR_LOC).path_param("id", id.to_string());
+        self.client.execute(request).await
+    }
+
+    /// Unlinks the charge from a location (`DELETE /pix/v2/loc/{id}/txid`,
+    /// scope `payloadlocation.write`): the QR Code of the location stops
+    /// paying that charge.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`consultar_cob`](Self::consultar_cob).
+    pub async fn desvincular_loc(&self, id: u64) -> Result<LocationPix> {
+        let request = ApiRequest::new(endpoint::pix::DESVINCULAR_LOC)
+            .path_param("id", id.to_string())
+            .retry(RetryMode::WhenNotProcessed);
+        self.client.execute(request).await
+    }
+
+    /// Creates, or replaces, the batch `id` of charges with a due date (`PUT
+    /// /pix/v2/lotecobv/{id}`, scope `lotecobv.write`). The batch is
+    /// processed afterwards: follow each charge with
+    /// [`consultar_lote_cobv`](Self::consultar_lote_cobv).
+    ///
+    /// # Errors
+    ///
+    /// [`Error::InvalidInput`] when a charge is invalid or a txid repeats
+    /// (nothing is sent); otherwise the same as
+    /// [`criar_cob`](Self::criar_cob).
+    pub async fn criar_lote_cobv(&self, id: u64, lote: &LoteCobvSolicitado) -> Result<()> {
+        lote.validar()
+            .map_err(|err| Error::InvalidInput(Box::new(err)))?;
+        let request = ApiRequest::new(endpoint::pix::CRIAR_LOTE_COBV)
+            .path_param("id", id.to_string())
+            .json(corpo(lote)?)
+            .retry(RetryMode::WhenNotProcessed);
+        self.client.execute_empty(request).await
+    }
+
+    /// Changes charges of the batch `id` (`PATCH /pix/v2/lotecobv/{id}`,
+    /// scope `lotecobv.write`).
+    ///
+    /// # Errors
+    ///
+    /// Same as [`criar_lote_cobv`](Self::criar_lote_cobv); also when nothing
+    /// changes.
+    pub async fn revisar_lote_cobv(&self, id: u64, revisao: &LoteCobvRevisado) -> Result<()> {
+        revisao
+            .validar()
+            .map_err(|err| Error::InvalidInput(Box::new(err)))?;
+        let request = ApiRequest::new(endpoint::pix::REVISAR_LOTE_COBV)
+            .path_param("id", id.to_string())
+            .json(corpo(revisao)?)
+            .retry(RetryMode::WhenNotProcessed);
+        self.client.execute_empty(request).await
+    }
+
+    /// The batch `id` and where each of its charges stands (`GET
+    /// /pix/v2/lotecobv/{id}`, scope `lotecobv.read`).
+    ///
+    /// # Errors
+    ///
+    /// Same as [`consultar_cob`](Self::consultar_cob).
+    pub async fn consultar_lote_cobv(&self, id: u64) -> Result<LoteCobv> {
+        let request =
+            ApiRequest::new(endpoint::pix::CONSULTAR_LOTE_COBV).path_param("id", id.to_string());
+        self.client.execute(request).await
+    }
+
+    /// Totals of the processing of the batch `id` (`GET
+    /// /pix/v2/lotecobv/{id}/sumario`, scope `lotecobv.read`).
+    ///
+    /// # Errors
+    ///
+    /// Same as [`consultar_cob`](Self::consultar_cob).
+    pub async fn sumario_lote_cobv(&self, id: u64) -> Result<SumarioLoteCobv> {
+        let request =
+            ApiRequest::new(endpoint::pix::SUMARIO_LOTE_COBV).path_param("id", id.to_string());
+        self.client.execute(request).await
+    }
+
+    /// The charges of the batch `id` in a situation (`GET
+    /// /pix/v2/lotecobv/{id}/situacao/{situacao}`, scope `lotecobv.read`).
+    ///
+    /// # Errors
+    ///
+    /// [`Error::InvalidInput`] for a situation the API does not document;
+    /// otherwise the same as [`consultar_cob`](Self::consultar_cob).
+    pub async fn consultar_lote_cobv_por_situacao(
+        &self,
+        id: u64,
+        situacao: &StatusCobvLote,
+    ) -> Result<LoteCobv> {
+        if matches!(situacao, StatusCobvLote::Outro(_)) {
+            return Err(Error::InvalidInput(
+                "situação do lote: EM_PROCESSAMENTO, CRIADA ou NEGADA".into(),
+            ));
+        }
+        let request = ApiRequest::new(endpoint::pix::LOTE_COBV_POR_SITUACAO)
+            .path_param("id", id.to_string())
+            .path_param("situacao", situacao.as_str().to_owned());
+        self.client.execute(request).await
+    }
+
+    /// One page of the batches created in a period (`GET /pix/v2/lotecobv`,
+    /// scope `lotecobv.read`).
+    ///
+    /// # Errors
+    ///
+    /// Same as [`listar_cobs`](Self::listar_cobs).
+    pub async fn listar_lotes_cobv(
+        &self,
+        periodo: &PeriodoPix,
+        pagina: u32,
+        itens_por_pagina: Option<u32>,
+    ) -> Result<PaginaLotesCobv> {
+        let request = paginada(
+            ApiRequest::new(endpoint::pix::LISTAR_LOTES_COBV).queries(periodo.query()),
+            pagina,
+            itens_por_pagina,
+        )?;
+        self.client.execute(request).await
+    }
+
+    /// Every batch of the period.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`listar_cobs`](Self::listar_cobs).
+    pub async fn listar_todos_lotes_cobv(&self, periodo: &PeriodoPix) -> Result<Vec<LoteCobv>> {
+        todas("lotes de cobranças com vencimento", |numero| async move {
+            let pagina = self
+                .listar_lotes_cobv(periodo, numero, Some(ITENS_POR_PAGINA_MAXIMO_PIX))
+                .await?;
+            Ok((
+                pagina.lotes,
+                pagina.parametros.paginacao.unwrap_or_default(),
+            ))
+        })
+        .await
+    }
+
+    /// Pays an immediate charge in the sandbox (`POST
+    /// /pix/v2/cob/pagar/{txid}`, scope `pix.write`), to test the whole flow.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::InvalidInput`] when the client was not built for
+    /// [`Environment::Sandbox`] or the amount is not positive (nothing is
+    /// sent); otherwise the same as [`criar_cob`](Self::criar_cob).
+    pub async fn pagar_cob_no_sandbox(
+        &self,
+        txid: &Txid,
+        valor: rust_decimal::Decimal,
+    ) -> Result<PagamentoSandbox> {
+        self.so_no_sandbox(valor)?;
+        let request = ApiRequest::new(endpoint::pix::PAGAR_COB_SANDBOX)
+            .path_param("txid", txid.as_str().to_owned())
+            .json(corpo(&PagamentoCobSandbox { valor })?)
+            .retry(RetryMode::WhenNotProcessed);
+        self.client.execute(request).await
+    }
+
+    /// Pays a charge with a due date in the sandbox (`POST
+    /// /pix/v2/cobv/pagar/{txid}`, scope `pix.write`).
+    ///
+    /// # Errors
+    ///
+    /// Same as [`pagar_cob_no_sandbox`](Self::pagar_cob_no_sandbox).
+    pub async fn pagar_cobv_no_sandbox(
+        &self,
+        txid: &Txid,
+        valor: rust_decimal::Decimal,
+    ) -> Result<PagamentoSandbox> {
+        self.so_no_sandbox(valor)?;
+        let request = ApiRequest::new(endpoint::pix::PAGAR_COBV_SANDBOX)
+            .path_param("txid", txid.as_str().to_owned())
+            .json(corpo(&PagamentoCobSandbox { valor })?)
+            .retry(RetryMode::WhenNotProcessed);
+        self.client.execute(request).await
+    }
+
+    /// Pays a charge by its "copia e cola" in the sandbox (`POST
+    /// /pix/v2/sandbox/cob/pagamento`, scope `pix.write`).
+    ///
+    /// # Errors
+    ///
+    /// Same as [`pagar_cob_no_sandbox`](Self::pagar_cob_no_sandbox).
+    pub async fn pagar_copia_e_cola_no_sandbox(
+        &self,
+        copia_e_cola: &str,
+        valor: rust_decimal::Decimal,
+    ) -> Result<PagamentoSandbox> {
+        self.so_no_sandbox(valor)?;
+        let request = ApiRequest::new(endpoint::pix::PAGAR_QR_CODE_SANDBOX)
+            .json(corpo(&PagamentoQrCodeSandbox {
+                qr_code: copia_e_cola.trim(),
+                valor,
+            })?)
+            .retry(RetryMode::WhenNotProcessed);
+        self.client.execute(request).await
+    }
+
+    fn so_no_sandbox(self, valor: rust_decimal::Decimal) -> Result<()> {
+        if self.client.environment() != Some(Environment::Sandbox) {
+            return Err(Error::InvalidInput(
+                "o pagamento de cobranças Pix pela API existe só no sandbox".into(),
+            ));
+        }
+        super::comum::valor(valor, "valor", false).map_err(|err| Error::InvalidInput(Box::new(err)))
     }
 }
 
