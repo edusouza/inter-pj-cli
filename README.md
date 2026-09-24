@@ -48,7 +48,11 @@ O plano completo — o caminho até a 1.0 — está em [`docs/roadmap.md`](docs/
 
 ## Instalação
 
-**Binários prontos**: baixe o pacote do seu sistema na página de [releases](https://github.com/edusouza/inter-pj-cli/releases) (Linux x86_64 e ARM64, glibc ou musl; macOS Apple Silicon ou Intel; e Windows), confira o `SHA256SUMS` e coloque o `inter-pj` no seu `PATH`.
+**Binários prontos**: baixe o pacote do seu sistema na página de [releases](https://github.com/edusouza/inter-pj-cli/releases) (Linux x86_64 e ARM64, glibc ou musl; macOS Apple Silicon ou Intel; e Windows), confira o `SHA256SUMS` e coloque o `inter-pj` no seu `PATH`. Desde a 1.0.0, cada pacote tem também uma atestação de origem, que o liga ao workflow, ao commit e à tag que o produziram. Com a [CLI do GitHub](https://cli.github.com/), confira-a assim (o nome é o do pacote baixado):
+
+```console
+$ gh attestation verify inter-pj-1.0.0-x86_64-unknown-linux-musl.tar.gz --repo edusouza/inter-pj-cli
+```
 
 **Com Cargo** (Rust 1.88 ou superior):
 

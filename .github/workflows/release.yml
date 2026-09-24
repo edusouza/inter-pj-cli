@@ -162,6 +162,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      # Para a atestação de origem dos pacotes (Sigstore, pelo OIDC do GitHub).
+      id-token: write
+      attestations: write
     env:
       TAG: ${{ needs.preparar.outputs.tag }}
       VERSAO: ${{ needs.preparar.outputs.versao }}
@@ -176,6 +179,13 @@ jobs:
           merge-multiple: true
       - name: Gerar SHA256SUMS
         run: cd dist && sha256sum -- * > SHA256SUMS && cat SHA256SUMS
+      # Liga cada pacote a este workflow, a este commit e a esta tag: quem
+      # baixa confere com `gh attestation verify <pacote> --repo <repositório>`,
+      # o que um SHA256SUMS trocado junto com os pacotes não engana.
+      - name: Atestar a origem dos pacotes
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: "dist/*"
       - name: Extrair notas da versão do CHANGELOG.md
         run: |
           awk -v versao="$VERSAO" '
