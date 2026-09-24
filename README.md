@@ -48,7 +48,7 @@ O plano completo — o caminho até a 1.0 — está em [`docs/roadmap.md`](docs/
 
 ## Instalação
 
-**Binários prontos**: baixe o pacote do seu sistema na página de [releases](https://github.com/edusouza/inter-pj-cli/releases) (Linux x86_64 glibc/musl, macOS Apple Silicon/Intel e Windows), confira o `SHA256SUMS` e coloque o `inter-pj` no seu `PATH`.
+**Binários prontos**: baixe o pacote do seu sistema na página de [releases](https://github.com/edusouza/inter-pj-cli/releases) (Linux x86_64 e ARM64, glibc ou musl; macOS Apple Silicon ou Intel; e Windows), confira o `SHA256SUMS` e coloque o `inter-pj` no seu `PATH`.
 
 **Com Cargo** (Rust 1.88 ou superior):
 
