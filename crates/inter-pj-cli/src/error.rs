@@ -83,6 +83,18 @@ pub(crate) enum CliError {
     /// received. Its charges have txids, so repeating it creates none twice.
     #[error("{source}")]
     LoteCobvIncerto { source: InterError, id: u64 },
+    /// A retry of callbacks in blocks that stopped midway: the callbacks of
+    /// the first blocks were already asked for.
+    #[error("{source}")]
+    ReenvioIncompleto {
+        source: InterError,
+        /// Operations whose callbacks were already asked for.
+        pedidos: usize,
+        /// Operations in all.
+        total: usize,
+        /// Command that asks for the rest.
+        restantes: String,
+    },
     /// A change of a webhook whose outcome is unknown: it may have been made.
     #[error("{source}")]
     WebhookIncerto {
@@ -155,7 +167,8 @@ impl CliError {
             | Self::CobrancaPixIncerta { source: err, .. }
             | Self::DevolucaoIncerta { source: err, .. }
             | Self::LoteCobvIncerto { source: err, .. }
-            | Self::WebhookIncerto { source: err, .. } => match err {
+            | Self::WebhookIncerto { source: err, .. }
+            | Self::ReenvioIncompleto { source: err, .. } => match err {
                 InterError::InvalidInput(_) => exit::USAGE,
                 InterError::Config(_) | InterError::Identity(_) => exit::CONFIG,
                 InterError::Auth(_) => exit::AUTH,
@@ -175,104 +188,119 @@ impl CliError {
 
     /// Suggestions shown after the error message.
     pub(crate) fn hints(&self) -> Vec<String> {
-        let err = match self {
-            Self::Inter(err) => err,
+        match self {
+            Self::Inter(err) => dicas_da_api(err),
             Self::Periodo {
                 dica: Some(dica), ..
-            } => return vec![(*dica).to_owned()],
+            } => vec![(*dica).to_owned()],
             Self::TempoEsgotado { .. } => {
-                return vec!["consulte de novo mais tarde, ou aumente o --timeout".to_owned()];
+                vec!["consulte de novo mais tarde, ou aumente o --timeout".to_owned()]
             }
             Self::ResultadoIncerto { id_idempotente, .. } => {
-                return vec![
+                vec![
                     "o pagamento pode ter sido feito: confira o extrato antes de tentar de novo"
                         .to_owned(),
                     format!(
                         "para repetir sem risco de pagar duas vezes, use a mesma chave: --id-idempotente {id_idempotente}"
                     ),
-                ];
+                ]
             }
             Self::PagamentoIncerto {
                 situacao, consulta, ..
             } => {
-                return vec![
+                vec![
                     format!(
                         "{situacao}, e esta API não tem chave de idempotência: repetir o comando pode pagar duas vezes"
                     ),
                     format!("confira antes de tentar de novo: {consulta}"),
-                ];
+                ]
             }
             Self::CobrancaPixIncerta { tipo, txid, .. } => {
-                return vec![
+                vec![
                     "a cobrança pode ter sido criada; com o mesmo txid, a API não cria outra"
                         .to_owned(),
                     format!("confira com: inter-pj pix {tipo} consultar {txid}"),
                     format!("ou repita o comando com --txid {txid}"),
-                ];
+                ]
             }
             Self::DevolucaoIncerta { e2e, id, .. } => {
-                return vec![
+                vec![
                     "a devolução pode ter sido feita; com o mesmo id, a API não devolve de novo"
                         .to_owned(),
                     format!("confira com: inter-pj pix devolucao consultar {e2e} {id}"),
                     format!("ou repita o comando com --id {id}"),
-                ];
+                ]
             }
             Self::LoteCobvIncerto { id, .. } => {
-                return vec![
+                vec![
                     format!(
                         "o lote pode ter sido recebido: confira com inter-pj pix lote-cobv consultar {id} antes de repetir"
                     ),
                     "repetir o comando não duplica cobranças: com o mesmo txid, a API não cria outra"
                         .to_owned(),
-                ];
+                ]
+            }
+            Self::ReenvioIncompleto {
+                pedidos,
+                total,
+                restantes,
+                ..
+            } => {
+                vec![
+                    format!("o reenvio de {pedidos} das {total} operações já foi pedido"),
+                    format!("para pedir o das outras: {restantes}"),
+                ]
             }
             Self::WebhookIncerto {
                 situacao, consulta, ..
             } => {
-                return vec![format!("{situacao}: confira com {consulta}")];
+                vec![format!("{situacao}: confira com {consulta}")]
             }
             Self::EmissaoIncerta { consulta, .. } => {
-                return vec![
+                vec![
                     "a cobrança pode ter sido emitida; por 30 minutos, a API recusa outra com o mesmo seu número, valor, vencimento e pagador".to_owned(),
                     format!("confira antes de tentar de novo: {consulta}"),
-                ];
+                ]
             }
-            _ => return Vec::new(),
-        };
-        let hints: Vec<&str> = match err {
-            InterError::Api(api) if problem_type(api) == Some("SCROLL_ALREADY_ACTIVE") => vec![
-                "já existe uma leitura do extrato em modo scroll para esta conta (outra execução?); ela expira após 6 minutos sem uso",
+            _ => Vec::new(),
+        }
+    }
+}
+
+/// Suggestions for an error of the Inter client.
+fn dicas_da_api(err: &InterError) -> Vec<String> {
+    let hints: Vec<&str> = match err {
+        InterError::Api(api) if problem_type(api) == Some("SCROLL_ALREADY_ACTIVE") => vec![
+            "já existe uma leitura do extrato em modo scroll para esta conta (outra execução?); ela expira após 6 minutos sem uso",
+        ],
+        InterError::Api(api) if problem_type(api) == Some("SCROLL_EXPIRED") => vec![
+            "a leitura em modo scroll expirou (6 minutos sem requisições); execute o comando novamente",
+        ],
+        InterError::Auth(api) if api.note.is_none() => vec![
+            "confira o client_id, o client_secret e se o certificado/chave são os da mesma integração",
+        ],
+        InterError::Api(api) => match api.kind() {
+            ApiErrorKind::Unauthorized => {
+                vec!["o token foi recusado; tente `inter-pj auth limpar` e repita o comando"]
+            }
+            ApiErrorKind::Forbidden => vec![
+                "confira se a integração tem os escopos necessários habilitados no Internet Banking PJ",
+                "se a integração tem mais de uma conta, informe --conta-corrente",
             ],
-            InterError::Api(api) if problem_type(api) == Some("SCROLL_EXPIRED") => vec![
-                "a leitura em modo scroll expirou (6 minutos sem requisições); execute o comando novamente",
-            ],
-            InterError::Auth(api) if api.note.is_none() => vec![
-                "confira o client_id, o client_secret e se o certificado/chave são os da mesma integração",
-            ],
-            InterError::Api(api) => match api.kind() {
-                ApiErrorKind::Unauthorized => {
-                    vec!["o token foi recusado; tente `inter-pj auth limpar` e repita o comando"]
-                }
-                ApiErrorKind::Forbidden => vec![
-                    "confira se a integração tem os escopos necessários habilitados no Internet Banking PJ",
-                    "se a integração tem mais de uma conta, informe --conta-corrente",
-                ],
-                ApiErrorKind::RateLimited => {
-                    vec!["limite de requisições atingido; aguarde um minuto e tente novamente"]
-                }
-                ApiErrorKind::Unavailable => vec![
-                    "o serviço pode estar em manutenção ou fora da janela de funcionamento; tente mais tarde",
-                ],
-                _ => Vec::new(),
-            },
-            InterError::Transport(_) => vec![
-                "confira a conexão/proxy e se o certificado (.crt) e a chave (.key) da integração estão válidos",
+            ApiErrorKind::RateLimited => {
+                vec!["limite de requisições atingido; aguarde um minuto e tente novamente"]
+            }
+            ApiErrorKind::Unavailable => vec![
+                "o serviço pode estar em manutenção ou fora da janela de funcionamento; tente mais tarde",
             ],
             _ => Vec::new(),
-        };
-        hints.into_iter().map(str::to_owned).collect()
-    }
+        },
+        InterError::Transport(_) => vec![
+            "confira a conexão/proxy e se o certificado (.crt) e a chave (.key) da integração estão válidos",
+        ],
+        _ => Vec::new(),
+    };
+    hints.into_iter().map(str::to_owned).collect()
 }
 
 /// Whether a payment may have been made despite the error: the request

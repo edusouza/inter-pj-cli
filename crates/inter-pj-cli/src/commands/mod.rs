@@ -54,7 +54,7 @@ impl Env for SystemEnv {
 pub(crate) async fn run(cli: Cli, matches: &ArgMatches) -> Result<(), CliError> {
     if cli.global.formato() == Formato::Csv && !cli.command.aceita_csv() {
         return Err(CliError::Usage(
-            "o formato csv vale apenas para listagens (saldo, extrato, pagamentos e cobranças); use texto ou json"
+            "o formato csv vale apenas para listagens (saldo, extrato, pagamentos, cobranças e callbacks); use texto ou json"
                 .to_owned(),
         ));
     }
