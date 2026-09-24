@@ -88,10 +88,17 @@ macro_rules! identificador {
     };
 }
 
+mod cobr;
 mod locrec;
 mod rec;
 mod solicrec;
 
+pub use cobr::{
+    AtualizacaoCobR, AtualizacaoTentativa, CalendarioCobR, CobR, CobRSolicitada, ContaRecebedor,
+    DevedorCobR, DevedorCobRGerado, FiltroCobsR, MAX_INFO_ADICIONAL, PaginaCobsR,
+    ParametrosConsultaCobR, RecebedorCobR, StatusCobR, StatusTentativa, TentativaCobR,
+    TipoContaRecebedor, TipoTentativa, ValorCobR,
+};
 pub use locrec::{FiltroLocsRec, PaginaLocsRec, ParametrosConsultaLocRec};
 pub use rec::{
     AtivacaoRec, AtivacaoSolicitada, AtualizacaoRec, CalendarioRec, CalendarioRecGerado,
@@ -109,7 +116,7 @@ pub use solicrec::{
 
 use crate::client::InterClient;
 use crate::error::{Error, Result};
-use crate::pix::texto;
+use crate::pix::{CobrancaPixError, texto};
 
 /// Operations of Pix Automático. Obtained with
 /// [`InterClient::pix_automatico`].
@@ -122,6 +129,38 @@ impl<'a> PixAutomatico<'a> {
     pub(crate) fn new(client: &'a InterClient) -> Self {
         Self { client }
     }
+}
+
+/// An account number with its check digit: digits only (the check digit
+/// may be `X`), up to `maximo` characters.
+fn conta(conta: &str, campo: &str, maximo: usize) -> Result<(), CobrancaPixError> {
+    let sem_dv = conta.strip_suffix(['X', 'x']).unwrap_or(conta);
+    if digitos(sem_dv) && conta.len() <= maximo {
+        Ok(())
+    } else {
+        Err(CobrancaPixError::new(
+            campo,
+            format!(
+                "até {maximo} dígitos, com o dígito verificador (que pode ser X), sem pontos nem traços"
+            ),
+        ))
+    }
+}
+
+/// A branch: digits only, up to `maximo`, without the check digit.
+fn agencia(agencia: &str, campo: &str, maximo: usize) -> Result<(), CobrancaPixError> {
+    if digitos(agencia) && agencia.len() <= maximo {
+        Ok(())
+    } else {
+        Err(CobrancaPixError::new(
+            campo,
+            format!("até {maximo} dígitos, sem o dígito verificador"),
+        ))
+    }
+}
+
+fn digitos(texto: &str) -> bool {
+    !texto.is_empty() && texto.bytes().all(|b| b.is_ascii_digit())
 }
 
 /// The agreement of a filter, up to [`MAX_CONVENIO`] characters.

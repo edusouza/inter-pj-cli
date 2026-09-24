@@ -25,6 +25,7 @@ pub use cob::{
     MAX_SOLICITACAO_PAGADOR, ModalidadeAgente, PaginaCobs, ParametrosConsulta, Retirada, StatusCob,
     ValorCob, ValorCobGerado, ValorCobRevisada, ValorRetirada,
 };
+pub(crate) use cobv::contato;
 pub use cobv::{
     AbatimentoCobv, CalendarioCobv, CalendarioCobvGerado, Cobv, CobvRevisada, CobvSolicitada,
     DescontoCobv, DescontoData, DescontoDataGerado, DevedorCobv, EncargoCobv, FiltroCobvs,
