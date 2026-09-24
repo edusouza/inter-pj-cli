@@ -72,7 +72,8 @@ Uso: {usage}
 /// The command definition with Portuguese help on every subcommand.
 ///
 /// clap has no localisation support: headings and usage lines are set here
-/// recursively instead.
+/// recursively instead, and the positional arguments go under a heading of
+/// their own, as clap does in English.
 pub(crate) fn command() -> clap::Command {
     localize(<Cli as clap::CommandFactory>::command(), "inter-pj")
 }
@@ -103,6 +104,13 @@ fn localize(command: clap::Command, path: &str) -> clap::Command {
     command
         .help_template(HELP_TEMPLATE)
         .override_usage(usage)
+        .mut_args(|arg| {
+            if arg.is_positional() {
+                arg.help_heading("Argumentos")
+            } else {
+                arg
+            }
+        })
         .subcommand_help_heading("Comandos")
         .subcommand_value_name("COMANDO")
         .mut_subcommands(|sub| {
@@ -437,7 +445,6 @@ Por exemplo:
 Se o man não encontrar as páginas, inclua o diretório acima de man1 no MANPATH.";
 
 #[derive(Debug, Args)]
-#[command(next_help_heading = "Argumentos")]
 pub(crate) struct CompletionsArgs {
     /// bash, zsh, fish, powershell ou elvish
     #[arg(value_enum, value_name = "SHELL", hide_possible_values = true)]
@@ -445,7 +452,6 @@ pub(crate) struct CompletionsArgs {
 }
 
 #[derive(Debug, Args)]
-#[command(next_help_heading = "Argumentos")]
 pub(crate) struct ManualArgs {
     /// Diretório das páginas (criado se não existir); as que já estiverem lá são atualizadas
     #[arg(value_name = "DIRETÓRIO")]
@@ -915,6 +921,7 @@ pub(crate) struct CobrancaEmitirArgs {
         value_enum,
         value_delimiter = ',',
         ignore_case = true,
+        hide_possible_values = true,
         requires = "seu_numero",
         help_heading = "Cobrança"
     )]
@@ -2015,6 +2022,56 @@ mod tests {
             assert!(!help.contains(english), "{help}");
             assert!(!completo.contains(english), "{completo}");
         }
+    }
+
+    /// Every help of every command, short and long, without the labels
+    /// clap writes in English, and with the arguments under a heading of
+    /// their own.
+    #[test]
+    fn every_help_is_in_portuguese() {
+        fn ajudas(comando: &clap::Command, todas: &mut Vec<(String, String)>) {
+            let nome = comando
+                .get_display_name()
+                .unwrap_or_else(|| comando.get_name())
+                .to_owned();
+            let mut copia = comando.clone();
+            todas.push((nome.clone(), copia.render_help().to_string()));
+            todas.push((nome, copia.render_long_help().to_string()));
+            for sub in comando.get_subcommands() {
+                ajudas(sub, todas);
+            }
+        }
+        let mut raiz = command();
+        raiz.build();
+        let mut todas = Vec::new();
+        ajudas(&raiz, &mut todas);
+        assert!(todas.len() > 250, "{} ajudas", todas.len());
+        for (nome, ajuda) in &todas {
+            for ingles in [
+                "Usage:",
+                "Options:",
+                "Arguments:",
+                "Commands:",
+                "ossible values",
+                "[default",
+                "[aliases",
+                "Print help",
+                "Print version",
+            ] {
+                assert!(!ajuda.contains(ingles), "{nome}: {ingles}\n{ajuda}");
+            }
+        }
+        let mut raiz = command();
+        let consultar = raiz
+            .find_subcommand_mut("cobranca")
+            .and_then(|cobranca| cobranca.find_subcommand_mut("consultar"))
+            .unwrap()
+            .render_help()
+            .to_string();
+        assert!(
+            consultar.contains("\n\nArgumentos:\n  <CODIGO>  Código da cobrança"),
+            "{consultar}"
+        );
     }
 
     #[test]
