@@ -198,54 +198,7 @@ O extrato de um período, o extrato completo, com os detalhes de cada transaçã
 
 ### Pix
 
-```console
-$ inter-pj pix enviar --chave fornecedor@empresa.example --valor 150,00 --descricao "NF 123"
-Pix a enviar
-  Ambiente               sandbox (dados fictícios)
-  Chave Pix              fornecedor@empresa.example (e-mail)
-  Valor                  R$ 150,00 (cento e cinquenta reais)
-  Quando                 agora
-  Descrição              NF 123
-  Chave de idempotência  9b2f6c1e-5d0a-4c1b-8f3e-2a7d4e6b8c90
-Enviar o Pix? [s/N] s
-Pix enviado.
-Código da solicitação  c42f0787-02cb-4b31-827e-459ec9d7ece1
-Data do pagamento      23/09/2026
-Data da operação       23/09/2026
-Chave de idempotência  9b2f6c1e-5d0a-4c1b-8f3e-2a7d4e6b8c90
-
-Acompanhe com: inter-pj pix consultar c42f0787-02cb-4b31-827e-459ec9d7ece1 --aguardar
-
-$ inter-pj pix enviar --chave +5511912345678 --valor 1.500,00 --data 2026-10-01   # agendado
-$ inter-pj pix enviar --chave 12.345.678/0001-95 --valor 99,90 --simular          # mostra a requisição, não envia
-$ inter-pj pix enviar --chave fornecedor@empresa.example --valor 150 --sim --json     # sem perguntar (scripts)
-
-$ inter-pj pix enviar --copia-e-cola '00020126...6304ABCD'                         # valor e recebedor vêm do código
-$ inter-pj pix enviar --valor 250,00 --ispb 00000000 --agencia 0001 --conta 123456-7 \
-    --tipo-conta corrente --documento 12.345.678/0001-95 --nome "Fornecedor Exemplo"  # dados bancários
-```
-
-O destino é uma chave (`--chave`), um código copia e cola (`--copia-e-cola`) ou dados bancários (`--ispb`, `--agencia`, `--conta`, `--tipo-conta` — `corrente`, `poupanca`, `salario` ou `pagamento` —, `--documento` e `--nome`). O código copia e cola é decodificado localmente, com o CRC conferido: o resumo mostra recebedor, cidade, chave ou URL da cobrança, identificador e mensagem. Se o código fixa o valor, `--valor` é dispensável e um valor diferente é recusado; códigos dinâmicos (cobranças) aceitam outro valor, e o resumo mostra os dois. Textos vindos do código passam por um filtro de caracteres de controle, para que não alterem o que o terminal mostra.
-
-Trilhos de segurança de todo envio:
-
-- **Resumo e confirmação**: antes de enviar, a CLI mostra destino, valor (também por extenso), data e ambiente (produção em destaque) e pergunta `[s/N]`; o padrão é não. `--sim` confirma sem perguntar. Respostas vindas de um *pipe* não valem, nem uma pergunta que não se vê (a saída de erros num arquivo): sem terminal e sem `--sim`, a CLI recusa (código 2).
-- **Validação local**: chave Pix (CPF/CNPJ com dígitos verificadores, e-mail, celular `+55DD9NNNNNNNN`, chave aleatória), valor maior que zero com até 2 casas, descrição de até 140 caracteres e data de agendamento. As datas seguem o calendário do banco: "hoje" é o dia em Brasília, qualquer que seja o fuso da máquina, para que um agendamento para amanhã, pedido de um servidor em UTC perto da meia-noite, não seja pago hoje. O valor aceita `150,00`, `1.500,00` e `150.00`; formas ambíguas como `1.500` são recusadas.
-- **`--simular`**: valida e mostra a requisição (sem segredos), sem enviar nada.
-- **Idempotência**: cada envio leva uma chave (`x-id-idempotente`), mostrada no resumo. Se a resposta se perder (tempo esgotado, erro 5xx), o Pix pode ter sido feito, e a CLI sai com o código 9: confira o extrato e, para repetir sem risco de pagar duas vezes, use `--id-idempotente <chave>`. Num script que repete envios que falharam, gere a chave antes (por exemplo, com `uuidgen`) e passe a mesma `--id-idempotente` em todas as tentativas; e nunca repita às cegas um comando que saiu com 9.
-- **Limite por operação**: com `limite_por_operacao` no perfil, valores acima dele são recusados, mesmo com `--sim`.
-- **Aprovação**: conforme a configuração da conta, o Pix aguarda aprovação no Internet Banking (Aprovar > Gestão de Aprovações); a CLI avisa quando for o caso.
-
-A integração precisa do escopo `pagamento-pix.write`.
-
-Para acompanhar um Pix enviado (últimos 90 dias), use o código da solicitação:
-
-```console
-$ inter-pj pix consultar c42f0787-02cb-4b31-827e-459ec9d7ece1                        # status, recebedor, erros e histórico
-$ inter-pj pix consultar c42f0787-02cb-4b31-827e-459ec9d7ece1 --aguardar --timeout 5m # até um status final
-```
-
-Com `--aguardar`, a CLI consulta a cada 6 segundos (dentro do limite de requisições da API) até o Pix ser pago, agendado ou terminar sem pagamento, e sai com o código 0 (pago ou agendado), 5 (terminou sem ser pago: reprovado, expirado, cancelado, falha...) ou 8 (o tempo acabou antes de um status final; padrão: 60 s). A consulta precisa do escopo `pagamento-pix.read`.
+Enviar um Pix por chave, código copia e cola ou dados bancários, agendar e acompanhar um Pix enviado estão no guia [Pix](docs/guias/pix.md), com os trilhos de segurança de todo envio: o resumo com o valor por extenso e a confirmação num terminal (ou `--sim`), a validação local, `--simular`, o limite por operação do perfil, a aprovação no Internet Banking e a chave de idempotência, com o código de saída 9 quando o resultado fica incerto. Enviar precisa do escopo `pagamento-pix.write`, e consultar, do `pagamento-pix.read`.
 
 ### Pagamentos
 
