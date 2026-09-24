@@ -79,6 +79,10 @@ pub(crate) enum CliError {
         e2e: String,
         id: String,
     },
+    /// A batch of charges whose request is unknown: it may have been
+    /// received. Its charges have txids, so repeating it creates none twice.
+    #[error("{source}")]
+    LoteCobvIncerto { source: InterError, id: u64 },
     /// `pix devolucao ... --aguardar`: the refund was not made.
     #[error("a devolução não foi feita: {motivo}")]
     DevolucaoNaoRealizada { motivo: String },
@@ -140,7 +144,8 @@ impl CliError {
             | Self::PagamentoIncerto { source: err, .. }
             | Self::EmissaoIncerta { source: err, .. }
             | Self::CobrancaPixIncerta { source: err, .. }
-            | Self::DevolucaoIncerta { source: err, .. } => match err {
+            | Self::DevolucaoIncerta { source: err, .. }
+            | Self::LoteCobvIncerto { source: err, .. } => match err {
                 InterError::InvalidInput(_) => exit::USAGE,
                 InterError::Config(_) | InterError::Identity(_) => exit::CONFIG,
                 InterError::Auth(_) => exit::AUTH,
@@ -201,6 +206,15 @@ impl CliError {
                         .to_owned(),
                     format!("confira com: inter-pj pix devolucao consultar {e2e} {id}"),
                     format!("ou repita o comando com --id {id}"),
+                ];
+            }
+            Self::LoteCobvIncerto { id, .. } => {
+                return vec![
+                    format!(
+                        "o lote pode ter sido recebido: confira com inter-pj pix lote-cobv consultar {id} antes de repetir"
+                    ),
+                    "repetir o comando não duplica cobranças: com o mesmo txid, a API não cria outra"
+                        .to_owned(),
                 ];
             }
             Self::EmissaoIncerta { consulta, .. } => {

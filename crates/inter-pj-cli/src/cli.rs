@@ -31,7 +31,9 @@ pub(crate) use pix::{
     PixCobvCommand, PixCobvConsultarArgs, PixCobvCriarArgs, PixCobvListarArgs, PixCobvRevisarArgs,
     PixDevolucaoCommand, PixDevolucaoConsultarArgs, PixDevolucaoSolicitarArgs, PixLocCommand,
     PixLocConsultarArgs, PixLocCriarArgs, PixLocDesvincularArgs, PixLocListarArgs,
-    PixRecebidoConsultarArgs, PixRecebidosCommand, PixRecebidosListarArgs, SimNao, StatusCobArg,
+    PixLoteCobvArquivoArgs, PixLoteCobvCommand, PixLoteCobvConsultarArgs, PixLoteCobvIdArgs,
+    PixLoteCobvListarArgs, PixLoteCobvSituacaoArgs, PixRecebidoConsultarArgs, PixRecebidosCommand,
+    PixRecebidosListarArgs, SimNao, StatusCobArg,
 };
 
 const AFTER_HELP: &str = "\
@@ -342,7 +344,8 @@ impl Command {
                 PixCommand::Cob(PixCobCommand::Listar(_))
                 | PixCommand::Cobv(PixCobvCommand::Listar(_))
                 | PixCommand::Recebidos(PixRecebidosCommand::Listar(_))
-                | PixCommand::Loc(PixLocCommand::Listar(_)),
+                | PixCommand::Loc(PixLocCommand::Listar(_))
+                | PixCommand::LoteCobv(PixLoteCobvCommand::Listar(_)),
             ) => true,
             Self::Extrato(args) => !matches!(args.comando, Some(ExtratoCommand::Pdf(_))),
             Self::Pix(_)
@@ -543,6 +546,14 @@ pub(crate) enum PixCommand {
         subcommand_value_name = "COMANDO"
     )]
     Loc(PixLocCommand),
+    /// Lotes de cobranças com vencimento, criados ou alterados a partir de um arquivo
+    #[command(
+        name = "lote-cobv",
+        subcommand,
+        subcommand_help_heading = "Comandos",
+        subcommand_value_name = "COMANDO"
+    )]
+    LoteCobv(PixLoteCobvCommand),
 }
 
 #[derive(Debug, Args)]
