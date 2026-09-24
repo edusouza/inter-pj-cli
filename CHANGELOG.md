@@ -9,6 +9,7 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 ### Adicionado
 
 - `inter-pj auth certificado [--arquivo ...]`: o certificado da integração, lido localmente, sem chamar a API: titular, emissor, número de série, validade e a situação (válido; com a renovação aberta, nos últimos 90 dias; vencendo; vencido; ou ainda não válido), em texto ou JSON. Nos últimos 30 dias da validade, e depois dela, todo comando que acessa a API avisa em stderr (#53).
+- `inter-pj config init --interativo`: o assistente de configuração pergunta o perfil, o ambiente, o `client_id`, o certificado e a chave, conferidos na hora (com a validade do certificado), e a conta corrente, pedindo de novo cada resposta inválida; grava caminhos relativos como absolutos e, num arquivo existente, acrescenta o perfil sem mexer nos outros. O `client_secret` não é perguntado (#53).
 - Biblioteca: `CertificateInfo` (`ClientIdentity::certificate`, `CertificateInfo::from_pem`), com o titular e o emissor (`DistinguishedName`), o número de série e a validade do certificado, lidos do DER sem dependências novas (#53).
 
 ## [0.8.0] - 2026-09-24

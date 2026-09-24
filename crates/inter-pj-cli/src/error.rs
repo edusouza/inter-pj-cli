@@ -128,6 +128,9 @@ pub(crate) enum CliError {
     /// The user did not confirm the operation.
     #[error("operação cancelada: nada foi enviado")]
     Cancelado,
+    /// The configuration wizard ended before its last answer.
+    #[error("assistente interrompido: nada foi gravado")]
+    AssistenteInterrompido,
     /// `pix consultar --aguardar`: the payment ended without being paid.
     #[error("o Pix terminou sem ser pago: {status}")]
     PixNaoPago { status: String },
@@ -165,7 +168,7 @@ impl CliError {
             Self::Usage(_) | Self::Periodo { .. } => exit::USAGE,
             Self::Config(_) => exit::CONFIG,
             Self::Io { .. } => exit::UNEXPECTED,
-            Self::Cancelado => exit::CANCELLED,
+            Self::Cancelado | Self::AssistenteInterrompido => exit::CANCELLED,
             Self::PixNaoPago { .. }
             | Self::LoteComErro { .. }
             | Self::CobrancaNaoEmitida { .. }

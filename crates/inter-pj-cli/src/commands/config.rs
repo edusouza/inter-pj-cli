@@ -7,6 +7,7 @@ use serde_json::{Value, json};
 use super::Context;
 use crate::cli::{ConfigCommand, Formato, InitArgs};
 use crate::config::{Setting, Settings, TEMPLATE};
+use crate::confirmacao::Stdio;
 use crate::error::CliError;
 use crate::files::write_private;
 use crate::output;
@@ -20,6 +21,9 @@ pub(super) fn run(context: &Context, command: &ConfigCommand) -> Result<(), CliE
 }
 
 fn init(context: &Context, args: &InitArgs) -> Result<(), CliError> {
+    if args.interativo {
+        return super::assistente::run(context, args, &mut Stdio);
+    }
     let path = context.config_path();
     if path.exists() && !args.forcar {
         return Err(CliError::Config(format!(

@@ -452,7 +452,7 @@ pub(crate) struct LimparArgs {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum ConfigCommand {
-    /// Cria o arquivo de configuração a partir de um modelo comentado
+    /// Cria o arquivo de configuração a partir de um modelo comentado, ou com um assistente (--interativo)
     Init(InitArgs),
     /// Mostra onde ficam o arquivo de configuração e o cache
     Caminho,
@@ -466,6 +466,10 @@ pub(crate) struct InitArgs {
     /// Sobrescreve o arquivo se ele já existir
     #[arg(long)]
     pub(crate) forcar: bool,
+
+    /// Pergunta o perfil, o ambiente, o client_id, o certificado e a chave (conferidos na hora) e a conta corrente; num arquivo existente, acrescenta o perfil
+    #[arg(long)]
+    pub(crate) interativo: bool,
 }
 
 #[derive(Debug, Args)]
