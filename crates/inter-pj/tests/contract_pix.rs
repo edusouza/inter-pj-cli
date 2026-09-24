@@ -3,8 +3,6 @@
 
 mod spec;
 
-use std::collections::BTreeSet;
-
 use inter_pj::cobranca::Uf;
 use inter_pj::endpoint;
 use inter_pj::pix::LocationPix;
@@ -28,92 +26,14 @@ use inter_pj::pix::{
 };
 use serde_json::Value;
 use spec::{
-    enum_values, example_for_schema, keys, parameter_names, parameters, property_names, resolve,
-    schema, spec,
+    assert_documentado, enum_de, enum_values, example_for_schema, keys, parameter_names,
+    parameters, property_names, propriedade, resolve, schema, spec, strings,
 };
 
 fn example(name: &str) -> &'static Value {
     let example = &spec()["components"]["examples"][name]["value"];
     assert!(!example.is_null(), "exemplo {name} não encontrado");
     example
-}
-
-/// A property of a schema, looking into `allOf`, `oneOf` and `anyOf`.
-fn propriedade(schema: &'static Value, nome: &str) -> Option<&'static Value> {
-    let schema = resolve(schema);
-    if let Some(propriedade) = schema["properties"].get(nome) {
-        return Some(resolve(propriedade));
-    }
-    ["allOf", "oneOf", "anyOf"]
-        .iter()
-        .flat_map(|chave| schema[*chave].as_array().into_iter().flatten())
-        .find_map(|parte| propriedade(parte, nome))
-}
-
-/// Every documented path of a schema (`valor.retirada.saque.valor`),
-/// following references, compositions and arrays.
-fn documentados(schema: &'static Value, prefixo: &str, caminhos: &mut BTreeSet<String>) {
-    let schema = resolve(schema);
-    for chave in ["allOf", "oneOf", "anyOf"] {
-        for parte in schema[chave].as_array().into_iter().flatten() {
-            documentados(parte, prefixo, caminhos);
-        }
-    }
-    if let Some(itens) = schema.get("items") {
-        documentados(itens, prefixo, caminhos);
-    }
-    for (nome, propriedade) in schema["properties"].as_object().into_iter().flatten() {
-        let caminho = format!("{prefixo}{nome}");
-        caminhos.insert(caminho.clone());
-        if caminhos.len() < 10_000 {
-            documentados(propriedade, &format!("{caminho}."), caminhos);
-        }
-    }
-}
-
-/// The paths of a JSON document, as [`documentados`] names them.
-fn caminhos(valor: &Value, prefixo: &str, saida: &mut BTreeSet<String>) {
-    match valor {
-        Value::Object(campos) => {
-            for (nome, valor) in campos {
-                let caminho = format!("{prefixo}{nome}");
-                saida.insert(caminho.clone());
-                caminhos(valor, &format!("{caminho}."), saida);
-            }
-        }
-        Value::Array(itens) => {
-            for item in itens {
-                caminhos(item, prefixo, saida);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn assert_documentado(nome: &str, enviado: &Value) {
-    let mut esperados = BTreeSet::new();
-    documentados(schema(nome), "", &mut esperados);
-    let mut usados = BTreeSet::new();
-    caminhos(enviado, "", &mut usados);
-    let fora: Vec<&String> = usados.difference(&esperados).collect();
-    assert!(fora.is_empty(), "campos fora do schema {nome}: {fora:?}");
-}
-
-fn strings(valores: &[impl AsRef<str>]) -> BTreeSet<String> {
-    valores
-        .iter()
-        .map(|valor| valor.as_ref().to_owned())
-        .collect()
-}
-
-fn enum_de(schema: &'static Value) -> BTreeSet<String> {
-    schema["enum"]
-        .as_array()
-        .unwrap_or_else(|| panic!("sem enum: {schema}"))
-        .iter()
-        .filter_map(Value::as_str)
-        .map(str::to_owned)
-        .collect()
 }
 
 // --- cob -------------------------------------------------------------------------

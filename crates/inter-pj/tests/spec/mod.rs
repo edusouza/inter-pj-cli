@@ -96,12 +96,19 @@ pub fn example(schema: &'static Value, name: &str, depth: usize) -> Value {
             }
         }
     }
+    // The first option, with what the `allOf` adds to every option.
     if let Some(first) = schema
         .get("oneOf")
         .and_then(Value::as_array)
         .and_then(|options| options.first())
     {
-        return example(first, name, depth + 1);
+        return match example(first, name, depth + 1) {
+            Value::Object(object) => {
+                merged.extend(object);
+                Value::Object(merged)
+            }
+            other => other,
+        };
     }
     if let Some(value) = schema.get("enum").and_then(|e| e.get(0)) {
         return value.clone();
@@ -138,6 +145,17 @@ pub fn parameters(endpoint: &Endpoint) -> Map<String, Value> {
             (p["name"].as_str().unwrap().to_owned(), p.clone())
         })
         .collect()
+}
+
+/// A parameter of an operation, as the specification has it.
+pub fn parametro(endpoint: &Endpoint, nome: &str) -> &'static Value {
+    operation(endpoint)["parameters"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(resolve)
+        .find(|parametro| parametro["name"] == nome)
+        .unwrap_or_else(|| panic!("{endpoint}: parâmetro {nome}"))
 }
 
 /// Properties of a schema, including the ones inherited through `allOf`.
@@ -230,4 +248,82 @@ pub fn numeric(value: &Value) -> Value {
         Value::Number(n) => json!(n.as_f64()),
         other => other.clone(),
     }
+}
+
+/// A property of a schema, looking into `allOf`, `oneOf` and `anyOf`.
+pub fn propriedade(schema: &'static Value, nome: &str) -> Option<&'static Value> {
+    let schema = resolve(schema);
+    if let Some(propriedade) = schema["properties"].get(nome) {
+        return Some(resolve(propriedade));
+    }
+    ["allOf", "oneOf", "anyOf"]
+        .iter()
+        .flat_map(|chave| schema[*chave].as_array().into_iter().flatten())
+        .find_map(|parte| propriedade(parte, nome))
+}
+
+/// Every documented path of a schema (`valor.retirada.saque.valor`),
+/// following references, compositions and arrays.
+pub fn documentados(schema: &'static Value, prefixo: &str, caminhos: &mut BTreeSet<String>) {
+    let schema = resolve(schema);
+    for chave in ["allOf", "oneOf", "anyOf"] {
+        for parte in schema[chave].as_array().into_iter().flatten() {
+            documentados(parte, prefixo, caminhos);
+        }
+    }
+    if let Some(itens) = schema.get("items") {
+        documentados(itens, prefixo, caminhos);
+    }
+    for (nome, propriedade) in schema["properties"].as_object().into_iter().flatten() {
+        let caminho = format!("{prefixo}{nome}");
+        caminhos.insert(caminho.clone());
+        if caminhos.len() < 10_000 {
+            documentados(propriedade, &format!("{caminho}."), caminhos);
+        }
+    }
+}
+
+/// The paths of a JSON document, as [`documentados`] names them.
+pub fn caminhos(valor: &Value, prefixo: &str, saida: &mut BTreeSet<String>) {
+    match valor {
+        Value::Object(campos) => {
+            for (nome, valor) in campos {
+                let caminho = format!("{prefixo}{nome}");
+                saida.insert(caminho.clone());
+                caminhos(valor, &format!("{caminho}."), saida);
+            }
+        }
+        Value::Array(itens) => {
+            for item in itens {
+                caminhos(item, prefixo, saida);
+            }
+        }
+        _ => {}
+    }
+}
+
+pub fn assert_documentado(nome: &str, enviado: &Value) {
+    let mut esperados = BTreeSet::new();
+    documentados(schema(nome), "", &mut esperados);
+    let mut usados = BTreeSet::new();
+    caminhos(enviado, "", &mut usados);
+    let fora: Vec<&String> = usados.difference(&esperados).collect();
+    assert!(fora.is_empty(), "campos fora do schema {nome}: {fora:?}");
+}
+
+pub fn strings(valores: &[impl AsRef<str>]) -> BTreeSet<String> {
+    valores
+        .iter()
+        .map(|valor| valor.as_ref().to_owned())
+        .collect()
+}
+
+pub fn enum_de(schema: &'static Value) -> BTreeSet<String> {
+    schema["enum"]
+        .as_array()
+        .unwrap_or_else(|| panic!("sem enum: {schema}"))
+        .iter()
+        .filter_map(Value::as_str)
+        .map(str::to_owned)
+        .collect()
 }

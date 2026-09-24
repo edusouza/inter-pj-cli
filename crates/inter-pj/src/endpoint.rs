@@ -551,6 +551,40 @@ pub mod pix {
     };
 }
 
+/// Pix Automático (`/pix/v2`): recurrences and their charges.
+pub mod pix_automatico {
+    use super::{Endpoint, Method};
+    use crate::scope::Scope;
+
+    /// `POST /pix/v2/rec` — creates a recurrence.
+    pub const CRIAR_REC: Endpoint = Endpoint {
+        method: Method::Post,
+        path: "/pix/v2/rec",
+        scopes: &[Scope::RecWrite],
+    };
+
+    /// `GET /pix/v2/rec` — recurrences of a period, paginated.
+    pub const LISTAR_RECS: Endpoint = Endpoint {
+        method: Method::Get,
+        path: "/pix/v2/rec",
+        scopes: &[Scope::RecRead],
+    };
+
+    /// `GET /pix/v2/rec/{idRec}` — a recurrence.
+    pub const CONSULTAR_REC: Endpoint = Endpoint {
+        method: Method::Get,
+        path: "/pix/v2/rec/{idRec}",
+        scopes: &[Scope::RecRead],
+    };
+
+    /// `PATCH /pix/v2/rec/{idRec}` — changes or cancels a recurrence.
+    pub const REVISAR_REC: Endpoint = Endpoint {
+        method: Method::Patch,
+        path: "/pix/v2/rec/{idRec}",
+        scopes: &[Scope::RecWrite],
+    };
+}
+
 /// Every operation implemented by this crate.
 pub const ALL: &[Endpoint] = &[
     TOKEN,
@@ -617,4 +651,8 @@ pub const ALL: &[Endpoint] = &[
     pix::WEBHOOK_EXCLUIR,
     pix::WEBHOOK_CALLBACKS,
     pix::WEBHOOK_REENVIAR,
+    pix_automatico::CRIAR_REC,
+    pix_automatico::LISTAR_RECS,
+    pix_automatico::CONSULTAR_REC,
+    pix_automatico::REVISAR_REC,
 ];

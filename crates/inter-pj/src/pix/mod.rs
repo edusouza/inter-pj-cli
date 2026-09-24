@@ -16,6 +16,7 @@ mod txid;
 mod webhook;
 
 pub use api::Pix;
+pub(crate) use api::{corpo, paginada, todas};
 pub use brcode::{BrCode, BrCodeError, crc16};
 pub(crate) use chave::is_uuid;
 pub use chave::{ChavePix, ChavePixError};
@@ -35,6 +36,7 @@ pub use comum::{
     MAX_INFO_ADICIONAIS, Paginacao, PeriodoPix, PeriodoPixError, PessoaPix, TipoCob,
     VALOR_MAXIMO_PIX,
 };
+pub(crate) use comum::{texto, valor};
 pub use loc::{FiltroLocs, PagamentoSandbox, PaginaLocs};
 pub use lote_cobv::{
     CobvDoLote, CobvNoLote, CobvRevisadaDoLote, LoteCobv, LoteCobvRevisado, LoteCobvSolicitado,

@@ -635,12 +635,16 @@ fn e2e_id(texto: &str) -> Result<String> {
 }
 
 /// A request body, as the API names its fields.
-fn corpo(modelo: &impl Serialize) -> Result<serde_json::Value> {
+pub(crate) fn corpo(modelo: &impl Serialize) -> Result<serde_json::Value> {
     serde_json::to_value(modelo).map_err(|err| Error::InvalidInput(Box::new(err)))
 }
 
 /// `request` for the page `pagina`, with `itens_por_pagina` items.
-fn paginada(request: ApiRequest, pagina: u32, itens_por_pagina: Option<u32>) -> Result<ApiRequest> {
+pub(crate) fn paginada(
+    request: ApiRequest,
+    pagina: u32,
+    itens_por_pagina: Option<u32>,
+) -> Result<ApiRequest> {
     let mut request = request.query("paginacao.paginaAtual", pagina.to_string());
     if let Some(itens) = itens_por_pagina {
         if !(1..=ITENS_POR_PAGINA_MAXIMO_PIX).contains(&itens) {
@@ -655,7 +659,7 @@ fn paginada(request: ApiRequest, pagina: u32, itens_por_pagina: Option<u32>) -> 
 
 /// Every item of a listing, page after page, until the API says there are no
 /// more (or sends an empty page).
-async fn todas<T, F, Fut>(nome: &str, mut pagina: F) -> Result<Vec<T>>
+pub(crate) async fn todas<T, F, Fut>(nome: &str, mut pagina: F) -> Result<Vec<T>>
 where
     F: FnMut(u32) -> Fut,
     Fut: Future<Output = Result<(Vec<T>, Paginacao)>>,
