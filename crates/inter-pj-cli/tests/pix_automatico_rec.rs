@@ -226,7 +226,7 @@ async fn resultado_incerto_orienta_a_conferir_antes_de_repetir() {
         .expect(1)
         .mount(&env.server)
         .await;
-    let assert = env.cmd().args(criar()).arg("--sim").assert().code(6);
+    let assert = env.cmd().args(criar()).arg("--sim").assert().code(9);
     let stderr = stderr_of(&assert);
     for dica in [
         "dica: a recorrência pode ter sido criada, e esta API não tem chave de idempotência: repetir o comando pode criar outra",

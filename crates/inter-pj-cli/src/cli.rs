@@ -1391,6 +1391,10 @@ pub(crate) struct LoteEnviarArgs {
     #[arg(long, value_name = "TEXTO", help_heading = "Lote")]
     pub(crate) identificador: Option<String>,
 
+    /// Envia mesmo com pagamentos repetidos no arquivo (o mesmo código, ou o mesmo DARF), que sem ela são recusados
+    #[arg(long, help_heading = "Segurança")]
+    pub(crate) permitir_repetidos: bool,
+
     /// Confirma sem perguntar (para scripts)
     #[arg(long, conflicts_with = "simular", help_heading = "Segurança")]
     pub(crate) sim: bool,

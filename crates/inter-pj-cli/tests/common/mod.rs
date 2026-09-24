@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 
 use assert_cmd::Command;
 use assert_cmd::assert::Assert;
+use chrono::{NaiveDate, TimeDelta, Utc};
 use serde_json::json;
 use tempfile::TempDir;
 use wiremock::matchers::{header, method, path};
@@ -114,6 +115,11 @@ impl TestEnv {
             Err(_) => Vec::new(),
         }
     }
+}
+
+/// Today in Brasília (UTC−3), the calendar of the bank and of the CLI.
+pub fn hoje() -> NaiveDate {
+    (Utc::now() - TimeDelta::hours(3)).date_naive()
 }
 
 pub fn write_private(path: &Path, content: &str) {

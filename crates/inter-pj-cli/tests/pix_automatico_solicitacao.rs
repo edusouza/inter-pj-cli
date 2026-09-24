@@ -211,7 +211,7 @@ async fn resultado_incerto_orienta_a_conferir_pela_recorrencia() {
         .expect(1)
         .mount(&env.server)
         .await;
-    let assert = env.cmd().args(criar()).arg("--sim").assert().code(6);
+    let assert = env.cmd().args(criar()).arg("--sim").assert().code(9);
     let stderr = stderr_of(&assert);
     for dica in [
         "dica: a solicitação pode ter sido enviada ao pagador, e esta API não tem chave de idempotência: repetir o comando pode criar outra".to_owned(),

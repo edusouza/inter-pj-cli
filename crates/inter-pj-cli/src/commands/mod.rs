@@ -19,7 +19,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use chrono::{Days, Local, NaiveDate, Utc};
+use chrono::{DateTime, Days, FixedOffset, NaiveDate, Utc};
 use clap::ArgMatches;
 use clap::parser::ValueSource;
 use inter_pj::{ClientIdentity, Credentials, InterClient};
@@ -224,8 +224,23 @@ impl Context {
     }
 }
 
+/// Brasília time, the bank's calendar: UTC−3, without daylight saving time
+/// since 2019.
+const BRASILIA: FixedOffset = match FixedOffset::west_opt(3 * 3600) {
+    Some(fuso) => fuso,
+    None => panic!("fuso de Brasília"),
+};
+
+/// Today in the bank's calendar. Scheduling dates, the checks of past
+/// dates and the default periods follow it: a machine in UTC, or in
+/// another time zone, near midnight would take a scheduling for tomorrow
+/// as a payment for today.
 fn hoje() -> NaiveDate {
-    Local::now().date_naive()
+    hoje_em(Utc::now())
+}
+
+fn hoje_em(agora: DateTime<Utc>) -> NaiveDate {
+    agora.with_timezone(&BRASILIA).date_naive()
 }
 
 /// Dates of a listing: without `--fim`, today; without `--inicio`, the
@@ -261,6 +276,17 @@ mod tests {
     use clap::{CommandFactory, FromArgMatches};
 
     use super::*;
+
+    #[test]
+    fn today_is_the_bank_calendar_day() {
+        let em = |texto: &str| hoje_em(texto.parse().unwrap());
+        let dia = |ano, mes, dia| NaiveDate::from_ymd_opt(ano, mes, dia).unwrap();
+        // 22:30 in Brasília, already the next day in UTC.
+        assert_eq!(em("2026-09-25T01:30:00Z"), dia(2026, 9, 24));
+        assert_eq!(em("2026-09-25T02:59:59Z"), dia(2026, 9, 24));
+        assert_eq!(em("2026-09-25T03:00:00Z"), dia(2026, 9, 25));
+        assert_eq!(em("2026-12-31T23:59:59Z"), dia(2026, 12, 31));
+    }
 
     fn matches(args: &[&str]) -> ArgMatches {
         Cli::command().try_get_matches_from(args).unwrap()
