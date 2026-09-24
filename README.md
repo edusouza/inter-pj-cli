@@ -235,9 +235,9 @@ Lote de cobranças com vencimento a criar
   Valor total  R$ 239,90
   Vencimentos  23/10/2026
 
-txid                          Vencimento      Valor  Devedor
-mensalidade202610cliente0001  23/10/2026  R$ 150,00  Cliente Exemplo Ltda
-mensalidade202610cliente0002  23/10/2026   R$ 89,90  Fulano de Tal
+  txid                          Vencimento      Valor  Devedor
+  mensalidade202610cliente0001  23/10/2026  R$ 150,00  Cliente Exemplo Ltda
+  mensalidade202610cliente0002  23/10/2026   R$ 89,90  Fulano de Tal
 Criar o lote de 2 cobranças? [s/N] s
 Lote 42 recebido: as 2 cobranças são criadas em instantes.
 
