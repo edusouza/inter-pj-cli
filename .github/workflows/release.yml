@@ -93,6 +93,9 @@ jobs:
         include:
           - { target: x86_64-unknown-linux-gnu, os: ubuntu-latest, nativo: true }
           - { target: x86_64-unknown-linux-musl, os: ubuntu-latest, nativo: true, musl: true }
+          # Runners ARM64 nativos (gratuitos em repositórios públicos).
+          - { target: aarch64-unknown-linux-gnu, os: ubuntu-24.04-arm, nativo: true }
+          - { target: aarch64-unknown-linux-musl, os: ubuntu-24.04-arm, nativo: true, musl: true }
           - { target: aarch64-apple-darwin, os: macos-latest, nativo: true }
           - { target: x86_64-apple-darwin, os: macos-latest, nativo: false }
           - { target: x86_64-pc-windows-msvc, os: windows-latest, nativo: true }
@@ -110,7 +113,10 @@ jobs:
           targets: ${{ matrix.target }}
       - name: Instalar musl-tools
         if: ${{ matrix.musl }}
-        run: sudo apt-get update && sudo apt-get install -y musl-tools
+        run: |
+          sudo apt-get update && sudo apt-get install -y musl-tools
+          # O compilador C do aws-lc (TLS) para o alvo musl, em qualquer arquitetura.
+          echo "CC_${TARGET//-/_}=musl-gcc" >> "$GITHUB_ENV"
       - name: Compilar
         run: cargo build --release --locked --target ${{ matrix.target }} -p inter-pj-cli
       - name: Testar o binário
