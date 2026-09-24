@@ -228,7 +228,7 @@ Os Pix que a conta recebeu, com os filtros e as devoluções de cada um, e as de
 
 ### Pix Automático
 
-No Pix Automático, o pagador autoriza uma vez, no banco dele, as cobranças de um contrato (uma mensalidade, uma assinatura), que depois são feitas a cada vencimento sem que ele precise pagá-las. A autorização é a **recorrência**: o devedor e o contrato, a periodicidade, o valor (fixo, um mínimo para o limite que o pagador define, ou o de cada cobrança) e se as cobranças não pagas podem ser tentadas de novo. A API é só para CNPJs com pelo menos 6 meses de atividade.
+No Pix Automático, o pagador autoriza uma vez, no banco dele, as cobranças de um contrato (uma mensalidade, uma assinatura), que depois são feitas a cada vencimento sem que ele precise pagá-las. A autorização é a **recorrência**: o devedor e o contrato, a periodicidade, o valor (fixo, um mínimo para o limite que o pagador define, ou o de cada cobrança) e se as cobranças não pagas podem ser tentadas de novo. A API é só para CNPJs com pelo menos 6 meses de atividade. As recorrências estão também no guia [Pix Automático](docs/guias/pix-automatico.md), com exemplos que os testes executam.
 
 ```console
 $ inter-pj pix-automatico rec criar --devedor-documento 123.456.789-09 --devedor-nome "Cliente Exemplo" \
