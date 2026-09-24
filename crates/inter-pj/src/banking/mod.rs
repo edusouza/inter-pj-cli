@@ -10,6 +10,7 @@ mod pagamento;
 mod pagamento_pix;
 mod periodo;
 mod saldo;
+mod webhook;
 
 use chrono::NaiveDate;
 use serde::Deserialize;

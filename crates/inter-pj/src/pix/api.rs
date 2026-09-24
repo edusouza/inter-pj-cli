@@ -37,7 +37,7 @@ const MAX_PAGINAS: u32 = 10_000;
 /// [`Banking::enviar_pix`](crate::banking::Banking::enviar_pix).
 #[derive(Debug, Clone, Copy)]
 pub struct Pix<'a> {
-    client: &'a InterClient,
+    pub(super) client: &'a InterClient,
 }
 
 impl<'a> Pix<'a> {
