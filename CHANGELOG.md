@@ -17,6 +17,10 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 - Biblioteca: `CertificateInfo` (`ClientIdentity::certificate`, `CertificateInfo::from_pem`), com o titular e o emissor (`DistinguishedName`), o número de série e a validade do certificado, lidos do DER sem dependências novas (#53).
 - Binários para Linux ARM64 (`aarch64-unknown-linux-gnu` e `-musl`) nas releases, compilados e testados em runners ARM64 nativos; os testes também passam a rodar no Linux ARM64 a cada push (#59).
 
+### Segurança
+
+- Os exemplos da documentação, da ajuda e dos testes usam só e-mails em `empresa.example`, domínio reservado para documentação, para que um exemplo copiado não leve um Pix ou uma cobrança a um endereço de alguém; o CPF com formato de celular dos testes da ambiguidade entre os dois virou um sintético evidente. Os exemplos da especificação tinham CNPJs com dígitos verificadores válidos e e-mails em provedores reais, agora trocados por `spec/sanitizar.py`, e um teste confere CPFs, CNPJs e e-mails em todos os arquivos que o git pode versionar (#58).
+
 ## [0.8.0] - 2026-09-24
 
 Pix Automático: as recorrências que o pagador autoriza uma vez no banco dele, as solicitações de confirmação, as cobranças recorrentes de cada ciclo, as locations dos QR Codes, os webhooks e o sandbox que simula o pagador e o banco dele.

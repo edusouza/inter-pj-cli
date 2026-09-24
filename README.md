@@ -206,10 +206,10 @@ $ inter-pj extrato pdf --inicio 2026-08-01 --fim 2026-08-31 --saida - | lpr
 ### Pix
 
 ```console
-$ inter-pj pix enviar --chave fornecedor@exemplo.com --valor 150,00 --descricao "NF 123"
+$ inter-pj pix enviar --chave fornecedor@empresa.example --valor 150,00 --descricao "NF 123"
 Pix a enviar
   Ambiente               sandbox (dados fictícios)
-  Chave Pix              fornecedor@exemplo.com (e-mail)
+  Chave Pix              fornecedor@empresa.example (e-mail)
   Valor                  R$ 150,00 (cento e cinquenta reais)
   Quando                 agora
   Descrição              NF 123
@@ -225,7 +225,7 @@ Acompanhe com: inter-pj pix consultar c42f0787-02cb-4b31-827e-459ec9d7ece1 --agu
 
 $ inter-pj pix enviar --chave +5511912345678 --valor 1.500,00 --data 2026-10-01   # agendado
 $ inter-pj pix enviar --chave 12.345.678/0001-95 --valor 99,90 --simular          # mostra a requisição, não envia
-$ inter-pj pix enviar --chave fornecedor@exemplo.com --valor 150 --sim --json     # sem perguntar (scripts)
+$ inter-pj pix enviar --chave fornecedor@empresa.example --valor 150 --sim --json     # sem perguntar (scripts)
 
 $ inter-pj pix enviar --copia-e-cola '00020126...6304ABCD'                         # valor e recebedor vêm do código
 $ inter-pj pix enviar --valor 250,00 --ispb 00000000 --agencia 0001 --conta 123456-7 \
@@ -387,7 +387,7 @@ Cobranças são boletos com Pix para os clientes da empresa. A emissão parte da
 $ inter-pj cobranca emitir --seu-numero NF-123 --valor 150,00 --vencimento 2026-10-20 \
     --pagador-documento 12.345.678/0001-95 --pagador-nome "Cliente Exemplo Ltda" \
     --pagador-endereco "Avenida Brasil" --pagador-numero 1200 --pagador-cidade "Belo Horizonte" \
-    --pagador-uf MG --pagador-cep 30110-000 --pagador-email financeiro@exemplo.com.br \
+    --pagador-uf MG --pagador-cep 30110-000 --pagador-email financeiro@empresa.example \
     --desconto 2% --desconto-dias 5 --multa 2% --juros 1% --dias-agenda 30
 Cobrança a emitir
   Ambiente      sandbox (dados fictícios)
@@ -396,7 +396,7 @@ Cobrança a emitir
   Vencimento    20/10/2026
   Pagador       Cliente Exemplo Ltda (12.345.678/0001-95)
   Endereço      Avenida Brasil, 1200 - Belo Horizonte/MG - CEP 30110-000
-  Contato       financeiro@exemplo.com.br
+  Contato       financeiro@empresa.example
   Desconto      2% para pagamentos até 15/10/2026
   Multa         2%
   Juros         1% ao mês

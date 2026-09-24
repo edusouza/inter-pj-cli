@@ -1068,7 +1068,7 @@ mod tests {
     fn payers_carry_an_address() {
         let mut devedor =
             DevedorCobv::new("12.345.678/0001-95".parse().unwrap(), "Empresa Exemplo");
-        devedor.email = Some("financeiro@exemplo.com.br".to_owned());
+        devedor.email = Some("financeiro@empresa.example".to_owned());
         devedor.logradouro = Some("Avenida Brasil, 1200".to_owned());
         devedor.cidade = Some("Belo Horizonte".to_owned());
         devedor.uf = Some(Uf::Mg);
@@ -1083,7 +1083,7 @@ mod tests {
                 "cep": "30110000",
                 "cnpj": "12345678000195",
                 "nome": "Empresa Exemplo",
-                "email": "financeiro@exemplo.com.br"
+                "email": "financeiro@empresa.example"
             })
         );
         devedor.cep = Some("30110-000".to_owned());

@@ -4,6 +4,9 @@
 mod spec;
 
 use std::collections::BTreeSet;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use chrono::NaiveDate;
 use inter_pj::banking::{
@@ -826,8 +829,6 @@ fn batch_answers_map_every_documented_field() {
 /// specification is updated.
 #[test]
 fn spec_examples_contain_no_real_looking_personal_data() {
-    const ALLOWED_CPFS: [&str; 2] = ["01234567890", "12345678909"];
-    const ALLOWED_CNPJS: [&str; 2] = ["11222333000181", "12345678000195"];
     const SYNTHETIC_PHONE: &str = "+5500000000000";
     const ACCOUNT_DIGITS: &str = "123456789012345678901234567890";
 
@@ -850,22 +851,8 @@ fn spec_examples_contain_no_real_looking_personal_data() {
             problems.insert(format!("CPF em {location}"));
         }
         // Anywhere, descriptions included: the shapes no other code has.
-        for token in tokens(&text) {
-            let digits: String = token.chars().filter(char::is_ascii_digit).collect();
-            let cnpj = has_shape(token, "99999999999999") || has_shape(token, "99.999.999/9999-99");
-            if cnpj && Documento::parse(token).is_ok() && !ALLOWED_CNPJS.contains(&digits.as_str())
-            {
-                problems.insert(format!("CNPJ em {location}"));
-            }
-            if has_shape(token, "999.999.999-99")
-                && cpf_is_valid(&digits)
-                && !ALLOWED_CPFS.contains(&digits.as_str())
-            {
-                problems.insert(format!("CPF em {location}"));
-            }
-        }
-        if email_domains(&text).any(|domain| !reserved_domain(&domain)) {
-            problems.insert(format!("e-mail em {location}"));
+        for problem in documents_and_addresses(&text, false) {
+            problems.insert(format!("{problem} em {location}"));
         }
         if text.starts_with("+55") && text != SYNTHETIC_PHONE {
             problems.insert(format!("telefone em {location}"));
@@ -887,6 +874,41 @@ fn spec_examples_contain_no_real_looking_personal_data() {
     assert!(
         problems.is_empty(),
         "rode `python3 spec/sanitizar.py`; dados possivelmente reais:\n{problems:#?}"
+    );
+}
+
+/// No file of the repository (code, tests, documentation, workflows) holds
+/// a real-looking CPF or CNPJ, or an e-mail address someone could receive:
+/// examples and tests use the synthetic documents and the domains reserved
+/// for documentation.
+#[test]
+fn repository_contains_no_real_looking_personal_data() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut problems = BTreeSet::new();
+    let mut files = 0;
+    for path in text_files(&root) {
+        let Ok(text) = fs::read_to_string(&path) else {
+            continue;
+        };
+        files += 1;
+        let name = path
+            .strip_prefix(&root)
+            .unwrap_or(&path)
+            .display()
+            .to_string();
+        for (number, line) in text.lines().enumerate() {
+            for problem in documents_and_addresses(line, true) {
+                problems.insert(format!("{problem} em {name}:{}", number + 1));
+            }
+        }
+    }
+    assert!(files > 100, "{files} arquivos lidos em {}", root.display());
+    assert!(
+        problems.is_empty(),
+        "use os dados sintéticos (CPF {}, CNPJ {} ou {}, e-mails em empresa.example):\n{problems:#?}",
+        ALLOWED_CPFS[2],
+        ALLOWED_CNPJS[1],
+        ALLOWED_CNPJS[0],
     );
 }
 
@@ -917,8 +939,10 @@ fn documents_and_addresses_are_found_anywhere_in_a_text() {
     assert!(!has_shape("12.345.678/0001-9", "99.999.999/9999-99"));
     assert!(!has_shape("12345678000195x", "99999999999999"));
 
-    let dominios: Vec<String> =
-        email_domains("a@Mail.com, b@example.com. (c@x.example) @solto d@").collect();
+    // Split, so that the scan of the repository does not take it for an
+    // address.
+    let texto = concat!("a@", "Mail.com, b@example.com. (c@x.example) @solto d@");
+    let dominios: Vec<String> = email_domains(texto).collect();
     assert_eq!(dominios, ["mail.com", "example.com", "x.example"]);
     assert!(!reserved_domain("mail.com"));
     assert!(!reserved_domain("example.com.br"));
@@ -953,6 +977,83 @@ fn looks_like_cpf(text: &str) -> bool {
         .chars()
         .all(|c| c.is_ascii_digit() || c == '.' || c == '-');
     digits == 11 && allowed && (text.len() == 11 || text.len() == 14)
+}
+
+/// Obviously synthetic documents with valid check digits: a sequence, a
+/// phone number of zeros (for the ambiguity between phones and CPFs) and
+/// the CPF of the examples; the CNPJs of the examples.
+const ALLOWED_CPFS: [&str; 3] = ["01234567890", "11900000083", "12345678909"];
+const ALLOWED_CNPJS: [&str; 2] = ["11222333000181", "12345678000195"];
+
+/// What in `text` looks like personal data: CPFs and CNPJs with valid
+/// check digits, formatted or not, other than the synthetic ones, and
+/// e-mail addresses outside the reserved domains. Plain 11-digit CPFs only
+/// with `plain_cpfs`: in the specification they are checked by field.
+fn documents_and_addresses(text: &str, plain_cpfs: bool) -> Vec<&'static str> {
+    let mut problems = Vec::new();
+    for token in tokens(text) {
+        let digits: String = token.chars().filter(char::is_ascii_digit).collect();
+        let cnpj = has_shape(token, "99999999999999") || has_shape(token, "99.999.999/9999-99");
+        if cnpj && Documento::parse(token).is_ok() && !ALLOWED_CNPJS.contains(&digits.as_str()) {
+            problems.push("CNPJ");
+        }
+        let cpf =
+            has_shape(token, "999.999.999-99") || (plain_cpfs && has_shape(token, "99999999999"));
+        if cpf && cpf_is_valid(&digits) && !ALLOWED_CPFS.contains(&digits.as_str()) {
+            problems.push("CPF");
+        }
+    }
+    if email_domains(text).any(|domain| !reserved_domain(&domain)) {
+        problems.push("e-mail");
+    }
+    problems
+}
+
+/// The files git could commit: tracked, or new and not ignored (local
+/// files the `.gitignore` covers, like payment spreadsheets, stay out).
+/// Without git, every file but the build output and git's data.
+fn text_files(root: &Path) -> Vec<PathBuf> {
+    let listed = Command::new("git")
+        .args([
+            "ls-files",
+            "-z",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+        ])
+        .current_dir(root)
+        .output()
+        .ok()
+        .filter(|output| output.status.success());
+    match listed {
+        Some(output) => String::from_utf8_lossy(&output.stdout)
+            .split('\0')
+            .filter(|name| !name.is_empty())
+            .map(|name| root.join(name))
+            .filter(|path| path.is_file())
+            .collect(),
+        None => walk(root),
+    }
+}
+
+fn walk(dir: &Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    let Ok(entries) = fs::read_dir(dir) else {
+        return files;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = entry.file_name();
+        if name == "target" || name == ".git" {
+            continue;
+        }
+        match entry.file_type() {
+            Ok(kind) if kind.is_dir() => files.extend(walk(&path)),
+            Ok(kind) if kind.is_file() => files.push(path),
+            _ => {}
+        }
+    }
+    files
 }
 
 /// The words of `text`, keeping the punctuation of documents

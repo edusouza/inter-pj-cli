@@ -34,7 +34,7 @@ use inter_pj::banking::{Destinatario, IdIdempotente, PagamentoPix};
 use rust_decimal::Decimal;
 let pagamento = PagamentoPix::new(
     Decimal::new(15_000, 2),
-    Destinatario::Chave { chave: "fornecedor@exemplo.com".parse()? },
+    Destinatario::Chave { chave: "fornecedor@empresa.example".parse()? },
 );
 let id = IdIdempotente::novo();
 let solicitacao = client.banking().enviar_pix(&pagamento, &id).await?;

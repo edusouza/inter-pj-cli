@@ -19,7 +19,7 @@ pub const MAX_DESCRICAO: usize = 140;
 /// use inter_pj::banking::{Destinatario, PagamentoPix};
 /// use rust_decimal::Decimal;
 ///
-/// let chave = "fornecedor@exemplo.com".parse().unwrap();
+/// let chave = "fornecedor@empresa.example".parse().unwrap();
 /// let mut pagamento = PagamentoPix::new(Decimal::new(15_000, 2), Destinatario::Chave { chave });
 /// pagamento.descricao = Some("NF 123".to_owned());
 /// assert!(pagamento.validar().is_ok());
@@ -359,7 +359,7 @@ mod tests {
         PagamentoPix::new(
             dec(valor),
             Destinatario::Chave {
-                chave: "fornecedor@exemplo.com".parse().unwrap(),
+                chave: "fornecedor@empresa.example".parse().unwrap(),
             },
         )
     }
@@ -388,7 +388,7 @@ mod tests {
                 "valor": 150,
                 "dataPagamento": "2026-10-01",
                 "descricao": "NF 123",
-                "destinatario": {"tipo": "CHAVE", "chave": "fornecedor@exemplo.com"}
+                "destinatario": {"tipo": "CHAVE", "chave": "fornecedor@empresa.example"}
             })
         );
 

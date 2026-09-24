@@ -253,7 +253,7 @@ mod tests {
                 "26",
                 tlv(&[
                     ("00", "BR.GOV.BCB.PIX"),
-                    ("01", "fornecedor@exemplo.com"),
+                    ("01", "fornecedor@empresa.example"),
                     ("02", "NF 123"),
                 ]),
             ),
@@ -295,7 +295,7 @@ mod tests {
     fn decodes_amount_message_and_txid_of_static_codes() {
         let brcode = BrCode::parse(&estatico(Some("150.00"))).unwrap();
         assert_eq!(brcode.valor, Some("150.00".parse().unwrap()));
-        assert_eq!(brcode.chave.as_deref(), Some("fornecedor@exemplo.com"));
+        assert_eq!(brcode.chave.as_deref(), Some("fornecedor@empresa.example"));
         assert_eq!(brcode.info_adicional.as_deref(), Some("NF 123"));
         assert_eq!(brcode.txid.as_deref(), Some("NF123"));
     }

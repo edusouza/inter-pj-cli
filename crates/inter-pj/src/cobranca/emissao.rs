@@ -1025,7 +1025,7 @@ mod tests {
         completa.pagador.numero = Some("1200".to_owned());
         completa.pagador.complemento = Some("sala 3".to_owned());
         completa.pagador.bairro = Some("Centro".to_owned());
-        completa.pagador.email = Some("financeiro@exemplo.com.br".to_owned());
+        completa.pagador.email = Some("financeiro@empresa.example".to_owned());
         completa.pagador.ddd = Some("31".to_owned());
         completa.pagador.telefone = Some("999999999".to_owned());
         completa.desconto = Some(Desconto::Percentual {

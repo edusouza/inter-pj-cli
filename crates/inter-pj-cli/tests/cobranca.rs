@@ -495,7 +495,7 @@ fn opcoes(vencimento: &str) -> Vec<String> {
         "--pagador-cep",
         "30110-000",
         "--pagador-email",
-        "financeiro@exemplo.com.br",
+        "financeiro@empresa.example",
         "--multa",
         "2%",
         "--juros",
@@ -525,7 +525,7 @@ fn corpo(vencimento: &str) -> Value {
             "cidade": "Belo Horizonte",
             "uf": "MG",
             "cep": "30110000",
-            "email": "financeiro@exemplo.com.br"
+            "email": "financeiro@empresa.example"
         },
         "multa": {"codigo": "PERCENTUAL", "taxa": 2},
         "mora": {"codigo": "TAXAMENSAL", "taxa": 1},

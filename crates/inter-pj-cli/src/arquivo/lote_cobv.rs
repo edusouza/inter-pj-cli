@@ -413,7 +413,7 @@ const MODELO_JSON: &str = r#"{
     {
       "txid": "mensalidade202610cliente0001",
       "calendario": {"dataDeVencimento": "{vencimento}", "validadeAposVencimento": 30},
-      "devedor": {"cnpj": "12.345.678/0001-95", "nome": "Cliente Exemplo Ltda", "email": "financeiro@exemplo.com.br"},
+      "devedor": {"cnpj": "12.345.678/0001-95", "nome": "Cliente Exemplo Ltda", "email": "financeiro@empresa.example"},
       "valor": {
         "original": "150,00",
         "multa": {"modalidade": 2, "valorPerc": "2,00"},
@@ -439,7 +439,7 @@ const MODELO_JSON: &str = r#"{
 /// The same batch in the columns of the CSV file, separated by `;` as Excel
 /// in Portuguese saves them.
 const MODELO_CSV: &str = "\u{feff}txid;calendario.dataDeVencimento;calendario.validadeAposVencimento;devedor.cpf;devedor.cnpj;devedor.nome;devedor.email;valor.original;valor.multa.modalidade;valor.multa.valorPerc;valor.juros.modalidade;valor.juros.valorPerc;valor.desconto.modalidade;valor.desconto.descontoDataFixa[0].data;valor.desconto.descontoDataFixa[0].valorPerc;chave;solicitacaoPagador\r
-mensalidade202610cliente0001;{vencimento};30;;12.345.678/0001-95;Cliente Exemplo Ltda;financeiro@exemplo.com.br;150,00;2;2,00;3;1,00;;;;pix@empresa.example;Mensalidade de outubro\r
+mensalidade202610cliente0001;{vencimento};30;;12.345.678/0001-95;Cliente Exemplo Ltda;financeiro@empresa.example;150,00;2;2,00;3;1,00;;;;pix@empresa.example;Mensalidade de outubro\r
 mensalidade202610cliente0002;{vencimento};;123.456.789-09;;Fulano de Tal;;89,90;;;;;1;{desconto};5,00;pix@empresa.example;\r
 ";
 

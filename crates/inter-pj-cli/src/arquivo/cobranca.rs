@@ -323,7 +323,7 @@ const MODELO: &str = r#"{
     "cidade": "Belo Horizonte",
     "uf": "MG",
     "cep": "30110-000",
-    "email": "financeiro@exemplo.com.br",
+    "email": "financeiro@empresa.example",
     "ddd": "31",
     "telefone": "999999999"
   },
