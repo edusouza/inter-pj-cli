@@ -2,7 +2,8 @@
 
 use std::io;
 
-use inter_pj::{ApiErrorKind, Error as InterError};
+use inter_pj::banking::PeriodoError;
+use inter_pj::{ApiError, ApiErrorKind, Error as InterError};
 
 /// Documented exit codes.
 pub(crate) mod exit {
@@ -19,6 +20,13 @@ pub(crate) enum CliError {
     /// Invalid usage detected after argument parsing.
     #[error("{0}")]
     Usage(String),
+    /// Invalid statement period.
+    #[error("{erro}")]
+    Periodo {
+        erro: PeriodoError,
+        /// What to do instead, shown as a hint.
+        dica: Option<&'static str>,
+    },
     /// Missing or invalid configuration.
     #[error("{0}")]
     Config(String),
@@ -44,7 +52,7 @@ impl CliError {
 
     pub(crate) fn exit_code(&self) -> u8 {
         match self {
-            Self::Usage(_) => exit::USAGE,
+            Self::Usage(_) | Self::Periodo { .. } => exit::USAGE,
             Self::Config(_) => exit::CONFIG,
             Self::Io { .. } => exit::UNEXPECTED,
             Self::Inter(err) => match err {
@@ -66,10 +74,20 @@ impl CliError {
 
     /// Suggestions shown after the error message.
     pub(crate) fn hints(&self) -> Vec<&'static str> {
-        let Self::Inter(err) = self else {
-            return Vec::new();
+        let err = match self {
+            Self::Inter(err) => err,
+            Self::Periodo {
+                dica: Some(dica), ..
+            } => return vec![dica],
+            _ => return Vec::new(),
         };
         match err {
+            InterError::Api(api) if problem_type(api) == Some("SCROLL_ALREADY_ACTIVE") => vec![
+                "já existe uma leitura do extrato em modo scroll para esta conta (outra execução?); ela expira após 6 minutos sem uso",
+            ],
+            InterError::Api(api) if problem_type(api) == Some("SCROLL_EXPIRED") => vec![
+                "a leitura em modo scroll expirou (6 minutos sem requisições); execute o comando novamente",
+            ],
             InterError::Auth(api) if api.note.is_none() => vec![
                 "confira o client_id, o client_secret e se o certificado/chave são os da mesma integração",
             ],
@@ -95,6 +113,10 @@ impl CliError {
             _ => Vec::new(),
         }
     }
+}
+
+fn problem_type(api: &ApiError) -> Option<&str> {
+    api.problem.as_ref()?.type_error.as_deref()
 }
 
 /// Prints the error (and hints) to stderr.

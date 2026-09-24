@@ -8,8 +8,8 @@ use super::Context;
 use crate::cli::{ConfigCommand, Formato, InitArgs};
 use crate::config::{Setting, Settings, TEMPLATE};
 use crate::error::CliError;
+use crate::files::write_private;
 use crate::output;
-use crate::token_store::write_private;
 
 pub(super) fn run(context: &Context, command: &ConfigCommand) -> Result<(), CliError> {
     match command {
@@ -56,7 +56,8 @@ fn caminho(context: &Context) -> Result<(), CliError> {
             "configuracaoExiste": config.exists(),
             "cache": context.cache_dir(),
         })),
-        Formato::Texto => output::print(&output::key_values_left(&[
+        // `commands::run` refuses csv for this command.
+        Formato::Texto | Formato::Csv => output::print(&output::key_values_left(&[
             ("Configuração", format!("{}{status}", config.display())),
             ("Cache", context.cache_dir().display().to_string()),
         ])),
@@ -77,7 +78,8 @@ fn mostrar(context: &Context) -> Result<(), CliError> {
                 .collect();
             output::print_json(&object)
         }
-        Formato::Texto => {
+        // `commands::run` refuses csv for this command.
+        Formato::Texto | Formato::Csv => {
             let lines: Vec<(&str, String)> = rows
                 .iter()
                 .map(|row| {
