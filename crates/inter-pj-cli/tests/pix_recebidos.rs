@@ -102,6 +102,45 @@ async fn lista_os_pix_do_periodo() {
     assert!(csv.contains(";Pedido 123;50,00\r\n"), "{csv}");
 }
 
+/// A day of the period is the bank's, in Brasília, as in the statement,
+/// whatever the time zone of the machine: on a server in UTC, 02/09 is still
+/// from 00:00 to 23:59 in Brasília.
+#[tokio::test(flavor = "multi_thread")]
+async fn os_dias_do_periodo_sao_os_do_banco() {
+    let env = env().await;
+    env.mount_token("pix.read", None).await;
+    Mock::given(method("GET"))
+        .and(path("/pix/v2/pix"))
+        .and(query_param("inicio", "2026-09-02T00:00:00-03:00"))
+        .and(query_param("fim", "2026-09-02T23:59:59-03:00"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "parametros": {"paginacao": {"paginaAtual": 0, "itensPorPagina": 1000, "quantidadeDePaginas": 1}},
+            "pix": []
+        })))
+        .expect(1)
+        .mount(&env.server)
+        .await;
+    let assert = env
+        .cmd()
+        .env("TZ", "UTC")
+        .args([
+            "pix",
+            "recebidos",
+            "listar",
+            "--inicio",
+            "2026-09-02",
+            "--fim",
+            "2026-09-02",
+        ])
+        .assert()
+        .success();
+    assert!(
+        stdout_of(&assert).starts_with("Pix recebidos de 02/09/2026 00:00 a 02/09/2026 23:59"),
+        "{}",
+        stdout_of(&assert)
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn filtra_pela_cobranca_e_traz_uma_pagina() {
     let env = env().await;

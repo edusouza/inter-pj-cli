@@ -379,7 +379,7 @@ pub(crate) struct SolicitacaoCriarArgs {
     #[arg(long, value_name = "CONTA", help_heading = "Conta do pagador")]
     pub(crate) conta: String,
 
-    /// Prazo para o pagador responder: 2h, 7d, uma data AAAA-MM-DD (até o fim do dia) ou data e hora com fuso [padrão: 7d]
+    /// Prazo para o pagador responder: 2h, 7d, uma data AAAA-MM-DD (até o fim do dia, em Brasília) ou data e hora com fuso [padrão: 7d]
     #[arg(long, value_name = "PRAZO", value_parser = parse_prazo)]
     pub(crate) expiracao: Option<Prazo>,
 
