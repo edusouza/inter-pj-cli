@@ -37,6 +37,50 @@ fn every_implemented_endpoint_matches_the_spec() {
     }
 }
 
+/// The other side of [`every_implemented_endpoint_matches_the_spec`]: no
+/// operation of the specification is left without an endpoint (issue #56).
+#[test]
+fn every_operation_of_the_spec_is_implemented() {
+    const METODOS: [&str; 5] = ["get", "post", "put", "patch", "delete"];
+    let ours: BTreeSet<(String, &str)> = endpoint::ALL
+        .iter()
+        .map(|endpoint| {
+            (
+                endpoint.method.as_str().to_lowercase(),
+                spec_path(endpoint.path),
+            )
+        })
+        .collect();
+    let mut cobertas = 0;
+    let mut faltam = Vec::new();
+    for (path, item) in spec()["paths"].as_object().unwrap() {
+        if path.starts_with(OUT_OF_SCOPE_PREFIX) {
+            continue;
+        }
+        let path = DUPLICADAS
+            .iter()
+            .find(|(copia, _)| copia == path)
+            .map_or(path.as_str(), |(_, original)| original);
+        for method in item.as_object().unwrap().keys() {
+            if !METODOS.contains(&method.as_str()) {
+                continue;
+            }
+            if ours.contains(&(method.clone(), path)) {
+                cobertas += 1;
+            } else {
+                faltam.push(format!("{} {path}", method.to_uppercase()));
+            }
+        }
+    }
+    assert!(
+        faltam.is_empty(),
+        "operações da especificação sem endpoint no registro: {faltam:#?}"
+    );
+    // The 98 of the specification but for the 6 of the Forum (the copy is
+    // one of them), with a registry of 91 endpoints.
+    assert_eq!(cobertas, 92);
+}
+
 #[test]
 fn registry_has_no_duplicates() {
     let unique: BTreeSet<String> = endpoint::ALL.iter().map(ToString::to_string).collect();

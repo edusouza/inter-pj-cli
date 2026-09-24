@@ -18,6 +18,7 @@ Cada operação declara em `security` os escopos OAuth exigidos.
 A especificação é a **fonte de verdade dos testes de contrato** (`crates/inter-pj/tests/contract.rs`):
 
 - todo endpoint implementado (`inter_pj::endpoint::ALL`) precisa existir na especificação com o mesmo método, caminho e escopos;
+- e toda operação da especificação, exceto as do Fórum, precisa de um endpoint no registro: o teste lista as que faltarem. A especificação repete uma operação (o pagamento de QR Code no sandbox, também entre as cobranças com vencimento, com um espaço no caminho), declarada em `tests/spec/mod.rs`;
 - o enum `Scope` precisa conter exatamente os escopos declarados (exceto os do Fórum);
 - os modelos Rust precisam aceitar os exemplos derivados dos schemas.
 

@@ -30,6 +30,16 @@ pub const DIVERGENCIAS: &[(&str, &str)] = &[(
     "/cobranca/v3/webhook/callbacks/retry",
 )];
 
+/// Operations the specification lists twice: the key of the copy and the
+/// one of the operation, which the registry has.
+pub const DUPLICADAS: &[(&str, &str)] = &[(
+    // The payment of a QR Code in the sandbox, among the immediate charges
+    // and again among the charges with a due date, with a space in the path
+    // (same scopes, body and responses).
+    "/pix/v2/ sandbox/cob/pagamento",
+    "/pix/v2/sandbox/cob/pagamento",
+)];
+
 /// The key of the specification for one of our paths.
 pub fn spec_path(path: &'static str) -> &'static str {
     DIVERGENCIAS
