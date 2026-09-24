@@ -21,6 +21,7 @@ Os exemplos são da Empresa Exemplo Ltda, uma empresa fictícia, no perfil de pr
   - [Um lote com problemas](#um-lote-com-problemas)
   - [O processamento](#o-processamento)
   - [Alterar as cobranças de um lote](#alterar-as-cobranças-de-um-lote)
+- [Testar no sandbox](#testar-no-sandbox)
 
 ## Criar uma cobrança imediata
 
@@ -742,3 +743,65 @@ Criado em                id  Descrição                 Cobranças  Criadas  Ne
 
 1 lote · 3 cobranças
 ```
+
+## Testar no sandbox
+
+No sandbox, as cobranças Pix podem ser pagas pela CLI, para testar o fluxo inteiro: criar, pagar, consultar e, com um webhook cadastrado, receber a notificação. Em produção, quem paga é o cliente, e os comandos são recusados antes de qualquer requisição:
+
+```console
+$ inter-pj pix cob pagar caixa0001empresaexemplo2026
+erro: pix cob pagar existe só no sandbox, para testes: em produção, quem paga é o cliente, com o QR Code ou o copia e cola
+```
+
+No perfil do sandbox, com uma cobrança de teste:
+
+```console
+$ inter-pj -p sandbox pix cob criar --chave pix@empresa.example --valor 10,00 --txid teste0001empresaexemplo2026
+Cobrança Pix a criar
+  Ambiente  sandbox (dados fictícios)
+  Valor     R$ 10,00 (dez reais)
+  Chave     pix@empresa.example (e-mail)
+  Expira    1 dia após a criação (padrão da API)
+  txid      teste0001empresaexemplo2026
+aviso: ambiente sandbox — os dados retornados são fictícios
+Criar a cobrança? [s/N] s
+Cobrança Pix criada.
+
+Cobrança Pix teste0001empresaexemplo2026
+  Status     ativa
+  Valor      R$ 10,00
+  Criada em  24/09/2026 10:54:12
+  Expira em  25/09/2026 10:54:12
+  Chave      pix@empresa.example
+  Revisão    0
+  Location   qrcodepix.inter.example/qr/v2/cob/teste0001empresaexemplo2026
+
+Copia e cola  00020101021226830014br.gov.bcb.pix2561qrcodepix.inter.example/qr/v2/cob/teste0001empresaexemplo20265204000053039865802BR5920EMPRESA EXEMPLO LTDA6014BELO HORIZONTE62070503***63049115
+
+Acompanhe com: inter-pj -p sandbox pix cob consultar teste0001empresaexemplo2026
+
+$ inter-pj -p sandbox pix cob pagar teste0001empresaexemplo2026
+Pago no sandbox: R$ 10,00.
+endToEndId  E12345678202609241401Sbx00000002
+
+Confira com: inter-pj -p sandbox pix cob consultar teste0001empresaexemplo2026
+
+$ inter-pj -p sandbox pix cob consultar teste0001empresaexemplo2026
+aviso: ambiente sandbox — os dados retornados são fictícios
+Cobrança Pix teste0001empresaexemplo2026
+  Status     concluída (paga)
+  Valor      R$ 10,00
+  Criada em  24/09/2026 10:54:12
+  Expira em  25/09/2026 10:54:12
+  Chave      pix@empresa.example
+  Revisão    0
+  Location   qrcodepix.inter.example/qr/v2/cob/teste0001empresaexemplo2026
+
+Pix recebidos
+Horário                 Valor  Devolvido  endToEndId
+24/09/2026 11:01:12  R$ 10,00             E12345678202609241401Sbx00000002
+
+Copia e cola  00020101021226830014br.gov.bcb.pix2561qrcodepix.inter.example/qr/v2/cob/teste0001empresaexemplo20265204000053039865802BR5920EMPRESA EXEMPLO LTDA6014BELO HORIZONTE62070503***63049115
+```
+
+Sem `--valor`, `pix cob pagar` e `pix cobv pagar` pagam o valor da cobrança, que consultam antes. `pix sandbox pagar-qrcode --copia-e-cola ...` paga um código como um cliente o pagaria, pelo valor do código, conferido (CRC16) antes do envio, ou pelo de `--valor`: o copia e cola de uma cobrança com QR Code dinâmico, como as deste guia, não traz o valor. Pagar precisa do escopo `pix.write`, e também do `cob.read` ou do `cobv.read` para buscar o valor; a API aceita até 10 pagamentos por minuto.
