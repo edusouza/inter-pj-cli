@@ -1,5 +1,6 @@
 //! `inter-pj cobranca ...`: charges (boleto with Pix) of the Cobrança API.
 
+mod alterar;
 mod consultar;
 mod emitir;
 mod listar;
@@ -27,6 +28,20 @@ pub(super) async fn run(context: &Context, command: CobrancaCommand) -> Result<(
         CobrancaCommand::Sumario(args) => listar::sumario(context, &args).await,
         CobrancaCommand::Consultar(args) => consultar::consultar(context, &args).await,
         CobrancaCommand::Pdf(args) => consultar::pdf(context, &args).await,
+        CobrancaCommand::Cancelar(args) => alterar::cancelar(context, &args, &mut Stdio).await,
+        CobrancaCommand::Editar(args) => alterar::editar(context, &args, &mut Stdio).await,
+        CobrancaCommand::Edicao(args) => alterar::edicao(context, &args).await,
+        CobrancaCommand::Pagar(args) => alterar::pagar(context, &args).await,
+    }
+}
+
+/// `texto` as one argument of a shell command: quoted when it has to be.
+pub(super) fn argumento(texto: &str) -> String {
+    let simples = |c: char| c.is_ascii_alphanumeric() || "-_./:,+=@%".contains(c);
+    if !texto.is_empty() && texto.chars().all(simples) {
+        texto.to_owned()
+    } else {
+        format!("'{}'", texto.replace('\'', r"'\''"))
     }
 }
 
@@ -221,6 +236,92 @@ fn secao(titulo: &str, linhas: &[(&str, String)]) -> String {
         let _ = write!(texto, "\n  {linha}");
     }
     texto
+}
+
+/// `inter-pj cobranca ...` against a mock API, with a sandbox profile and
+/// a token for reading and writing charges.
+#[cfg(test)]
+mod testes {
+    use std::collections::HashMap;
+    use std::fs;
+
+    use clap::{CommandFactory, FromArgMatches};
+    use serde_json::json;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    use crate::cli::{Cli, CobrancaCommand, Command};
+    use crate::commands::{Context, Env};
+
+    struct EnvFalso(HashMap<&'static str, String>);
+
+    impl Env for EnvFalso {
+        fn var(&self, name: &str) -> Option<String> {
+            self.0.get(name).cloned()
+        }
+    }
+
+    pub(super) struct Cenario {
+        pub(super) server: MockServer,
+        pub(super) context: Context,
+        _dir: tempfile::TempDir,
+    }
+
+    /// The scenario and the command of `inter-pj cobranca <args>`.
+    pub(super) async fn cenario(args: &[&str]) -> (Cenario, CobrancaCommand) {
+        let server = MockServer::start().await;
+        let dir = tempfile::tempdir().unwrap();
+        let rcgen::CertifiedKey { cert, signing_key } =
+            rcgen::generate_simple_self_signed(vec!["cliente.teste".to_owned()]).unwrap();
+        let certificado = dir.path().join("certificado.crt");
+        let chave = dir.path().join("chave.key");
+        fs::write(&certificado, cert.pem()).unwrap();
+        fs::write(&chave, signing_key.serialize_pem()).unwrap();
+        let config = dir.path().join("config.toml");
+        fs::write(
+            &config,
+            format!(
+                "[perfis.padrao]\nambiente = \"sandbox\"\nclient_id = \"id-de-teste\"\ncertificado = '{}'\nchave_privada = '{}'\n",
+                certificado.display(),
+                chave.display()
+            ),
+        )
+        .unwrap();
+        let config = config.display().to_string();
+        let mut full = vec!["inter-pj", "--config", &config, "cobranca"];
+        full.extend_from_slice(args);
+        let matches = Cli::command().try_get_matches_from(&full).unwrap();
+        let cli = Cli::from_arg_matches(&matches).unwrap();
+        let env = EnvFalso(HashMap::from([
+            ("INTER_CLIENT_SECRET", "segredo-de-teste".to_owned()),
+            ("INTER_BASE_URL", server.uri()),
+            (
+                "INTER_CACHE_DIR",
+                dir.path().join("cache").display().to_string(),
+            ),
+        ]));
+        let context = Context::new(cli.global, &matches, &env).unwrap();
+        let Command::Cobranca(comando) = cli.command else {
+            unreachable!("inter-pj cobranca");
+        };
+        Mock::given(method("POST"))
+            .and(path("/oauth/v2/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "access_token": "tok",
+                "expires_in": 3600,
+                "scope": "boleto-cobranca.write boleto-cobranca.read"
+            })))
+            .mount(&server)
+            .await;
+        (
+            Cenario {
+                server,
+                context,
+                _dir: dir,
+            },
+            comando,
+        )
+    }
 }
 
 #[cfg(test)]

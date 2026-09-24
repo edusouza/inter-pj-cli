@@ -8,6 +8,11 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ### Adicionado
 
+- `inter-pj cobranca cancelar <codigo> --motivo TEXTO`: cancela uma cobrança depois de consultá-la, mostrá-la e pedir confirmação; cobranças pagas, canceladas ou expiradas são recusadas sem nenhuma alteração, e, sem terminal nem `--sim`, nenhuma requisição é feita (#30).
+- `inter-pj cobranca editar <codigo> [--valor] [--vencimento]`: altera o valor e o vencimento, os únicos campos que a API aceita, mostrando o antes e o depois; com `--aguardar`, acompanha a alteração até o fim, saindo com 5 se ela não foi feita e 8 se o tempo acabou (#30).
+- `inter-pj cobranca edicao <codigo-edicao> [--aguardar]`: mostra em que pé está uma alteração (#30).
+- `inter-pj cobranca pagar <codigo> --com boleto|pix`: paga uma cobrança no sandbox, para testar o fluxo completo; em produção, é recusado antes de qualquer requisição (#32).
+- Biblioteca: `cobranca::motivo_cancelamento` confere o motivo do cancelamento antes do envio (#30).
 - `inter-pj cobranca emitir`: emite uma cobrança com boleto e Pix pelas opções (casos simples) ou por `--arquivo` (JSON com os campos da API, inclusive beneficiário final e nota fiscal, ou `-` para a entrada padrão), conferida localmente com mensagens que apontam a opção ou o campo; campos desconhecidos no arquivo são recusados. O resumo mostra o valor por extenso, até quando vale o desconto e quando a cobrança não paga é cancelada, e avisa sobre multa e juros que não chegam a valer (`--dias-agenda` 0 cancela a cobrança no vencimento), prazo de desconto já passado e vencimento no mesmo dia (só até as 19h59). Confirmação, `--sim` e `--simular`; sem chave de idempotência, um resultado incerto vem com o comando que procura a cobrança antes de emiti-la de novo. Com `--aguardar [--timeout 60s]`, espera a emissão e mostra o boleto e o Pix, com `--qrcode` e `--qrcode-png` (#28).
 - `inter-pj cobranca modelo`: imprime um arquivo de exemplo para `cobranca emitir --arquivo`, com dados fictícios e vencimento em 30 dias (#28).
 - `inter-pj cobranca listar`: cobranças de um período por vencimento (padrão), emissão ou pagamento, com filtros de situação, pagador, CPF/CNPJ, seu número e tipo, ordem e todas as páginas (ou `--pagina`), em texto com totais, JSON ou CSV com os nomes da API (#29).
@@ -19,7 +24,7 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ### Alterado
 
-- Os códigos de saída 5 e 8 valem também para `cobranca emitir --aguardar` (cobrança não emitida; tempo esgotado).
+- Os códigos de saída 5 e 8 valem também para `cobranca emitir`, `cobranca editar` e `cobranca edicao` com `--aguardar` (cobrança não emitida ou alteração não feita; tempo esgotado).
 
 ## [0.4.0] - 2026-09-23
 
