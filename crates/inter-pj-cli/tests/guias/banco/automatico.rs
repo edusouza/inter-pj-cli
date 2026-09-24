@@ -1,15 +1,16 @@
 //! Pix Automático in one state: the recurrences ([`rec`](super::rec)), which
 //! the payers authorize once, the confirmation requests
-//! ([`solicrec`](super::solicrec)) that ask them to, and the recurring
-//! charges ([`cobr`](super::cobr)) of each cycle. What is created or changed
-//! today takes the next time of one clock, 5 minutes after the one before,
-//! and each recurrence or request created today the next id of the account's
-//! bank.
+//! ([`solicrec`](super::solicrec)) that ask them to, the recurring charges
+//! ([`cobr`](super::cobr)) of each cycle and the locations of the QR Codes
+//! of the recurrences ([`locrec`](super::locrec)), each in its recurrence
+//! or free for the next. What is created or changed today takes the next
+//! time of one clock, 5 minutes after the one before, and each recurrence
+//! or request created today the next id of the account's bank.
 
 use chrono::{DateTime, SecondsFormat, TimeDelta};
 use serde_json::{Value, json};
 
-use super::{cobr, rec, solicrec};
+use super::{cobr, locrec, rec, solicrec};
 use crate::sessao::HOJE;
 
 /// The ISPB of the account's bank, in the ids it creates.
@@ -38,6 +39,10 @@ pub(super) struct Automatico {
     pub(super) cobrs: Vec<Value>,
     /// The debits the payers' banks scheduled today, for the id of the next.
     pub(super) agendadas: usize,
+    /// The locations without a recurrence; the others are in theirs.
+    locrecs_livres: Vec<Value>,
+    /// The id of the next location.
+    proxima_locrec: u64,
     /// What was done today, for the time of the next one.
     feitos: i64,
     /// The recurrences created today, for the id of the next one.
@@ -51,11 +56,18 @@ impl Automatico {
     pub(super) fn novo() -> Self {
         let recs = rec::iniciais();
         let solicitacoes = solicrec::iniciais(&recs);
+        let proxima_locrec = recs
+            .iter()
+            .filter_map(|rec| rec["loc"]["id"].as_u64())
+            .max()
+            .map_or(8100, |id| id + 1);
         Self {
             recs,
             solicitacoes,
             cobrs: cobr::iniciais(),
             agendadas: 0,
+            locrecs_livres: Vec::new(),
+            proxima_locrec,
             feitos: 0,
             criadas: 0,
             solicitadas: 0,
@@ -106,8 +118,9 @@ impl Automatico {
         }
     }
 
-    /// A recurrence as its lookup shows it, with its requests.
-    pub(super) fn com_solicitacoes(&self, rec: &Value) -> Value {
+    /// A recurrence as its lookup shows it: with its requests and, when it
+    /// has a location, its QR Code.
+    pub(super) fn consulta(&self, rec: &Value) -> Value {
         let mut rec = rec.clone();
         let solicitacoes: Vec<Value> = self
             .solicitacoes
@@ -124,7 +137,64 @@ impl Automatico {
         if !solicitacoes.is_empty() {
             rec["solicitacao"] = json!(solicitacoes);
         }
+        if let Some(loc) = rec.get("loc") {
+            rec["dadosQR"] = locrec::dados_qr(loc);
+        }
         rec
+    }
+
+    /// A location created now, free for a recurrence.
+    pub(super) fn nova_locrec(&mut self) -> Value {
+        let id = self.proxima_locrec;
+        self.proxima_locrec += 1;
+        let loc = json!({
+            "id": id,
+            "location": locrec::location(id),
+            "criacao": self.agora(),
+        });
+        self.locrecs_livres.push(loc.clone());
+        loc
+    }
+
+    /// The free location `id`, taken for a recurrence; `None` when there is
+    /// no such location or it has a recurrence.
+    pub(super) fn locrec_livre(&mut self, id: u64) -> Option<Value> {
+        let livre = self.locrecs_livres.iter().position(|loc| loc["id"] == id)?;
+        Some(self.locrecs_livres.remove(livre))
+    }
+
+    /// A location a recurrence leaves, which becomes free.
+    pub(super) fn liberar_locrec(&mut self, mut loc: Value) {
+        loc.as_object_mut().unwrap().remove("idRec");
+        self.locrecs_livres.push(loc);
+    }
+
+    /// Every location, with its recurrence, in the order of the ids.
+    pub(super) fn locrecs(&self) -> Vec<Value> {
+        let mut locs: Vec<Value> = self
+            .recs
+            .iter()
+            .filter_map(|rec| rec.get("loc").cloned())
+            .chain(self.locrecs_livres.iter().cloned())
+            .collect();
+        locs.sort_by_key(|loc| loc["id"].as_u64());
+        locs
+    }
+
+    /// The location `id`, with its recurrence.
+    pub(super) fn locrec(&self, id: u64) -> Option<Value> {
+        self.locrecs().into_iter().find(|loc| loc["id"] == id)
+    }
+
+    /// Unlinks the recurrence of the location `id`: the recurrence loses
+    /// the location and its QR Code but keeps its status, and the location
+    /// becomes free.
+    pub(super) fn desvincular_locrec(&mut self, id: u64) {
+        let Some(rec) = self.recs.iter_mut().find(|rec| rec["loc"]["id"] == id) else {
+            return;
+        };
+        let loc = rec.as_object_mut().unwrap().remove("loc").unwrap();
+        self.liberar_locrec(loc);
     }
 }
 
