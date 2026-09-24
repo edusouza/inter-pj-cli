@@ -17,6 +17,10 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 - Biblioteca: `CertificateInfo` (`ClientIdentity::certificate`, `CertificateInfo::from_pem`), com o titular e o emissor (`DistinguishedName`), o número de série e a validade do certificado, lidos do DER sem dependências novas (#53).
 - Binários para Linux ARM64 (`aarch64-unknown-linux-gnu` e `-musl`) nas releases, compilados e testados em runners ARM64 nativos; os testes também passam a rodar no Linux ARM64 a cada push (#59).
 
+### Alterado
+
+- Os erros de uso (uma opção desconhecida, um valor inválido, opções que não combinam, um argumento que falta) saem em português, como todas as outras mensagens, com as mesmas dicas (a opção ou o comando parecido com o digitado, os valores possíveis) e a linha de uso; o clap os escrevia em inglês. Os números fora da faixa dizem qual é ela. O código de saída continua 2 (#57).
+
 ### Segurança
 
 - Os exemplos da documentação, da ajuda e dos testes usam só e-mails em `empresa.example`, domínio reservado para documentação, para que um exemplo copiado não leve um Pix ou uma cobrança a um endereço de alguém; o CPF com formato de celular dos testes da ambiguidade entre os dois virou um sintético evidente. Os exemplos da especificação tinham CNPJs com dígitos verificadores válidos e e-mails em provedores reais, agora trocados por `spec/sanitizar.py`, e um teste confere CPFs, CNPJs e e-mails em todos os arquivos que o git pode versionar (#58).
