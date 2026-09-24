@@ -12,6 +12,7 @@ mod cli;
 mod commands;
 mod config;
 mod confirmacao;
+mod cores;
 mod error;
 mod files;
 mod logging;
@@ -28,6 +29,9 @@ use std::process::ExitCode;
 use clap::FromArgMatches;
 
 fn main() -> ExitCode {
+    let sem_cor = cores::sem_cor_pedido(std::env::args_os());
+    // Before the parser, whose help and errors have colors too.
+    cores::decidir(sem_cor);
     let matches = cli::command().get_matches();
     let cli = cli::Cli::from_arg_matches(&matches).unwrap_or_else(|err| err.exit());
     logging::init(cli.global.verbose);

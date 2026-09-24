@@ -21,6 +21,7 @@ doc = false
 
 [dependencies]
 inter-pj.workspace = true
+anstream.workspace = true
 chrono.workspace = true
 clap.workspace = true
 clap_complete.workspace = true

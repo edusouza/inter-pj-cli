@@ -24,6 +24,7 @@ use crate::cli::{
 use crate::commands::pix::{documento, endereco, incerta, pagina, periodo, pessoa, tabela_pix};
 use crate::commands::{Context, hoje, simulacao};
 use crate::confirmacao::{Stdio, Terminal, confirmar, descrever_ambiente, pode_confirmar};
+use crate::cores::Tom;
 use crate::error::{CliError, resultado_incerto};
 use crate::output::{self, data_br, horario_em, parse_data, secao};
 use crate::tabela::{Celula, Coluna, Tabela};
@@ -364,6 +365,18 @@ fn curto(status: &StatusCobR) -> &str {
     }
 }
 
+/// The status of a recurring charge in a table: awaiting the debit, paid
+/// or ended without it.
+fn celula_status(status: Option<&StatusCobR>) -> Celula {
+    let tom = status.and_then(|status| match status {
+        StatusCobR::Criada | StatusCobR::Ativa => Some(Tom::Pendente),
+        StatusCobR::Concluida => Some(Tom::Positivo),
+        StatusCobR::Expirada | StatusCobR::Rejeitada | StatusCobR::Cancelada => Some(Tom::Negativo),
+        _ => None,
+    });
+    Celula::situacao(status.map(curto), tom)
+}
+
 /// Whether nothing changes a charge any more.
 fn encerrada(status: &StatusCobR) -> bool {
     matches!(
@@ -439,7 +452,7 @@ where
         let _ = write!(
             texto,
             "\n\nTentativas de liquidação\n{}",
-            tabela_de_tentativas(&cobr.tentativas).texto()
+            tabela_de_tentativas(&cobr.tentativas).texto_colorido()
         );
     }
     if let Some(historico) = historico(cobr, fuso) {
@@ -449,7 +462,7 @@ where
         let _ = write!(
             texto,
             "\n\nPix recebidos\n{}",
-            tabela_pix(&cobr.pix, fuso).texto()
+            tabela_pix(&cobr.pix, fuso).texto_colorido()
         );
     }
     texto
@@ -500,7 +513,7 @@ fn tabela_de_tentativas(tentativas: &[TentativaCobR]) -> Tabela {
         tabela.linha(vec![
             Celula::texto(tentativa.data_liquidacao.as_deref().map(data_br).as_deref()),
             Celula::texto(tentativa.tipo.as_ref().map(descrever_tipo)),
-            Celula::texto(tentativa.status.as_ref().map(descrever_tentativa)),
+            celula_tentativa(tentativa.status.as_ref()),
             Celula::texto(tentativa.end_to_end_id.as_deref()),
             Celula::texto(motivo.as_deref()),
         ]);
@@ -529,6 +542,18 @@ fn descrever_tentativa(status: &StatusTentativa) -> &str {
         StatusTentativa::Expirada => "expirada",
         outro => outro.as_str(),
     }
+}
+
+fn celula_tentativa(status: Option<&StatusTentativa>) -> Celula {
+    let tom = status.and_then(|status| match status {
+        StatusTentativa::Solicitada | StatusTentativa::Agendada => Some(Tom::Pendente),
+        StatusTentativa::Paga => Some(Tom::Positivo),
+        StatusTentativa::Cancelada | StatusTentativa::Rejeitada | StatusTentativa::Expirada => {
+            Some(Tom::Negativo)
+        }
+        _ => None,
+    });
+    Celula::situacao(status.map(descrever_tentativa), tom)
 }
 
 /// The changes of status of a charge, with their times in `fuso`.
@@ -599,7 +624,7 @@ async fn listar(context: &Context, args: &CobrListarArgs) -> Result<(), CliError
             if cobrs.is_empty() {
                 texto.push_str("Nenhuma cobrança recorrente encontrada.");
             } else {
-                texto.push_str(&tabela(&cobrs).texto());
+                texto.push_str(&tabela(&cobrs).texto_colorido());
                 let _ = write!(texto, "\n\n{}", totais(&cobrs));
             }
             if let Some((numero, paginacao)) = pagina_pedida {
@@ -659,7 +684,7 @@ fn tabela(cobrs: &[CobR]) -> Tabela {
             .map(data_br);
         tabela.linha(vec![
             Celula::texto(vencimento.as_deref()),
-            Celula::texto(cobr.status.as_ref().map(curto)),
+            celula_status(cobr.status.as_ref()),
             Celula::dinheiro(cobr.valor.as_ref().and_then(|valor| valor.original)),
             Celula::texto(cobr.id_rec.as_deref()),
             Celula::texto(cobr.txid.as_deref()),
@@ -986,6 +1011,30 @@ mod tests {
 
     use super::*;
     use crate::cli::{Cli, Command, PixAutomaticoCommand};
+
+    #[test]
+    fn every_documented_status_has_a_tone() {
+        for status in StatusCobR::DOCUMENTADOS {
+            assert!(
+                matches!(celula_status(Some(status)), Celula::Situacao(..)),
+                "{status:?}"
+            );
+        }
+        for status in StatusTentativa::DOCUMENTADOS {
+            assert!(
+                matches!(celula_tentativa(Some(status)), Celula::Situacao(..)),
+                "{status:?}"
+            );
+        }
+        assert_eq!(
+            celula_status(Some(&StatusCobR::Ativa)),
+            Celula::Situacao("ativa".into(), Tom::Pendente)
+        );
+        assert_eq!(
+            celula_tentativa(Some(&StatusTentativa::Rejeitada)),
+            Celula::Situacao("rejeitada".into(), Tom::Negativo)
+        );
+    }
     use crate::commands::testes;
     use crate::confirmacao::testes::TerminalFalso;
     use crate::tabela::Separador;

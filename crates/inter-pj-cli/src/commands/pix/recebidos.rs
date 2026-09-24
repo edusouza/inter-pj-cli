@@ -8,7 +8,7 @@ use inter_pj::pix::{FiltroPixRecebidos, PixRecebido};
 use rust_decimal::Decimal;
 use serde_json::{Value, json};
 
-use super::{descrever_status_devolucao, devolvido, disponivel, em_devolucao, paginacao, periodo};
+use super::{celula_status_devolucao, devolvido, disponivel, em_devolucao, paginacao, periodo};
 use crate::cli::{Formato, PixRecebidoConsultarArgs, PixRecebidosCommand, PixRecebidosListarArgs};
 use crate::commands::Context;
 use crate::error::CliError;
@@ -69,7 +69,7 @@ async fn listar(context: &Context, args: &PixRecebidosListarArgs) -> Result<(), 
             if pix.is_empty() {
                 texto.push_str("Nenhum Pix encontrado.");
             } else {
-                texto.push_str(&tabela(&pix).texto());
+                texto.push_str(&tabela(&pix).texto_colorido());
                 let _ = write!(texto, "\n\n{}", totais(&pix));
             }
             if let Some((numero, pagina)) = pagina {
@@ -233,7 +233,7 @@ where
         let _ = write!(
             texto,
             "\n\nDevoluções\n{}",
-            tabela_devolucoes(pix, fuso).texto()
+            tabela_devolucoes(pix, fuso).texto_colorido()
         );
     }
     if restante.is_none_or(|restante| restante > Decimal::ZERO) {
@@ -272,7 +272,7 @@ where
             .map(|horario| horario_em(horario, fuso));
         let mut celulas = vec![
             Celula::texto(devolucao.id.as_deref()),
-            Celula::texto(devolucao.status.as_ref().map(descrever_status_devolucao)),
+            celula_status_devolucao(devolucao.status.as_ref()),
             Celula::dinheiro(devolucao.valor),
             Celula::texto(solicitacao.as_deref()),
         ];
