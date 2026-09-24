@@ -1,15 +1,12 @@
 //! Recurrences (`/pix/v2/rec`): the payer's authorization of the recurring
 //! charges, with the contract, the period, the frequency and the amount.
 
-use std::fmt;
-use std::str::FromStr;
-
 use chrono::NaiveDate;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value, json};
 
-use super::PixAutomatico;
+use super::{PixAutomatico, SolicRec, convenio};
 use crate::client::ApiRequest;
 use crate::documento::Documento;
 use crate::endpoint;
@@ -21,9 +18,6 @@ use crate::pix::{
 use crate::retry::RetryMode;
 use crate::serde_util::{api_enum, decimal_texto, lenient, string_serde};
 
-/// Characters of an [`IdRec`].
-pub const ID_REC_TAMANHO: usize = 29;
-
 /// Longest description of what the payments are for (`vinculo.objeto`).
 pub const MAX_OBJETO: usize = 35;
 
@@ -33,63 +27,13 @@ pub const MAX_CONTRATO: usize = 35;
 /// Longest name of the payer of a recurrence.
 pub const MAX_NOME_DEVEDOR: usize = 140;
 
-/// Longest agreement code (`convenio`) in a filter.
-pub const MAX_CONVENIO: usize = 60;
-
-/// Identifier of a recurrence (`idRec`), as the API creates it: 29 letters
-/// and digits, case sensitive (`RR1234567820240115abcdefghijk`: `R`, then
-/// `R` or `N` as retries are allowed or not, the ISPB, the date and 11
-/// characters).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct IdRec(String);
-
-impl IdRec {
-    /// Checks an identifier of a recurrence.
-    ///
-    /// # Errors
-    ///
-    /// When it is not 29 ASCII letters and digits.
-    pub fn parse(raw: &str) -> Result<Self, IdRecError> {
-        let id = raw.trim();
-        if id.len() == ID_REC_TAMANHO && id.bytes().all(|b| b.is_ascii_alphanumeric()) {
-            Ok(Self(id.to_owned()))
-        } else {
-            Err(IdRecError)
-        }
-    }
-
-    /// The identifier as sent.
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
+identificador! {
+    /// Identifier of a recurrence (`idRec`), as the API creates it: 29
+    /// letters and digits, case sensitive (`RR1234567820240115abcdefghijk`:
+    /// `R`, then `R` or `N` as retries are allowed or not, the ISPB, the
+    /// date and 11 characters).
+    IdRec, IdRecError, "idRec", "RR1234567820240115abcdefghijk"
 }
-
-impl FromStr for IdRec {
-    type Err = IdRecError;
-
-    fn from_str(raw: &str) -> Result<Self, Self::Err> {
-        Self::parse(raw)
-    }
-}
-
-impl fmt::Display for IdRec {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl Serialize for IdRec {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&self.0)
-    }
-}
-
-/// Not an identifier of a recurrence.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error(
-    "idRec inválido: são 29 letras e dígitos, como a API os cria (ex.: RR1234567820240115abcdefghijk)"
-)]
-pub struct IdRecError;
 
 api_enum! {
     /// How often the payments happen (`periodicidade`).
@@ -511,13 +455,13 @@ pub struct Rec {
     /// How the payer joined it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ativacao: Option<AtivacaoRec>,
-    /// The confirmation requests sent to the payer, as received.
+    /// The confirmation requests sent to the payer.
     #[serde(
         default,
         skip_serializing_if = "Vec::is_empty",
         deserialize_with = "lenient::vec"
     )]
-    pub solicitacao: Vec<Value>,
+    pub solicitacao: Vec<SolicRec>,
     /// The QR Code of the recurrence, in a lookup.
     #[serde(default, skip_serializing_if = "Option::is_none", rename = "dadosQR")]
     pub dados_qr: Option<DadosQrRec>,
@@ -862,7 +806,8 @@ pub struct FiltroRecs {
     pub location_presente: Option<bool>,
     /// Only those in this status.
     pub status: Option<StatusRec>,
-    /// Only those of this agreement, up to [`MAX_CONVENIO`] characters.
+    /// Only those of this agreement, up to
+    /// [`MAX_CONVENIO`](super::MAX_CONVENIO) characters.
     pub convenio: Option<String>,
 }
 
@@ -891,10 +836,8 @@ impl FiltroRecs {
         if let Some(status) = &self.status {
             query.push(("status", status.as_str().to_owned()));
         }
-        if let Some(convenio) = &self.convenio {
-            texto(convenio, "convenio", MAX_CONVENIO)
-                .map_err(|err| Error::InvalidInput(Box::new(err)))?;
-            query.push(("convenio", convenio.clone()));
+        if let Some(filtro) = &self.convenio {
+            query.push(("convenio", convenio(filtro)?));
         }
         Ok(query)
     }

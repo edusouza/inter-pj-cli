@@ -583,6 +583,55 @@ pub mod pix_automatico {
         path: "/pix/v2/rec/{idRec}",
         scopes: &[Scope::RecWrite],
     };
+
+    /// `POST /pix/v2/solicrec` — asks the payer to approve a recurrence.
+    pub const CRIAR_SOLICITACAO: Endpoint = Endpoint {
+        method: Method::Post,
+        path: "/pix/v2/solicrec",
+        scopes: &[Scope::SolicRecWrite],
+    };
+
+    /// `GET /pix/v2/solicrec/{idSolicRec}` — a confirmation request.
+    pub const CONSULTAR_SOLICITACAO: Endpoint = Endpoint {
+        method: Method::Get,
+        path: "/pix/v2/solicrec/{idSolicRec}",
+        scopes: &[Scope::SolicRecRead],
+    };
+
+    /// `PATCH /pix/v2/solicrec/{idSolicRec}` — cancels a confirmation request.
+    pub const REVISAR_SOLICITACAO: Endpoint = Endpoint {
+        method: Method::Patch,
+        path: "/pix/v2/solicrec/{idSolicRec}",
+        scopes: &[Scope::SolicRecWrite],
+    };
+
+    /// `POST /pix/v2/locrec` — creates a location for the QR Code of a recurrence.
+    pub const CRIAR_LOCREC: Endpoint = Endpoint {
+        method: Method::Post,
+        path: "/pix/v2/locrec",
+        scopes: &[Scope::PayloadLocationRecWrite],
+    };
+
+    /// `GET /pix/v2/locrec` — locations of recurrences of a period, paginated.
+    pub const LISTAR_LOCRECS: Endpoint = Endpoint {
+        method: Method::Get,
+        path: "/pix/v2/locrec",
+        scopes: &[Scope::PayloadLocationRecRead],
+    };
+
+    /// `GET /pix/v2/locrec/{id}` — a location of recurrences.
+    pub const CONSULTAR_LOCREC: Endpoint = Endpoint {
+        method: Method::Get,
+        path: "/pix/v2/locrec/{id}",
+        scopes: &[Scope::PayloadLocationRecRead],
+    };
+
+    /// `DELETE /pix/v2/locrec/{id}/idRec` — unlinks the recurrence from a location.
+    pub const DESVINCULAR_LOCREC: Endpoint = Endpoint {
+        method: Method::Delete,
+        path: "/pix/v2/locrec/{id}/idRec",
+        scopes: &[Scope::PayloadLocationRecWrite],
+    };
 }
 
 /// Every operation implemented by this crate.
@@ -655,4 +704,11 @@ pub const ALL: &[Endpoint] = &[
     pix_automatico::LISTAR_RECS,
     pix_automatico::CONSULTAR_REC,
     pix_automatico::REVISAR_REC,
+    pix_automatico::CRIAR_SOLICITACAO,
+    pix_automatico::CONSULTAR_SOLICITACAO,
+    pix_automatico::REVISAR_SOLICITACAO,
+    pix_automatico::CRIAR_LOCREC,
+    pix_automatico::LISTAR_LOCRECS,
+    pix_automatico::CONSULTAR_LOCREC,
+    pix_automatico::DESVINCULAR_LOCREC,
 ];
