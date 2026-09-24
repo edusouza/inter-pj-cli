@@ -2,6 +2,7 @@
 //! their recurring charges.
 
 mod cobr;
+mod locrec;
 mod rec;
 mod solicitacao;
 
@@ -22,6 +23,7 @@ pub(super) async fn run(context: &Context, command: PixAutomaticoCommand) -> Res
         PixAutomaticoCommand::Rec(command) => rec::run(context, command).await,
         PixAutomaticoCommand::Solicitacao(command) => solicitacao::run(context, command).await,
         PixAutomaticoCommand::Cobr(command) => cobr::run(context, command).await,
+        PixAutomaticoCommand::Locrec(command) => locrec::run(context, command).await,
     }
 }
 

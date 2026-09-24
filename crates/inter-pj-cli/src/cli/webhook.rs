@@ -32,6 +32,20 @@ pub(crate) enum WebhookCommand {
         subcommand_value_name = "COMANDO"
     )]
     Pix(WebhookPixCommand),
+    /// Webhook do Pix Automático para as recorrências: aprovadas, rejeitadas, expiradas ou canceladas
+    #[command(
+        subcommand,
+        subcommand_help_heading = "Comandos",
+        subcommand_value_name = "COMANDO"
+    )]
+    Recorrencia(WebhookPixAutomaticoCommand),
+    /// Webhook do Pix Automático para as cobranças recorrentes: agendadas, pagas, rejeitadas ou canceladas
+    #[command(
+        subcommand,
+        subcommand_help_heading = "Comandos",
+        subcommand_value_name = "COMANDO"
+    )]
+    CobrancaRecorrente(WebhookPixAutomaticoCommand),
 }
 
 #[derive(Debug, Subcommand)]
@@ -74,6 +88,16 @@ pub(crate) enum WebhookPixCommand {
     Callbacks(WebhookPixCallbacksArgs),
     /// Pede ao Inter que envie de novo os callbacks de cobranças Pix de uma chave, pelos seus txids
     Reenviar(WebhookPixReenviarArgs),
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum WebhookPixAutomaticoCommand {
+    /// Cadastra ou troca o webhook, após mostrar o atual e pedir confirmação
+    Cadastrar(WebhookCadastroArgs),
+    /// Mostra o webhook
+    Consultar,
+    /// Exclui o webhook, após mostrá-lo e pedir confirmação
+    Excluir(WebhookExclusaoArgs),
 }
 
 /// The kind of a webhook of the Banking API.

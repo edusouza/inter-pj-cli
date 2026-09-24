@@ -1,0 +1,397 @@
+//! `inter-pj pix-automatico locrec criar|listar|consultar|desvincular`: the
+//! locations of recurrences, addresses of the QR Codes with which the payer
+//! approves a recurrence.
+
+use std::fmt::Write as _;
+
+use chrono::{Local, TimeZone};
+use inter_pj::Environment;
+use inter_pj::pix_automatico::{FiltroLocsRec, LocationRec};
+use serde_json::json;
+
+use crate::cli::{
+    Formato, LocrecCommand, LocrecConsultarArgs, LocrecDesvincularArgs, LocrecListarArgs,
+};
+use crate::commands::Context;
+use crate::commands::pix::{pagina, periodo};
+use crate::confirmacao::{Stdio, Terminal, confirmar, descrever_ambiente, pode_confirmar};
+use crate::error::CliError;
+use crate::output::{self, horario_em, horario_local, secao};
+use crate::tabela::{Celula, Coluna, Tabela};
+
+pub(super) async fn run(context: &Context, command: LocrecCommand) -> Result<(), CliError> {
+    match command {
+        LocrecCommand::Criar(_) => criar(context).await,
+        LocrecCommand::Listar(args) => listar(context, &args).await,
+        LocrecCommand::Consultar(args) => consultar(context, &args).await,
+        LocrecCommand::Desvincular(args) => desvincular(context, &args, &mut Stdio).await,
+    }
+}
+
+async fn criar(context: &Context) -> Result<(), CliError> {
+    let settings = context.settings()?;
+    let client = context.client(&settings)?;
+    let loc = client.pix_automatico().criar_locrec().await?;
+    match context.formato() {
+        Formato::Json => output::print_json(&loc),
+        // `commands::run` refuses csv for this command.
+        Formato::Texto | Formato::Csv => {
+            let mut texto = format!("Location criada.\n\n{}", render(&loc));
+            if let Some(id) = loc.id {
+                let _ = write!(
+                    texto,
+                    "\n\nUse com: inter-pj pix-automatico rec criar ... --loc {id}"
+                );
+            }
+            output::print(&texto)
+        }
+    }
+}
+
+async fn listar(context: &Context, args: &LocrecListarArgs) -> Result<(), CliError> {
+    let mut filtro = FiltroLocsRec::new(periodo(args.periodo)?);
+    filtro.id_rec_presente = match (args.com_recorrencia, args.sem_recorrencia) {
+        (true, _) => Some(true),
+        (_, true) => Some(false),
+        _ => None,
+    };
+    filtro.convenio.clone_from(&args.convenio);
+    let settings = context.settings()?;
+    let client = context.client(&settings)?;
+    let (locs, pagina_pedida) = match args.pagina {
+        Some(numero) => {
+            let mut resposta = client
+                .pix_automatico()
+                .listar_locrecs(&filtro, numero, args.itens_por_pagina)
+                .await?;
+            if context.formato() == Formato::Json {
+                return output::print_json(&resposta);
+            }
+            let locs = std::mem::take(&mut resposta.loc);
+            let paginacao = resposta
+                .parametros
+                .and_then(|parametros| parametros.paginacao)
+                .unwrap_or_default();
+            (locs, Some((numero, paginacao)))
+        }
+        None => (
+            client
+                .pix_automatico()
+                .listar_todas_locrecs(&filtro)
+                .await?,
+            None,
+        ),
+    };
+    match context.formato() {
+        Formato::Json => output::print_json(&json!({ "loc": locs })),
+        Formato::Csv => output::print_raw(&csv(&locs).csv(context.separador())),
+        Formato::Texto => {
+            context.warn_if_sandbox(&settings);
+            let mut texto = format!("{}\n\n", titulo(&filtro));
+            if locs.is_empty() {
+                texto.push_str("Nenhuma location encontrada.");
+            } else {
+                texto.push_str(&tabela(&locs).texto());
+                let vinculadas = locs.iter().filter(|loc| loc.id_rec.is_some()).count();
+                let quantas = match locs.len() {
+                    1 => "1 location".to_owned(),
+                    n => format!("{n} locations"),
+                };
+                let _ = write!(texto, "\n\n{quantas} · {vinculadas} com recorrência");
+            }
+            if let Some((numero, paginacao)) = pagina_pedida {
+                texto.push_str(&pagina(numero, paginacao, locs.len(), "locations"));
+            }
+            output::print(&texto)
+        }
+    }
+}
+
+/// `Locations de recorrências criadas de 01/09/2026 00:00 a 30/09/2026
+/// 23:59`, and the filters.
+fn titulo(filtro: &FiltroLocsRec) -> String {
+    let formato = "%d/%m/%Y %H:%M";
+    let mut texto = format!(
+        "Locations de recorrências criadas de {} a {}",
+        filtro.periodo.inicio.format(formato),
+        filtro.periodo.fim.format(formato)
+    );
+    let mut filtros = Vec::new();
+    match filtro.id_rec_presente {
+        Some(true) => filtros.push("com recorrência".to_owned()),
+        Some(false) => filtros.push("sem recorrência".to_owned()),
+        None => {}
+    }
+    if let Some(convenio) = &filtro.convenio {
+        filtros.push(format!("convênio {convenio}"));
+    }
+    if !filtros.is_empty() {
+        let _ = write!(texto, " ({})", filtros.join(", "));
+    }
+    texto
+}
+
+fn tabela(locs: &[LocationRec]) -> Tabela {
+    let mut tabela = Tabela::new(vec![
+        Coluna::texto("Criada em", ""),
+        Coluna::valor("id", ""),
+        Coluna::texto("Recorrência", ""),
+        Coluna::texto("Location", ""),
+    ]);
+    for loc in locs {
+        tabela.linha(vec![
+            Celula::texto(loc.criacao.as_deref().map(horario_local).as_deref()),
+            Celula::texto(loc.id.map(|id| id.to_string()).as_deref()),
+            Celula::texto(loc.id_rec.as_deref()),
+            Celula::texto(loc.location.as_deref()),
+        ]);
+    }
+    tabela
+}
+
+/// The fields of the API.
+fn csv(locs: &[LocationRec]) -> Tabela {
+    let texto = |campo: &'static str| Coluna::texto(campo, campo);
+    let mut tabela = Tabela::new(vec![
+        texto("id"),
+        texto("idRec"),
+        texto("criacao"),
+        texto("location"),
+    ]);
+    for loc in locs {
+        tabela.linha(vec![
+            Celula::texto(loc.id.map(|id| id.to_string()).as_deref()),
+            Celula::texto(loc.id_rec.as_deref()),
+            Celula::texto(loc.criacao.as_deref()),
+            Celula::texto(loc.location.as_deref()),
+        ]);
+    }
+    tabela
+}
+
+async fn consultar(context: &Context, args: &LocrecConsultarArgs) -> Result<(), CliError> {
+    let settings = context.settings()?;
+    let client = context.client(&settings)?;
+    let loc = client.pix_automatico().consultar_locrec(args.id).await?;
+    match context.formato() {
+        Formato::Json => output::print_json(&loc),
+        // `commands::run` refuses csv for this command.
+        Formato::Texto | Formato::Csv => {
+            context.warn_if_sandbox(&settings);
+            output::print(&render(&loc))
+        }
+    }
+}
+
+async fn desvincular(
+    context: &Context,
+    args: &LocrecDesvincularArgs,
+    terminal: &mut dyn Terminal,
+) -> Result<(), CliError> {
+    // Nothing is looked up when no one could confirm.
+    pode_confirmar(terminal, args.sim)?;
+    let settings = context.settings()?;
+    let client = context.client(&settings)?;
+    let atual = client.pix_automatico().consultar_locrec(args.id).await?;
+    let Some(id_rec) = atual.id_rec.as_deref() else {
+        return Err(CliError::Usage(format!(
+            "a location {} não tem recorrência vinculada: não há o que desvincular",
+            args.id
+        )));
+    };
+    let ambiente = settings.ambiente.as_ref().map(|setting| setting.value);
+    eprintln!("{}", resumo(&atual, id_rec, ambiente));
+    confirmar(terminal, args.sim, "Desvincular a recorrência?")?;
+    let loc = client.pix_automatico().desvincular_locrec(args.id).await?;
+    match context.formato() {
+        Formato::Json => output::print_json(&loc),
+        // `commands::run` refuses csv for this command.
+        Formato::Texto | Formato::Csv => output::print(&format!(
+            "Recorrência {id_rec} desvinculada: a location está livre.\n\n{}",
+            render(&loc)
+        )),
+    }
+}
+
+/// The location and the recurrence about to lose it.
+fn resumo(loc: &LocationRec, id_rec: &str, ambiente: Option<Environment>) -> String {
+    let mut linhas = vec![("Ambiente", descrever_ambiente(ambiente))];
+    if let Some(location) = &loc.location {
+        linhas.push(("Location", location.clone()));
+    }
+    linhas.push(("Recorrência", id_rec.to_owned()));
+    let id = loc.id.map(|id| id.to_string()).unwrap_or_default();
+    let mut texto = secao(&format!("Location {id} a desvincular"), &linhas);
+    let _ = write!(
+        texto,
+        "\naviso: o QR Code desta location deixa de levar à recorrência {id_rec}, que continua como está"
+    );
+    texto
+}
+
+/// A location, with the time in the local time zone.
+fn render(loc: &LocationRec) -> String {
+    render_em(loc, &Local)
+}
+
+fn render_em<Tz: TimeZone>(loc: &LocationRec, fuso: &Tz) -> String
+where
+    Tz::Offset: std::fmt::Display,
+{
+    let mut linhas = Vec::new();
+    if let Some(criacao) = &loc.criacao {
+        linhas.push(("Criada em", horario_em(criacao, fuso)));
+    }
+    if let Some(location) = &loc.location {
+        linhas.push(("Location", location.clone()));
+    }
+    linhas.push((
+        "Recorrência",
+        loc.id_rec.clone().unwrap_or_else(|| "nenhuma".to_owned()),
+    ));
+    let id = loc.id.map(|id| id.to_string()).unwrap_or_default();
+    secao(format!("Location {id}").trim(), &linhas)
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::{DateTime, FixedOffset};
+    use serde_json::Value;
+    use wiremock::matchers::{any, method, path};
+    use wiremock::{Mock, ResponseTemplate};
+
+    use super::*;
+    use crate::cli::{Command, PixAutomaticoCommand};
+    use crate::commands::testes;
+    use crate::confirmacao::testes::TerminalFalso;
+
+    const ID_REC: &str = "RR1234567820260924abcdefghijk";
+
+    fn loc(id_rec: Option<&str>) -> LocationRec {
+        serde_json::from_value(json!({
+            "id": 108,
+            "location": "pix.example.com/qr/v2/rec/2353c790eefb11eaadc10242ac120002",
+            "criacao": "2026-09-24T13:10:00.000Z",
+            "idRec": id_rec
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn a_location_in_detail() {
+        let brasilia = FixedOffset::west_opt(3 * 3600).unwrap();
+        assert_eq!(
+            render_em(&loc(Some(ID_REC)), &brasilia),
+            format!(
+                "\
+Location 108
+  Criada em    24/09/2026 10:10:00
+  Location     pix.example.com/qr/v2/rec/2353c790eefb11eaadc10242ac120002
+  Recorrência  {ID_REC}"
+            )
+        );
+        assert!(render_em(&loc(None), &brasilia).ends_with("Recorrência  nenhuma"));
+        assert_eq!(
+            resumo(&loc(Some(ID_REC)), ID_REC, Some(Environment::Sandbox)),
+            format!(
+                "\
+Location 108 a desvincular
+  Ambiente     sandbox (dados fictícios)
+  Location     pix.example.com/qr/v2/rec/2353c790eefb11eaadc10242ac120002
+  Recorrência  {ID_REC}
+aviso: o QR Code desta location deixa de levar à recorrência {ID_REC}, que continua como está"
+            )
+        );
+    }
+
+    #[test]
+    fn listings_use_the_api_names_in_csv() {
+        let locs = [loc(Some(ID_REC)), loc(None)];
+        let csv = csv(&locs).csv(crate::tabela::Separador::Virgula);
+        assert!(
+            csv.starts_with(&format!(
+                "id,idRec,criacao,location\r\n108,{ID_REC},2026-09-24T13:10:00.000Z,pix.example.com/"
+            )),
+            "{csv}"
+        );
+        assert!(csv.contains("\r\n108,,2026-09-24T13:10:00.000Z,"), "{csv}");
+        let momento = |texto| DateTime::parse_from_rfc3339(texto).unwrap();
+        let mut filtro = FiltroLocsRec::new(
+            inter_pj::pix::PeriodoPix::new(
+                momento("2026-09-01T00:00:00-03:00"),
+                momento("2026-09-30T23:59:59-03:00"),
+            )
+            .unwrap(),
+        );
+        filtro.id_rec_presente = Some(false);
+        filtro.convenio = Some("convenio-01".to_owned());
+        assert_eq!(
+            titulo(&filtro),
+            "Locations de recorrências criadas de 01/09/2026 00:00 a 30/09/2026 23:59 (sem recorrência, convênio convenio-01)"
+        );
+    }
+
+    // --- the commands against a mock API ------------------------------------
+
+    async fn cenario(args: &[&str]) -> (testes::Cenario, LocrecCommand) {
+        let mut todos = vec!["pix-automatico", "locrec"];
+        todos.extend_from_slice(args);
+        match testes::cenario(&todos, "payloadlocationrec.write payloadlocationrec.read").await {
+            (cenario, Command::PixAutomatico(PixAutomaticoCommand::Locrec(comando))) => {
+                (cenario, comando)
+            }
+            (_, outro) => panic!("{outro:?}"),
+        }
+    }
+
+    async fn apenas_a_consulta(cenario: &testes::Cenario, id_rec: Option<&str>) {
+        let atual: Value = serde_json::to_value(loc(id_rec)).unwrap();
+        Mock::given(method("GET"))
+            .and(path("/pix/v2/locrec/108"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(atual))
+            .expect(1)
+            .mount(&cenario.server)
+            .await;
+        Mock::given(any())
+            .respond_with(ResponseTemplate::new(500))
+            .expect(0)
+            .mount(&cenario.server)
+            .await;
+    }
+
+    fn desvincular_args(comando: LocrecCommand) -> LocrecDesvincularArgs {
+        match comando {
+            LocrecCommand::Desvincular(args) => args,
+            outro => panic!("{outro:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_declined_unlink_only_looks_the_location_up() {
+        let (cenario, comando) = cenario(&["desvincular", "108"]).await;
+        apenas_a_consulta(&cenario, Some(ID_REC)).await;
+        let mut terminal = TerminalFalso::respondendo("n\n");
+        let err = desvincular(&cenario.context, &desvincular_args(comando), &mut terminal)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CliError::Cancelado), "{err}");
+        assert_eq!(terminal.perguntas, ["Desvincular a recorrência? [s/N] "]);
+    }
+
+    #[tokio::test]
+    async fn a_free_location_has_nothing_to_unlink() {
+        let (cenario, comando) = cenario(&["desvincular", "108", "--sim"]).await;
+        apenas_a_consulta(&cenario, None).await;
+        let err = desvincular(
+            &cenario.context,
+            &desvincular_args(comando),
+            &mut TerminalFalso::respondendo(""),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "a location 108 não tem recorrência vinculada: não há o que desvincular"
+        );
+    }
+}
