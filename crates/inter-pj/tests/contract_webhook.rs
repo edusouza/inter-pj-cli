@@ -12,7 +12,7 @@ use inter_pj::webhook::{
     PaginaCallbacks, ReenvioCallbacks, TipoWebhookBanking, Webhook, WebhookUrl,
 };
 use serde_json::Value;
-use spec::{example_for_schema, keys, operation, property_names, resolve};
+use spec::{example_for_schema, keys, operation, parametro, property_names, resolve};
 
 /// The schema of the body of an operation.
 fn corpo(endpoint: &Endpoint) -> &'static Value {
@@ -22,17 +22,6 @@ fn corpo(endpoint: &Endpoint) -> &'static Value {
 /// The schema of the answer `status` of an operation.
 fn resposta(endpoint: &Endpoint, status: &str) -> &'static Value {
     resolve(&operation(endpoint)["responses"][status]["content"]["application/json"]["schema"])
-}
-
-/// A parameter of an operation.
-fn parametro(endpoint: &Endpoint, nome: &str) -> &'static Value {
-    operation(endpoint)["parameters"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(resolve)
-        .find(|parametro| parametro["name"] == nome)
-        .unwrap_or_else(|| panic!("{endpoint}: parâmetro {nome}"))
 }
 
 fn nomes(schema: &Value) -> BTreeSet<String> {

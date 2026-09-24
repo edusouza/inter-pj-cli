@@ -6,6 +6,10 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+### Adicionado
+
+- Biblioteca: Pix Automático (`InterClient::pix_automatico`), cobranças recorrentes que o pagador autoriza uma vez no seu banco. As recorrências (`RecSolicitada`) têm o contrato e o devedor, a data do primeiro pagamento e a do último, a periodicidade, o valor (fixo, mínimo ou livre) e a política de retentativas, conferidos antes do envio com o campo como a API o nomeia; são criadas (`criar_rec`), listadas por período com filtros de devedor, status, location e convênio (`listar_recs`, `listar_todas_recs`), consultadas pelo `IdRec`, com o QR Code composto de uma cobrança imediata ou com vencimento quando se informa o seu txid (`consultar_rec`), e alteradas ou canceladas (`revisar_rec`). As respostas são lidas como os exemplos da documentação as mostram, com o status das atualizações em `nome` e CPF e CNPJ como números (#46).
+
 ## [0.7.0] - 2026-09-24
 
 Webhooks e callbacks: os endereços que o Inter chama quando algo acontece na conta, nas APIs Banking, de Cobrança e Pix, com o histórico das tentativas de envio e o reenvio dos callbacks.
