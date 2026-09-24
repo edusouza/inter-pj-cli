@@ -907,8 +907,8 @@ fn repository_contains_no_real_looking_personal_data() {
         problems.is_empty(),
         "use os dados sintéticos (CPF {}, CNPJ {} ou {}, e-mails em empresa.example):\n{problems:#?}",
         ALLOWED_CPFS[2],
-        ALLOWED_CNPJS[1],
         ALLOWED_CNPJS[0],
+        ALLOWED_CNPJS[1],
     );
 }
 
@@ -981,9 +981,10 @@ fn looks_like_cpf(text: &str) -> bool {
 
 /// Obviously synthetic documents with valid check digits: a sequence, a
 /// phone number of zeros (for the ambiguity between phones and CPFs) and
-/// the CPF of the examples; the CNPJs of the examples.
+/// the CPF of the examples; the CNPJs of the examples, the last one that
+/// of the fictitious company of the guides.
 const ALLOWED_CPFS: [&str; 3] = ["01234567890", "11900000083", "12345678909"];
-const ALLOWED_CNPJS: [&str; 2] = ["11222333000181", "12345678000195"];
+const ALLOWED_CNPJS: [&str; 3] = ["12345678000195", "11222333000181", "11444777000161"];
 
 /// What in `text` looks like personal data: CPFs and CNPJs with valid
 /// check digits, formatted or not, other than the synthetic ones, and
