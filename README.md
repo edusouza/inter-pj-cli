@@ -908,6 +908,33 @@ Cobrança recorrente criada: o banco do pagador agenda o débito para o vencimen
 
 As **locations de recorrências** são os endereços dos QR Codes com que o pagador aprova uma recorrência. `pix-automatico locrec criar` cria uma, para usar com `rec criar --loc`; `locrec listar` mostra as de um período (padrão: últimos 30 dias), com os filtros `--com-recorrencia`, `--sem-recorrencia` e `--convenio`, em texto, JSON ou CSV; `locrec consultar <id>` mostra uma e a recorrência vinculada; e `locrec desvincular <id>`, depois de mostrá-la e pedir confirmação, a solta da recorrência: o QR Code deixa de levar a ela, que continua como está. Os escopos são `payloadlocationrec.write` e `payloadlocationrec.read`. As mudanças das recorrências e das cobranças recorrentes chegam pelos webhooks do Pix Automático (veja [Webhooks](#webhooks)).
 
+No **sandbox**, `pix-automatico sandbox` faz o papel do pagador e do banco dele, para testar o fluxo inteiro:
+
+```console
+$ inter-pj pix-automatico sandbox status-rec RR1234567820260924abcdefghijk --status aprovada
+Recorrência RR1234567820260924abcdefghijk aprovada no sandbox.
+
+Confira com: inter-pj pix-automatico rec consultar RR1234567820260924abcdefghijk
+
+$ inter-pj pix-automatico cobr criar --rec RR1234567820260924abcdefghijk --valor 149,90 \
+    --vencimento 2026-10-10 --conta 1234567 --txid 7978c0c97ea847e78e8849634473c1f1 --sim
+$ inter-pj pix-automatico sandbox pagar-cobr 7978c0c97ea847e78e8849634473c1f1 --chave pix@empresa.example
+Pago no sandbox: R$ 149,90.
+endToEndId  E12345678202610101300abcdef12345
+
+Confira com: inter-pj pix-automatico cobr consultar 7978c0c97ea847e78e8849634473c1f1
+```
+
+| Comando | O que simula |
+| --- | --- |
+| `sandbox status-rec <idRec> --status aprovada\|cancelada [--razao ...]` | o pagador aprova ou cancela a recorrência (o motivo vai só com o cancelamento) |
+| `sandbox status-solicitacao <idRec> --status aceita\|rejeitada` | o pagador responde à solicitação de confirmação, que o sandbox identifica pela recorrência |
+| `sandbox status-cobr <txid> [--razao ...]` | o banco do pagador cancela a cobrança recorrente (padrão: sem motivo específico) |
+| `sandbox pagar-cobr <txid> --chave ...` | o débito da cobrança recorrente, por padrão com o valor dela e pelo devedor da recorrência (`--valor`, `--documento`) |
+| `sandbox pagar-qrcode --copia-e-cola ...` | o pagamento de um QR Code, também o composto de uma cobrança imediata com uma recorrência |
+
+Em produção, todos são recusados antes de qualquer requisição.
+
 ### Webhooks
 
 Webhooks são os endereços que o Inter chama quando algo acontece na conta. Cada API tem os seus:
