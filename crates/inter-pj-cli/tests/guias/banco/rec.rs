@@ -3,7 +3,8 @@
 //! Fulano de Tal's basic plan, approved in September by a confirmation
 //! request, Cliente Exemplo Ltda's support contract, which the payer
 //! rejected, and Beltrana de Tal's monthly fee, created with the wrong
-//! amount and waiting for her approval. A recurrence created is waiting for
+//! amount and waiting for her approval. A lookup shows the requests of the
+//! recurrence ([`solicrec`](super::solicrec)). A recurrence created is waiting for
 //! the payer; the answer to the creation of Cliente Exemplo Ltda's second
 //! contract gets lost, though the recurrence is created. A change of the
 //! first payment or of the payer's name is made at once, and so is a
@@ -47,11 +48,6 @@ pub(super) fn iniciais() -> Vec<Value> {
             {"status": "APROVADA", "data": "2026-09-02T11:42:17.000Z"},
         ],
         "ativacao": {"tipoJornada": "JORNADA_1"},
-        "solicitacao": [{
-            "idSolicRec": "SC1234567820260901h3Rw8Kd5Nb2",
-            "status": "ACEITA",
-            "calendario": {"dataExpiracaoSolicitacao": "2026-09-08T02:59:59.000Z"},
-        }],
     });
     let cliente = json!({
         "idRec": "RN1234567820260910m2Hc6Vy8Qd1",
@@ -77,11 +73,6 @@ pub(super) fn iniciais() -> Vec<Value> {
             "codigo": "AP14",
             "descricao": "Rejeitada pelo usuário pagador, sem interesse no Pix Automático para o recebedor",
         }},
-        "solicitacao": [{
-            "idSolicRec": "SC1234567820260910r6Gt1Xm4Hs8",
-            "status": "REJEITADA",
-            "calendario": {"dataExpiracaoSolicitacao": "2026-09-17T02:59:59.000Z"},
-        }],
     });
     let beltrana = json!({
         "idRec": "RR1234567820260920p5Jx3Ls7Gv0",
@@ -114,8 +105,15 @@ pub(super) async fn montar(servidor: &MockServer, automatico: &Arc<Mutex<Automat
     let consulta = Arc::clone(automatico);
     requisicao("GET", path_regex(r"^/pix/v2/rec/[A-Za-z0-9]+$"))
         .respond_with(move |request: &Request| {
-            match achar(&mut consulta.lock().unwrap(), id(request)) {
-                Some(rec) => ResponseTemplate::new(200).set_body_json(&*rec),
+            let mut automatico = consulta.lock().unwrap();
+            automatico.andamento();
+            let rec = automatico
+                .recs
+                .iter()
+                .find(|rec| rec["idRec"] == id(request))
+                .map(|rec| automatico.com_solicitacoes(rec));
+            match rec {
+                Some(rec) => ResponseTemplate::new(200).set_body_json(rec),
                 None => nao_encontrada(),
             }
         })
