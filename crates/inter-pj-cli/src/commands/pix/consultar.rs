@@ -84,7 +84,7 @@ async fn aguardar(
             let texto = atual
                 .as_ref()
                 .map_or_else(|| "sem status".to_owned(), descrever);
-            eprintln!("aguardando: {texto}");
+            output::eprint_linha(&format!("aguardando: {texto}"));
             anterior = atual;
         }
         tokio::time::sleep(intervalo.min(prazo - agora)).await;

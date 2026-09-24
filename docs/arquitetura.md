@@ -165,7 +165,11 @@ A paginação tradicional da API alcança apenas as primeiras 10.000 transaçõe
 
 ### CSV para planilhas
 
-O CSV segue a RFC 4180 (cabeçalho, CRLF, aspas quando necessário), usa os códigos e nomes de campo da API e valores com sinal (saídas negativas), para somar direto na planilha. Com `--separador ';'` o arquivo sai no padrão do Excel em português (vírgula decimal e BOM UTF-8). Descrições vêm de terceiros (por exemplo, a mensagem de um Pix recebido); textos que começam com `=`, `+`, `-` ou `@` recebem um apóstrofo para não virarem fórmulas (*CSV injection*).
+O CSV segue a RFC 4180 (cabeçalho, CRLF, aspas quando necessário), usa os códigos e nomes de campo da API e valores com sinal (saídas negativas), para somar direto na planilha. Com `--separador ';'` o arquivo sai no padrão do Excel em português (vírgula decimal e BOM UTF-8). Descrições vêm de terceiros (por exemplo, a mensagem de um Pix recebido); textos que começam com `=`, `+`, `-` ou `@` recebem um apóstrofo para não virarem fórmulas (*CSV injection*), e também esses caracteres depois de `,`, `;`, tabulação ou quebra de linha dentro do texto, porque o Excel em português separa um `.csv` por `;` e começaria uma célula ali. Num arquivo, o CSV traz os textos como vieram; no terminal (`output::print_csv`), eles passam pelo filtro da saída em texto, sem o BOM.
+
+### O que chega ao terminal
+
+`output::perigoso` define o que um texto de terceiros nunca leva ao terminal: os caracteres de controle e os de formatação que invertem ou escondem texto (marcas, *embeddings*, *overrides* e *isolates* bidirecionais, espaços de largura zero, o BOM, os separadores de linha); os *joiners* das sequências de emoji ficam. `limpo` troca todos eles por `�` numa linha; `sem_controle` guarda as quebras de linha de um texto feito de linhas. Tudo o que sai em stdout passa por `print` (filtro sobre o texto todo), `print_json` (os mesmos caracteres escapados como `\u`, sem mudar os dados) ou `print_csv`; tudo o que sai em stderr, por `eprint`, `eprint_linha` (uma linha só, para avisos e progresso) ou `error::report`, que recua as linhas seguintes de um erro para que só as linhas da CLI comecem na margem. A biblioteca põe numa linha os textos de um erro da API (`Problem`), e um erro do parser que cite um valor com esses caracteres (um código colado) sai sem cores, filtrado.
 
 ### Valores monetários exatos
 

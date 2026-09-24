@@ -60,7 +60,7 @@ async fn criar(
         Some(context.client(&settings)?)
     };
     let ambiente = settings.ambiente.as_ref().map(|setting| setting.value);
-    eprintln!("{}", resumo(&cob, &txid, ambiente));
+    output::eprint(&resumo(&cob, &txid, ambiente));
 
     let Some(client) = client else {
         return simulacao::mostrar_em(
@@ -197,7 +197,7 @@ async fn revisar(
     let atual = client.pix().consultar_cob(&args.txid).await?;
     alteravel(atual.status.as_ref())?;
     let ambiente = settings.ambiente.as_ref().map(|setting| setting.value);
-    eprintln!("{}", resumo_revisao(&atual, &revisao, ambiente));
+    output::eprint(&resumo_revisao(&atual, &revisao, ambiente));
     let pergunta = if revisao.remover {
         "Remover a cobrança?"
     } else {
@@ -465,7 +465,7 @@ async fn listar(context: &Context, args: &PixCobListarArgs) -> Result<(), CliErr
     };
     match context.formato() {
         Formato::Json => output::print_json(&json!({ "cobs": cobs })),
-        Formato::Csv => output::print_raw(&csv(&cobs).csv(context.separador())),
+        Formato::Csv => output::print_csv(&csv(&cobs), context.separador()),
         Formato::Texto => {
             context.warn_if_sandbox(&settings);
             let mut texto = format!("{}\n\n", filtros.titulo("Cobranças Pix imediatas", &[]));

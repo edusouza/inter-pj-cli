@@ -32,8 +32,10 @@ fn main() -> ExitCode {
     let sem_cor = cores::sem_cor_pedido(std::env::args_os());
     // Before the parser, whose help and errors have colors too.
     cores::decidir(sem_cor);
-    let matches = cli::command().get_matches();
-    let cli = cli::Cli::from_arg_matches(&matches).unwrap_or_else(|err| err.exit());
+    let matches = cli::command()
+        .try_get_matches()
+        .unwrap_or_else(|err| sair(&err));
+    let cli = cli::Cli::from_arg_matches(&matches).unwrap_or_else(|err| sair(&err));
     logging::init(cli.global.verbose);
 
     let result = tokio::runtime::Builder::new_current_thread()
@@ -49,4 +51,16 @@ fn main() -> ExitCode {
             ExitCode::from(err.exit_code())
         }
     }
+}
+
+/// Ends on an error of the parser, as clap would. A value it quotes (a
+/// pasted copia e cola, a barcode) may carry escape sequences: then the
+/// message goes without colors, cleaned like every other.
+fn sair(err: &clap::Error) -> ! {
+    let texto = err.render().to_string();
+    if err.use_stderr() && texto.chars().any(|c| output::perigoso(c) && c != '\n') {
+        eprint!("{}", output::sem_controle(&texto));
+        std::process::exit(err.exit_code());
+    }
+    err.exit()
 }

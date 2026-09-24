@@ -62,7 +62,7 @@ async fn listar(context: &Context, args: &PixRecebidosListarArgs) -> Result<(), 
     };
     match context.formato() {
         Formato::Json => output::print_json(&json!({ "pix": pix })),
-        Formato::Csv => output::print_raw(&csv(&pix).csv(context.separador())),
+        Formato::Csv => output::print_csv(&csv(&pix), context.separador()),
         Formato::Texto => {
             context.warn_if_sandbox(&settings);
             let mut texto = format!("{}\n\n", titulo(&filtro));

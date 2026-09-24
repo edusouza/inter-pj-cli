@@ -41,7 +41,7 @@ pub(super) async fn run(
         .unwrap_or_else(IdIdempotente::novo);
     let ambiente = settings.ambiente.as_ref().map(|setting| setting.value);
     let brcode = args.copia_e_cola.as_ref().map(|codigo| &codigo.brcode);
-    eprintln!("{}", resumo(&pagamento, brcode, ambiente, &id));
+    output::eprint(&resumo(&pagamento, brcode, ambiente, &id));
 
     let Some(client) = client else {
         return simulacao(context, &settings, &pagamento, &id);
@@ -354,7 +354,7 @@ fn render(solicitacao: &SolicitacaoPix, id: &IdIdempotente) -> String {
             None => "Pix agendado.".to_owned(),
         },
         Some(TipoRetornoPix::Aprovacao) => "Pix aguardando aprovação no Internet Banking (Aprovar > Gestão de Aprovações): só será enviado depois de aprovado.".to_owned(),
-        Some(outro) => format!("Pix registrado (retorno da API: {outro})."),
+        Some(outro) => format!("Pix registrado (retorno da API: {}).", limpo(&outro.to_string())),
         None => "Pix registrado.".to_owned(),
     };
     let mut linhas = Vec::new();
@@ -372,7 +372,8 @@ fn render(solicitacao: &SolicitacaoPix, id: &IdIdempotente) -> String {
     if let Some(codigo) = &solicitacao.codigo_solicitacao {
         let _ = write!(
             texto,
-            "\n\nAcompanhe com: inter-pj pix consultar {codigo} --aguardar"
+            "\n\nAcompanhe com: inter-pj pix consultar {} --aguardar",
+            limpo(codigo)
         );
     }
     texto

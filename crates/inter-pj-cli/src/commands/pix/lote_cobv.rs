@@ -25,7 +25,7 @@ use crate::config::Settings;
 use crate::confirmacao::{Stdio, Terminal, confirmar, descrever_ambiente};
 use crate::cores::Tom;
 use crate::error::{CliError, resultado_incerto};
-use crate::output::{self, horario_em, horario_local, secao};
+use crate::output::{self, horario_em, horario_local, limpo, secao};
 use crate::tabela::{Celula, Coluna, Tabela};
 
 /// Between two queries with `--aguardar`, within the rate limit.
@@ -78,7 +78,7 @@ async fn criar(
         Some(context.client(&settings)?)
     };
     let ambiente = settings.ambiente.as_ref().map(|setting| setting.value);
-    eprintln!("{}", resumo_criacao(args.id, &lote, ambiente));
+    output::eprint(&resumo_criacao(args.id, &lote, ambiente));
     let id = args.id.to_string();
     let Some(client) = client else {
         return simulacao::mostrar_em(
@@ -121,7 +121,7 @@ async fn revisar(
         Some(context.client(&settings)?)
     };
     let ambiente = settings.ambiente.as_ref().map(|setting| setting.value);
-    eprintln!("{}", resumo_revisao(args.id, &revisao, ambiente));
+    output::eprint(&resumo_revisao(args.id, &revisao, ambiente));
     let id = args.id.to_string();
     let Some(client) = client else {
         return simulacao::mostrar_em(
@@ -381,7 +381,7 @@ async fn aguardar(
         }
         let situacao = contagem(&lote);
         if anterior.as_ref() != Some(&situacao) {
-            eprintln!("aguardando: {situacao}");
+            output::eprint_linha(&format!("aguardando: {situacao}"));
             anterior = Some(situacao);
         }
         tokio::time::sleep(intervalo.min(prazo - agora)).await;
@@ -509,7 +509,7 @@ where
 {
     let id = lote.id.unwrap_or(id);
     let titulo = match &lote.descricao {
-        Some(descricao) => format!("Lote {id}: {descricao}"),
+        Some(descricao) => format!("Lote {id}: {}", limpo(descricao)),
         None => format!("Lote {id}"),
     };
     let mut linhas = Vec::new();
@@ -585,7 +585,7 @@ async fn listar(context: &Context, args: &PixLoteCobvListarArgs) -> Result<(), C
     };
     match context.formato() {
         Formato::Json => output::print_json(&json!({ "lotes": lotes })),
-        Formato::Csv => output::print_raw(&csv(&lotes).csv(context.separador())),
+        Formato::Csv => output::print_csv(&csv(&lotes), context.separador()),
         Formato::Texto => {
             context.warn_if_sandbox(&settings);
             let formato = "%d/%m/%Y %H:%M";

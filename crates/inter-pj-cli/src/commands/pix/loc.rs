@@ -93,7 +93,7 @@ async fn listar(context: &Context, args: &PixLocListarArgs) -> Result<(), CliErr
     };
     match context.formato() {
         Formato::Json => output::print_json(&json!({ "loc": locs })),
-        Formato::Csv => output::print_raw(&csv(&locs).csv(context.separador())),
+        Formato::Csv => output::print_csv(&csv(&locs), context.separador()),
         Formato::Texto => {
             context.warn_if_sandbox(&settings);
             let mut texto = format!("{}\n\n", titulo(&filtro));
@@ -218,7 +218,7 @@ async fn desvincular(
         )));
     };
     let ambiente = settings.ambiente.as_ref().map(|setting| setting.value);
-    eprintln!("{}", resumo(&atual, txid, ambiente));
+    output::eprint(&resumo(&atual, txid, ambiente));
     confirmar(terminal, args.sim, "Desvincular a cobrança?")?;
     let loc = client.pix().desvincular_loc(args.id).await?;
     match context.formato() {

@@ -1,7 +1,8 @@
 //! Output helpers: Brazilian formatting and writing to stdout.
 
 use std::borrow::Cow;
-use std::io::{self, Write};
+use std::fmt::Write as _;
+use std::io::{self, IsTerminal, Write};
 
 use anstream::AutoStream;
 use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, TimeZone};
@@ -10,6 +11,7 @@ use serde::Serialize;
 
 use crate::cores;
 use crate::error::CliError;
+use crate::tabela::{Separador, Tabela};
 
 /// Formats a monetary value in Brazilian reais: `R$ 1.234,56` / `-R$ 10,00`.
 pub(crate) fn brl(value: Decimal) -> String {
@@ -40,16 +42,44 @@ fn group_thousands(integer: &str) -> String {
     out
 }
 
-/// Text from the API or from a code on one line, without control
-/// characters: names and descriptions come from third parties, and an
-/// escape sequence or a line break in them could rewrite or fake what the
-/// terminal shows (e.g. a line with another amount).
+/// Whether `c` must not reach the terminal from the data: the control
+/// characters (escape sequences, line breaks, the C1 controls) and the
+/// format characters that reorder or hide text. These are:
+/// - the bidirectional marks, embeddings, overrides and isolates (a U+202E
+///   in a description would show the rest of the row, the amount included,
+///   reversed);
+/// - the zero-width space, the word joiner and the invisible operators;
+/// - the byte order mark;
+/// - the line and paragraph separators.
+///
+/// The joiners of emoji sequences and of some scripts (U+200C, U+200D)
+/// stay.
+pub(crate) fn perigoso(c: char) -> bool {
+    c.is_control()
+        || matches!(
+            c,
+            '\u{061C}'
+                | '\u{200B}'
+                | '\u{200E}'
+                | '\u{200F}'
+                | '\u{2028}'..='\u{202E}'
+                | '\u{2060}'..='\u{2064}'
+                | '\u{2066}'..='\u{2069}'
+                | '\u{FEFF}'
+        )
+}
+
+/// Text from the API or from a code on one line, without the characters
+/// of [`perigoso`]: names and descriptions come from third parties, and an
+/// escape sequence, a line break or a bidirectional override in them could
+/// rewrite or fake what the terminal shows (e.g. a line with another
+/// amount).
 pub(crate) fn limpo(texto: &str) -> Cow<'_, str> {
-    if texto.chars().any(char::is_control) {
+    if texto.chars().any(perigoso) {
         Cow::Owned(
             texto
                 .chars()
-                .map(|c| if c.is_control() { '\u{FFFD}' } else { c })
+                .map(|c| if perigoso(c) { '\u{FFFD}' } else { c })
                 .collect(),
         )
     } else {
@@ -59,7 +89,7 @@ pub(crate) fn limpo(texto: &str) -> Cow<'_, str> {
 
 /// Like [`limpo`], but keeps the line breaks of a text made of lines.
 pub(crate) fn sem_controle(texto: &str) -> Cow<'_, str> {
-    let controle = |c: char| c.is_control() && c != '\n';
+    let controle = |c: char| perigoso(c) && c != '\n';
     if texto.chars().any(controle) {
         Cow::Owned(
             texto
@@ -115,7 +145,7 @@ pub(crate) fn key_values_left(rows: &[(&str, String)]) -> String {
 /// like the other control characters. A code in the data itself could at
 /// most change a color: data reaches the renderers cleaned by [`limpo`].
 pub(crate) fn sem_controle_exceto_cores(texto: &str) -> Cow<'_, str> {
-    let controle = |c: char| c.is_control() && c != '\n';
+    let controle = |c: char| perigoso(c) && c != '\n';
     if !texto.chars().any(controle) {
         return Cow::Borrowed(texto);
     }
@@ -158,7 +188,34 @@ pub(crate) fn print(text: &str) -> Result<(), CliError> {
     }
 }
 
-/// Prints `text` as is (e.g. CSV, which carries its own line endings).
+/// Writes `texto` and a newline to stderr, like `eprintln!`, without the
+/// characters of [`perigoso`] but the line breaks: the summaries, the
+/// warnings and the progress quote the data (a name, a status) and the
+/// arguments.
+pub(crate) fn eprint(texto: &str) {
+    eprintln!("{}", sem_controle(texto));
+}
+
+/// Like [`eprint`], for a message on one line: a line break in the data (a
+/// status, a name, a path) cannot start another line, like a fake `erro:`.
+pub(crate) fn eprint_linha(texto: &str) {
+    eprintln!("{}", limpo(texto));
+}
+
+/// Prints `tabela` as CSV. A file or a pipe gets the text as sent, for the
+/// spreadsheets and the scripts; a terminal, the text cleaned as in the
+/// text output (the message of a Pix could carry escape sequences), without
+/// the BOM.
+pub(crate) fn print_csv(tabela: &Tabela, separador: Separador) -> Result<(), CliError> {
+    if io::stdout().is_terminal() {
+        print_raw(&tabela.csv_para_terminal(separador))
+    } else {
+        print_raw(&tabela.csv(separador))
+    }
+}
+
+/// Prints `text` as is (e.g. a completion script, which carries its own
+/// line endings). Only for text the CLI wrote.
 pub(crate) fn print_raw(text: &str) -> Result<(), CliError> {
     let mut stdout = io::stdout().lock();
     match stdout
@@ -176,7 +233,29 @@ pub(crate) fn print_raw(text: &str) -> Result<(), CliError> {
 pub(crate) fn print_json<T: Serialize>(value: &T) -> Result<(), CliError> {
     let json = serde_json::to_string_pretty(value)
         .map_err(|err| CliError::io("falha ao gerar JSON", io::Error::other(err)))?;
-    print(&json)
+    print(&json_seguro(&json))
+}
+
+/// `json` with the characters of [`perigoso`] as `\u` escapes: `serde_json`
+/// escapes only the C0 controls, so a DEL, a C1 control or a bidirectional
+/// override in a text would reach the terminal. They can only be in the
+/// strings (the line breaks outside them are the indentation's), so the
+/// data is the same.
+fn json_seguro(json: &str) -> Cow<'_, str> {
+    let escapar = |c: char| perigoso(c) && c != '\n';
+    if !json.chars().any(escapar) {
+        return Cow::Borrowed(json);
+    }
+    let mut seguro = String::with_capacity(json.len() + 16);
+    for c in json.chars() {
+        if escapar(c) {
+            // All of them are in the Basic Multilingual Plane.
+            let _ = write!(seguro, "\\u{:04x}", u32::from(c));
+        } else {
+            seguro.push(c);
+        }
+    }
+    Cow::Owned(seguro)
 }
 
 /// A date as the APIs send it: `2026-10-09`, `2026-10-09 00:00:00` or
@@ -253,6 +332,8 @@ pub(crate) fn mask(value: &str, visible: usize) -> String {
 mod tests {
     use std::str::FromStr;
 
+    use serde_json::Value;
+
     use super::*;
 
     fn dec(s: &str) -> Decimal {
@@ -317,6 +398,54 @@ mod tests {
         ];
         assert_eq!(key_values_left(&rows).lines().count(), 2);
         assert_eq!(key_values(&rows).lines().count(), 2);
+    }
+
+    #[test]
+    fn text_cannot_be_reversed_or_hidden() {
+        // An override would show the rest of the row reversed, the amount
+        // included; the invisible characters would hide text or break the
+        // alignment.
+        for c in [
+            '\u{202E}', '\u{202A}', '\u{2066}', '\u{2069}', '\u{200E}', '\u{200F}', '\u{061C}',
+            '\u{200B}', '\u{2060}', '\u{2064}', '\u{FEFF}', '\u{2028}', '\u{2029}', '\u{85}',
+            '\u{7f}', '\u{9b}',
+        ] {
+            assert!(perigoso(c), "{:04X}", u32::from(c));
+            assert_eq!(limpo(&format!("a{c}b")), "a\u{FFFD}b");
+        }
+        assert_eq!(
+            sem_controle("R$ 1,00\u{202E}00,005.1 $R\n"),
+            "R$ 1,00\u{FFFD}00,005.1 $R\n"
+        );
+        // Emoji sequences and the scripts that need the joiners keep them.
+        for texto in [
+            "Família 👨\u{200D}👩\u{200D}👧",
+            "می\u{200C}خواهم",
+            "Ação · João — 15%",
+        ] {
+            assert!(matches!(limpo(texto), Cow::Borrowed(_)), "{texto}");
+        }
+    }
+
+    #[test]
+    fn json_escapes_what_would_reach_the_terminal() {
+        let valor = serde_json::json!({
+            "descricao": "Loja\u{202E}R$ 9\u{7f}\u{9b}2J\u{1b}[2K\nfim",
+            "normal": "sem nada",
+        });
+        let json = serde_json::to_string_pretty(&valor).unwrap();
+        let seguro = json_seguro(&json);
+        assert!(
+            !seguro.chars().any(|c| perigoso(c) && c != '\n'),
+            "{seguro}"
+        );
+        assert!(
+            seguro.contains(r"Loja\u202eR$ 9\u007f\u009b2J\u001b[2K\nfim"),
+            "{seguro}"
+        );
+        // The same data, read back.
+        assert_eq!(serde_json::from_str::<Value>(&seguro).unwrap(), valor);
+        assert!(matches!(json_seguro("{\n  \"a\": 1\n}"), Cow::Borrowed(_)));
     }
 
     #[test]
