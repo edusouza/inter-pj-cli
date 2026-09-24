@@ -54,6 +54,14 @@ fn criar() -> Vec<&'static str> {
     ]
 }
 
+/// `criar()` with another value for `opcao`.
+fn criar_com(opcao: &str, valor: &str) -> Vec<String> {
+    let mut args: Vec<String> = criar().into_iter().map(str::to_owned).collect();
+    let i = args.iter().position(|arg| arg == opcao).unwrap();
+    valor.clone_into(&mut args[i + 1]);
+    args
+}
+
 fn corpo() -> Value {
     json!({
         "vinculo": {"objeto": "Mensalidade", "devedor": {"cpf": "12345678909", "nome": "Cliente Exemplo"}, "contrato": "contrato-001"},
@@ -171,13 +179,39 @@ async fn simulacao_e_erros_nao_chamam_a_api() {
         "{}",
         stderr_of(&assert)
     );
-    for extra in [
-        &["--data-inicial", "2020-01-01", "--sim"][..],
-        &["--contrato", "", "--sim"][..],
-        &["--valor-minimo", "10", "--sim"][..],
+    for (opcao, valor, erro) in [
+        (
+            "--data-inicial",
+            "2020-01-01",
+            "a data do primeiro pagamento (01/01/2020) já passou",
+        ),
+        ("--contrato", " ", "--contrato: "),
+        ("--objeto", &"x".repeat(36), "--objeto: "),
     ] {
-        env.cmd().args(criar()).args(extra).assert().code(2);
+        let assert = env
+            .cmd()
+            .args(criar_com(opcao, valor))
+            .arg("--sim")
+            .assert()
+            .code(2);
+        assert!(
+            stderr_of(&assert).contains(erro),
+            "{erro}\n{}",
+            stderr_of(&assert)
+        );
     }
+    // A fixed amount and a minimum do not go together.
+    let assert = env
+        .cmd()
+        .args(criar())
+        .args(["--valor-minimo", "10", "--sim"])
+        .assert()
+        .code(2);
+    assert!(
+        stderr_of(&assert).contains("cannot be used with"),
+        "{}",
+        stderr_of(&assert)
+    );
 }
 
 /// Without an idempotency key, the error says how to check before trying
