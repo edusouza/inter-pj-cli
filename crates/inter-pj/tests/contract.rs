@@ -15,6 +15,7 @@ use inter_pj::banking::{
     StatusLote, StatusPagamento, StatusPix, TipoConta, TipoOperacao, TipoRetornoDarf,
     TipoRetornoPix, TipoTransacao, TransacaoCompleta, TransacaoSimples,
 };
+use inter_pj::documento::Documento;
 use inter_pj::endpoint::{self, Endpoint};
 use inter_pj::{Environment, Scope};
 use rust_decimal::Decimal;
@@ -353,7 +354,7 @@ fn pix_payment_bodies_reproduce_the_spec_examples() {
             &examples["chavePix"],
             pagamento(
                 Destinatario::Chave {
-                    chave: "chavepix@teste.com".parse().unwrap(),
+                    chave: "chavepix@example.com".parse().unwrap(),
                 },
                 "Pix com chave Pix teste",
             ),
@@ -819,16 +820,18 @@ fn batch_answers_map_every_documented_field() {
     );
 }
 
-/// The portal's examples carried real-looking CPFs, phone numbers and bank
-/// accounts; `spec/sanitizar.py` replaces them with synthetic values. This
-/// test keeps it that way when the specification is updated.
+/// The portal's examples carried real-looking CPFs, CNPJs, e-mail
+/// addresses, phone numbers and bank accounts; `spec/sanitizar.py` replaces
+/// them with synthetic values. This test keeps it that way when the
+/// specification is updated.
 #[test]
 fn spec_examples_contain_no_real_looking_personal_data() {
     const ALLOWED_CPFS: [&str; 2] = ["01234567890", "12345678909"];
+    const ALLOWED_CNPJS: [&str; 2] = ["11222333000181", "12345678000195"];
     const SYNTHETIC_PHONE: &str = "+5500000000000";
     const ACCOUNT_DIGITS: &str = "123456789012345678901234567890";
 
-    let mut problems = Vec::new();
+    let mut problems = BTreeSet::new();
     visit(spec(), &mut Vec::new(), &mut |path, value| {
         let text = match value {
             Value::String(s) => s.clone(),
@@ -844,10 +847,28 @@ fn spec_examples_contain_no_real_looking_personal_data() {
             && cpf_is_valid(&digits)
             && !ALLOWED_CPFS.contains(&digits.as_str())
         {
-            problems.push(format!("CPF em {location}"));
+            problems.insert(format!("CPF em {location}"));
+        }
+        // Anywhere, descriptions included: the shapes no other code has.
+        for token in tokens(&text) {
+            let digits: String = token.chars().filter(char::is_ascii_digit).collect();
+            let cnpj = has_shape(token, "99999999999999") || has_shape(token, "99.999.999/9999-99");
+            if cnpj && Documento::parse(token).is_ok() && !ALLOWED_CNPJS.contains(&digits.as_str())
+            {
+                problems.insert(format!("CNPJ em {location}"));
+            }
+            if has_shape(token, "999.999.999-99")
+                && cpf_is_valid(&digits)
+                && !ALLOWED_CPFS.contains(&digits.as_str())
+            {
+                problems.insert(format!("CPF em {location}"));
+            }
+        }
+        if email_domains(&text).any(|domain| !reserved_domain(&domain)) {
+            problems.insert(format!("e-mail em {location}"));
         }
         if text.starts_with("+55") && text != SYNTHETIC_PHONE {
-            problems.push(format!("telefone em {location}"));
+            problems.insert(format!("telefone em {location}"));
         }
         let field = path
             .iter()
@@ -860,7 +881,7 @@ fn spec_examples_contain_no_real_looking_personal_data() {
             && !text.chars().all(|c| c == '0')
             && !ACCOUNT_DIGITS.starts_with(&text)
         {
-            problems.push(format!("conta em {location}"));
+            problems.insert(format!("conta em {location}"));
         }
     });
     assert!(
@@ -876,6 +897,34 @@ fn cpf_check_digits() {
     assert!(!cpf_is_valid("11111111111"));
     assert!(looks_like_cpf("123.456.789-09"));
     assert!(!looks_like_cpf("1234567890"));
+}
+
+#[test]
+fn documents_and_addresses_are_found_anywhere_in_a_text() {
+    let texto = "CNPJ 12.345.678/0001-95, CPF 123.456.789-09 (ou E12345678000195x).";
+    assert_eq!(
+        tokens(texto).collect::<Vec<_>>(),
+        [
+            "CNPJ",
+            "12.345.678/0001-95",
+            "CPF",
+            "123.456.789-09",
+            "ou",
+            "E12345678000195x"
+        ]
+    );
+    assert!(has_shape("12.345.678/0001-95", "99.999.999/9999-99"));
+    assert!(!has_shape("12.345.678/0001-9", "99.999.999/9999-99"));
+    assert!(!has_shape("12345678000195x", "99999999999999"));
+
+    let dominios: Vec<String> =
+        email_domains("a@Mail.com, b@example.com. (c@x.example) @solto d@").collect();
+    assert_eq!(dominios, ["mail.com", "example.com", "x.example"]);
+    assert!(!reserved_domain("mail.com"));
+    assert!(!reserved_domain("example.com.br"));
+    for dominio in ["example.com", "sub.example.org", "x.example", "a.test"] {
+        assert!(reserved_domain(dominio), "{dominio}");
+    }
 }
 
 // --- helpers ---------------------------------------------------------------
@@ -904,6 +953,56 @@ fn looks_like_cpf(text: &str) -> bool {
         .chars()
         .all(|c| c.is_ascii_digit() || c == '.' || c == '-');
     digits == 11 && allowed && (text.len() == 11 || text.len() == 14)
+}
+
+/// The words of `text`, keeping the punctuation of documents
+/// (`12.345.678/0001-95`) and dropping the one that ends a sentence.
+fn tokens(text: &str) -> impl Iterator<Item = &str> {
+    text.split(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '.' | '/' | '-')))
+        .map(|token| token.trim_end_matches(['.', '/', '-']))
+        .filter(|token| !token.is_empty())
+}
+
+/// Whether `text` has the shape of `pattern`, where `9` stands for a digit.
+fn has_shape(text: &str, pattern: &str) -> bool {
+    text.len() == pattern.len()
+        && text.chars().zip(pattern.chars()).all(
+            |(c, p)| {
+                if p == '9' { c.is_ascii_digit() } else { c == p }
+            },
+        )
+}
+
+/// The domains of the e-mail addresses in `text`, in lowercase.
+fn email_domains(text: &str) -> impl Iterator<Item = String> + '_ {
+    text.match_indices('@').filter_map(|(at, _)| {
+        let local = text[..at]
+            .chars()
+            .next_back()
+            .is_some_and(|c| c.is_ascii_alphanumeric() || "._%+-".contains(c));
+        let domain: String = text[at + 1..]
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-'))
+            .collect();
+        let domain = domain.trim_end_matches(['.', '-']).to_lowercase();
+        (local && domain.contains('.')).then_some(domain)
+    })
+}
+
+/// The domains reserved for documentation (RFC 2606 and RFC 6761), where no
+/// one gets mail.
+fn reserved_domain(domain: &str) -> bool {
+    const DOMAINS: [&str; 3] = ["example.com", "example.net", "example.org"];
+    const TLDS: [&str; 4] = ["example", "test", "invalid", "localhost"];
+    DOMAINS.iter().any(|reserved| {
+        domain == *reserved
+            || domain
+                .strip_suffix(reserved)
+                .is_some_and(|sub| sub.ends_with('.'))
+    }) || domain
+        .rsplit('.')
+        .next()
+        .is_some_and(|tld| TLDS.contains(&tld))
 }
 
 fn cpf_is_valid(digits: &str) -> bool {

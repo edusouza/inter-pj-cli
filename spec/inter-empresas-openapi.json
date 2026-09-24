@@ -8325,7 +8325,7 @@
           },
           "cpfCnpj": {
             "description": "CPF/CNPJ",
-            "example": 27395669000186,
+            "example": 12345678000195,
             "type": "string"
           },
           "nomeFantasia": {
@@ -9233,7 +9233,7 @@
           },
           "cpfCnpj": {
             "type": "string",
-            "example": "00436923000190"
+            "example": "12345678000195"
           },
           "valorPrincipal": {
             "type": "string",
@@ -9879,7 +9879,7 @@
             "descricao": "Pix com chave Pix teste",
             "destinatario": {
               "tipo": "CHAVE",
-              "chave": "chavepix@teste.com"
+              "chave": "chavepix@example.com"
             }
           },
           "pixCopiaECola": {
@@ -9951,7 +9951,7 @@
         "properties": {
           "chave": {
             "type": "string",
-            "description": "Exemplos de tipos:\nSe email: email do recebedor (ex: fulano.da.silva@example.com)\nSe CPF/CNPJ: 12345678900 / 00038166000105\nSe número do telefone celular: +55DD9XXXXXXXX (formato internacional)\nSe EVP: 123e4567-e12b-12d1-a456-426655440000\n"
+            "description": "Exemplos de tipos:\nSe email: email do recebedor (ex: fulano.da.silva@example.com)\nSe CPF/CNPJ: 12345678900 / 12345678000195\nSe número do telefone celular: +55DD9XXXXXXXX (formato internacional)\nSe EVP: 123e4567-e12b-12d1-a456-426655440000\n"
           }
         }
       },
@@ -19306,7 +19306,7 @@
           "dataVencimento": "2026-10-20",
           "numDiasAgenda": 60,
           "pagador": {
-            "email": "nome.sobrenome@x.com.br",
+            "email": "nome.sobrenome@example.com",
             "ddd": "31",
             "telefone": "999999999",
             "numero": "3456",
@@ -19407,7 +19407,7 @@
               "taxa": 5
             },
             "pagador": {
-              "email": "nome.sobrenome@x.com.br",
+              "email": "nome.sobrenome@example.com",
               "ddd": "31",
               "telefone": "9999-9999",
               "numero": "3456",
@@ -21744,7 +21744,7 @@
           "devedor": {
             "cep": "89256-140",
             "cidade": "Uberlândia",
-            "email": "sebastiao.tavares@mail.com",
+            "email": "sebastiao.tavares@example.com",
             "logradouro": "Alameda Franco 1056",
             "uf": "MG"
           },
@@ -21780,7 +21780,7 @@
           "devedor": {
             "cep": "89256-140",
             "cidade": "Uberlândia",
-            "email": "sebastiao.tavares@mail.com",
+            "email": "sebastiao.tavares@example.com",
             "logradouro": "Alameda Franco 1056",
             "uf": "MG"
           },
@@ -22001,7 +22001,7 @@
               "devedor": {
                 "cep": "63259-740",
                 "cidade": "Campinas",
-                "email": "beltrano.silva@mail.com",
+                "email": "beltrano.silva@example.com",
                 "logradouro": "Rua Gonçalves Dias 605",
                 "uf": "SP"
               },
@@ -22102,7 +22102,7 @@
           "devedor": {
             "cep": "89256-140",
             "cidade": "Uberlândia",
-            "email": "sebastiao.tavares@mail.com",
+            "email": "sebastiao.tavares@example.com",
             "logradouro": "Alameda Franco 1056",
             "uf": "MG"
           },
@@ -22137,7 +22137,7 @@
           "devedor": {
             "cep": "63259-740",
             "cidade": "Campinas",
-            "email": "beltrano.silva@mail.com",
+            "email": "beltrano.silva@example.com",
             "logradouro": "Rua Gonçalves Dias 605",
             "uf": "SP"
           },
@@ -22190,7 +22190,7 @@
           "devedor": {
             "cep": "26901-340",
             "cidade": "São Luís",
-            "email": "fulano.tal@mail.com",
+            "email": "fulano.tal@example.com",
             "logradouro": "Alameda Cardoso 1007",
             "uf": "MA"
           },
