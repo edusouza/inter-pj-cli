@@ -856,6 +856,33 @@ Webhook excluído: o Inter deixa de notificar Pix enviados pela conta.
 
 A URL precisa começar com `https://`, e o Inter precisa alcançá-la pela internet: a CLI a confere antes de qualquer requisição e avisa quando ela aponta para um endereço local ou de rede privada. `cadastrar` consulta o webhook atual e mostra o antes e o depois, porque a nova URL passa a receber as notificações dos pagamentos da conta; cadastrar a mesma URL não muda nada. `cadastrar` e `excluir` pedem confirmação (sem terminal, `--sim`). Quando o servidor do webhook não aceita uma notificação, o Inter tenta de novo até 4 vezes: 20, 30, 60 e 120 minutos depois (no Banking, 5, 10, 30 e 60).
 
+Cada tentativa fica no histórico dos callbacks, com o status HTTP que o servidor respondeu, e as que falharam podem ser pedidas de novo:
+
+```console
+$ inter-pj webhook cobranca callbacks --inicio 2026-09-24 --fim 2026-09-24
+Callbacks do webhook de cobranças de 24/09/2026 00:00 a 24/09/2026 23:59
+
+Disparo              Tentativa  Entregue  HTTP  Código da cobrança                    Erro
+24/09/2026 11:05:00          2  sim        200  0b7e4c1a-5d3f-4a2b-9c8d-7e6f5a4b3c2d
+24/09/2026 11:05:01          2  não        503  1c8f5d2b-6e4a-4b3c-8d9e-8f7a6b5c4d3e  Service Unavailable
+24/09/2026 10:45:00          1  não        503  0b7e4c1a-5d3f-4a2b-9c8d-7e6f5a4b3c2d  Service Unavailable
+24/09/2026 10:45:01          1  não        503  1c8f5d2b-6e4a-4b3c-8d9e-8f7a6b5c4d3e  Service Unavailable
+
+4 tentativas · 1 entregue · 3 falharam
+
+Sem entrega no período: 1 operação. Para pedir o reenvio:
+  inter-pj webhook cobranca reenviar 1c8f5d2b-6e4a-4b3c-8d9e-8f7a6b5c4d3e
+
+$ inter-pj webhook cobranca reenviar 1c8f5d2b-6e4a-4b3c-8d9e-8f7a6b5c4d3e
+Reenvio pedido para 1 de 1 operação: o Inter vai enviar os callbacks de novo.
+
+$ inter-pj webhook banking callbacks pix-pagamento --end-to-end E00416968202609241310abcdEFGH123
+$ inter-pj webhook pix callbacks --txid 7978c0c97ea847e78e8849634473c1f1 --falhas
+$ inter-pj webhook pix reenviar pix@empresa.example 7978c0c97ea847e78e8849634473c1f1
+```
+
+O período segue as regras das listagens Pix (padrão: últimos 30 dias), e `--falhas` mostra só as tentativas que falharam; todas as páginas são lidas, ou só uma com `--pagina`. O comando sugerido considera todas as tentativas do período, então uma operação entregue numa tentativa posterior não entra nele. `reenviar` recebe os mesmos códigos que o histórico mostra: o código da solicitação dos Pix enviados (`pix-pagamento`) ou o da transação dos boletos pagos (`boleto-pagamento`), o código das cobranças e, no Pix, a chave e os txids das cobranças. Todos são conferidos antes de qualquer requisição, os repetidos vão uma vez e mais de 50 vão em blocos de 50; como o Inter aceita 5 pedidos de reenvio por minuto, com mais de 5 blocos a CLI espera 12 segundos entre eles. As operações não encontradas são listadas, e, se um bloco falhar, a dica traz o comando que pede o reenvio das que faltam.
+
 ### Formatos de saída
 
 | Formato | Para quê |

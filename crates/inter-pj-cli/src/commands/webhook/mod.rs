@@ -3,8 +3,11 @@
 //! removing one shows the current webhook and asks for confirmation: a new
 //! address receives the notifications of the account's payments.
 
+mod callbacks;
+
 use std::fmt::Write as _;
 use std::net::IpAddr;
+use std::time::Duration;
 
 use chrono::{Local, TimeZone};
 use inter_pj::pix::ChavePix;
@@ -12,6 +15,7 @@ use inter_pj::webhook::{TipoWebhookBanking, Webhook, WebhookUrl};
 use inter_pj::{Environment, Error as InterError, InterClient};
 use serde_json::{Map, Value, json};
 
+use self::callbacks::Api;
 use super::cobranca::argumento;
 use crate::cli::{
     Formato, WebhookBankingCommand, WebhookCadastroArgs, WebhookCobrancaCommand, WebhookCommand,
@@ -22,47 +26,119 @@ use crate::confirmacao::{Stdio, Terminal, confirmar, descrever_ambiente, pode_co
 use crate::error::{CliError, resultado_incerto};
 use crate::output::{self, horario_em, limpo, secao};
 
+/// Between blocks of a retry, when there are more than the API accepts
+/// per minute.
+const INTERVALO_REENVIO: Duration = Duration::from_secs(12);
+
 pub(super) async fn run(context: &Context, command: WebhookCommand) -> Result<(), CliError> {
     match command {
-        WebhookCommand::Banking(command) => match command {
-            WebhookBankingCommand::Cadastrar(args) => {
-                let alvo = Alvo::Banking(args.tipo.into());
-                cadastrar(context, &alvo, &args.cadastro, &mut Stdio).await
-            }
-            WebhookBankingCommand::Consultar(args) => {
-                let alvos: Vec<Alvo> = match args.tipo {
-                    Some(tipo) => vec![Alvo::Banking(tipo.into())],
-                    None => TipoWebhookBanking::TODOS.map(Alvo::Banking).to_vec(),
-                };
-                consultar(context, &alvos).await
-            }
-            WebhookBankingCommand::Excluir(args) => {
-                let alvo = Alvo::Banking(args.tipo.into());
-                excluir(context, &alvo, &args.exclusao, &mut Stdio).await
-            }
-        },
-        WebhookCommand::Cobranca(command) => match command {
-            WebhookCobrancaCommand::Cadastrar(args) => {
-                cadastrar(context, &Alvo::Cobranca, &args, &mut Stdio).await
-            }
-            WebhookCobrancaCommand::Consultar => consultar(context, &[Alvo::Cobranca]).await,
-            WebhookCobrancaCommand::Excluir(args) => {
-                excluir(context, &Alvo::Cobranca, &args, &mut Stdio).await
-            }
-        },
-        WebhookCommand::Pix(command) => match command {
-            WebhookPixCommand::Cadastrar(args) => {
-                let alvo = Alvo::Pix(args.chave);
-                cadastrar(context, &alvo, &args.cadastro, &mut Stdio).await
-            }
-            WebhookPixCommand::Consultar(args) => {
-                consultar(context, &[Alvo::Pix(args.chave)]).await
-            }
-            WebhookPixCommand::Excluir(args) => {
-                let alvo = Alvo::Pix(args.chave);
-                excluir(context, &alvo, &args.exclusao, &mut Stdio).await
-            }
-        },
+        WebhookCommand::Banking(command) => banking(context, command).await,
+        WebhookCommand::Cobranca(command) => cobranca(context, command).await,
+        WebhookCommand::Pix(command) => pix(context, command).await,
+    }
+}
+
+async fn banking(context: &Context, command: WebhookBankingCommand) -> Result<(), CliError> {
+    match command {
+        WebhookBankingCommand::Cadastrar(args) => {
+            let alvo = Alvo::Banking(args.tipo.into());
+            cadastrar(context, &alvo, &args.cadastro, &mut Stdio).await
+        }
+        WebhookBankingCommand::Consultar(args) => {
+            let alvos: Vec<Alvo> = match args.tipo {
+                Some(tipo) => vec![Alvo::Banking(tipo.into())],
+                None => TipoWebhookBanking::TODOS.map(Alvo::Banking).to_vec(),
+            };
+            consultar(context, &alvos).await
+        }
+        WebhookBankingCommand::Excluir(args) => {
+            let alvo = Alvo::Banking(args.tipo.into());
+            excluir(context, &alvo, &args.exclusao, &mut Stdio).await
+        }
+        WebhookBankingCommand::Callbacks(args) => {
+            let tipo = TipoWebhookBanking::from(args.tipo);
+            let identificador =
+                identificador_banking(tipo, args.end_to_end, args.codigo_transacao)?;
+            callbacks::listar(context, Api::Banking(tipo), identificador, &args.callbacks).await
+        }
+        WebhookBankingCommand::Reenviar(args) => {
+            let api = Api::Banking(args.tipo.into());
+            callbacks::reenviar(context, api, args.codigos, None, INTERVALO_REENVIO).await
+        }
+    }
+}
+
+async fn cobranca(context: &Context, command: WebhookCobrancaCommand) -> Result<(), CliError> {
+    match command {
+        WebhookCobrancaCommand::Cadastrar(args) => {
+            cadastrar(context, &Alvo::Cobranca, &args, &mut Stdio).await
+        }
+        WebhookCobrancaCommand::Consultar => consultar(context, &[Alvo::Cobranca]).await,
+        WebhookCobrancaCommand::Excluir(args) => {
+            excluir(context, &Alvo::Cobranca, &args, &mut Stdio).await
+        }
+        WebhookCobrancaCommand::Callbacks(args) => {
+            callbacks::listar(context, Api::Cobranca, args.codigo, &args.callbacks).await
+        }
+        WebhookCobrancaCommand::Reenviar(args) => {
+            callbacks::reenviar(
+                context,
+                Api::Cobranca,
+                args.codigos,
+                None,
+                INTERVALO_REENVIO,
+            )
+            .await
+        }
+    }
+}
+
+async fn pix(context: &Context, command: WebhookPixCommand) -> Result<(), CliError> {
+    match command {
+        WebhookPixCommand::Cadastrar(args) => {
+            let alvo = Alvo::Pix(args.chave);
+            cadastrar(context, &alvo, &args.cadastro, &mut Stdio).await
+        }
+        WebhookPixCommand::Consultar(args) => consultar(context, &[Alvo::Pix(args.chave)]).await,
+        WebhookPixCommand::Excluir(args) => {
+            let alvo = Alvo::Pix(args.chave);
+            excluir(context, &alvo, &args.exclusao, &mut Stdio).await
+        }
+        WebhookPixCommand::Callbacks(args) => {
+            let txid = args.txid.map(|txid| txid.as_str().to_owned());
+            callbacks::listar(context, Api::Pix, txid, &args.callbacks).await
+        }
+        WebhookPixCommand::Reenviar(args) => {
+            let txids = args
+                .txids
+                .iter()
+                .map(|txid| txid.as_str().to_owned())
+                .collect();
+            let chave = Some(&args.chave);
+            callbacks::reenviar(context, Api::Pix, txids, chave, INTERVALO_REENVIO).await
+        }
+    }
+}
+
+/// The filter of a Banking history: the `endToEnd` of a Pix sent or the
+/// code of the transaction of a boleto paid, each for its kind.
+fn identificador_banking(
+    tipo: TipoWebhookBanking,
+    end_to_end: Option<String>,
+    codigo_transacao: Option<String>,
+) -> Result<Option<String>, CliError> {
+    match (tipo, end_to_end, codigo_transacao) {
+        (_, None, None) => Ok(None),
+        (TipoWebhookBanking::PixPagamento, Some(e2e), None) => Ok(Some(e2e)),
+        (TipoWebhookBanking::BoletoPagamento, None, Some(codigo)) => Ok(Some(codigo)),
+        (TipoWebhookBanking::PixPagamento, _, Some(_)) => Err(CliError::Usage(
+            "--codigo-transacao vale para boleto-pagamento; nos Pix enviados, use --end-to-end"
+                .to_owned(),
+        )),
+        (TipoWebhookBanking::BoletoPagamento, Some(_), _) => Err(CliError::Usage(
+            "--end-to-end vale para pix-pagamento; nos boletos pagos, use --codigo-transacao"
+                .to_owned(),
+        )),
     }
 }
 
