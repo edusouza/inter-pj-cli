@@ -9,6 +9,7 @@ mod pix;
 mod qrcode;
 mod saldo;
 mod simulacao;
+mod webhook;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -64,6 +65,7 @@ pub(crate) async fn run(cli: Cli, matches: &ArgMatches) -> Result<(), CliError> 
         Command::Pix(command) => pix::run(&context, command).await,
         Command::Pagamento(command) => pagamento::run(&context, command).await,
         Command::Cobranca(command) => cobranca::run(&context, command).await,
+        Command::Webhook(command) => webhook::run(&context, command).await,
         Command::Auth(command) => auth::run(&context, command).await,
         Command::Config(command) => config::run(&context, &command),
     }
