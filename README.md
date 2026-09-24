@@ -220,77 +220,7 @@ Emitir cobranças, que são boletos com Pix para os clientes da empresa, está n
 
 ### Cobranças Pix
 
-A API Pix cria cobranças com QR Code dinâmico, que o cliente paga pelo app de qualquer banco. A cobrança imediata (`pix cob`), para pagar na hora, até expirar, está no guia [Cobranças Pix](docs/guias/cobrancas-pix.md): a criação, com o resumo e a confirmação, o txid que torna segura a repetição, a alteração e a remoção, uma cobrança paga com os seus Pix, a conferência de uma criação de resultado incerto e a listagem de um período com os seus filtros. Criar e alterar precisam do escopo `cob.write`; consultar e listar, do `cob.read`.
-
-A cobrança com vencimento (`pix cobv`) é o boleto do Pix: vale até a data de vencimento, com desconto por pagar antes e multa e juros por pagar depois, e o devedor é obrigatório:
-
-```console
-$ inter-pj pix cobv criar --chave pix@empresa.example --valor 150,00 --vencimento 2026-10-20 \
-    --devedor-documento 12.345.678/0001-95 --devedor-nome "Cliente Exemplo Ltda" \
-    --devedor-endereco "Avenida Brasil, 1200" --devedor-cidade "Belo Horizonte" --devedor-uf MG \
-    --devedor-cep 30110-000 --multa 2% --juros 1% --desconto 10,00@2026-10-15 --solicitacao "Referente à NF 123"
-Cobrança Pix com vencimento a criar
-  Ambiente     sandbox (dados fictícios)
-  Valor        R$ 150,00 (cento e cinquenta reais)
-  Vencimento   20/10/2026
-  Validade     até 19/11/2026, 30 dias após o vencimento (padrão da API)
-  Chave        pix@empresa.example (e-mail)
-  Devedor      Cliente Exemplo Ltda (12.345.678/0001-95)
-  Endereço     Avenida Brasil, 1200 - Belo Horizonte/MG - CEP 30110-000
-  Multa        2%
-  Juros        1% ao mês (dias corridos)
-  Desconto     R$ 10,00 até 15/10/2026
-  Solicitação  Referente à NF 123
-  txid         cobvexemplo0000000000000000001
-Criar a cobrança? [s/N] s
-aviso: ambiente sandbox — os dados retornados são fictícios
-Cobrança Pix com vencimento criada.
-...
-
-$ inter-pj pix cobv modelo > cobv.json          # exemplo com todos os campos, vencendo em 30 dias
-$ inter-pj pix cobv criar --arquivo cobv.json --qrcode-png pix.png
-```
-
-A validade (`--validade-apos-vencimento`, em dias corridos; o padrão da API é 30) é por quanto tempo depois do vencimento a cobrança ainda pode ser paga, com multa e juros; com 0, ela não aceita pagamento atrasado, e a CLI avisa quando há multa ou juros que assim nunca valeriam. Os encargos aceitam um percentual (`2%`) ou um valor (`4,00`):
-
-- `--multa`: por pagar depois do vencimento;
-- `--juros`: um percentual ao mês (ou ao dia ou ao ano, com `--juros-periodo`) ou um valor por dia de atraso;
-- `--abatimento`: vale qualquer que seja o dia do pagamento;
-- `--desconto`: vale até o vencimento ou até a data depois do `@` (`2%@2026-10-15`), e pode ser repetido para até 3 datas, todas com percentuais ou todas com valores; `--desconto-por-dia` dá um desconto para cada dia pago antes do vencimento;
-- `--dias-uteis`: os juros e o desconto por dia contam só os dias úteis.
-
-O vencimento é hoje ou depois, o desconto vale até ele e os valores fixos de desconto e abatimento são menores que o da cobrança; tudo é conferido antes de qualquer requisição. O devedor pode ter e-mail e endereço (`--devedor-email`, `--devedor-endereco`, `--devedor-cidade`, `--devedor-uf` e `--devedor-cep`). O arquivo (`--arquivo`, ou `-` para a entrada padrão) tem os nomes de campo da API (`calendario.dataDeVencimento`, `valor.multa.modalidade`...), com as modalidades como números; campos desconhecidos são recusados, e as mensagens apontam o campo (`cobv.json, campo "valor.desconto.descontoDataFixa[0].data": ...`). O txid, a confirmação, `--simular`, o QR Code e o resultado incerto funcionam como em `pix cob`; os escopos são `cobv.write` e `cobv.read`.
-
-`revisar` mostra o antes e o depois e muda só o que for informado: um novo vencimento mantém a validade atual, e um desconto sem data vale até o vencimento. O que depende da cobrança atual é conferido depois da consulta, sem nenhuma alteração se falhar: um novo vencimento antes do fim de um desconto atual, por exemplo, pede também o novo `--desconto`. O devedor informado substitui o atual, com o e-mail e o endereço.
-
-```console
-$ inter-pj pix cobv revisar cobvexemplo0000000000000000001 --vencimento 2026-10-30 --multa 4,00
-Cobrança Pix com vencimento cobvexemplo0000000000000000001 a alterar
-  Ambiente    sandbox (dados fictícios)
-  Valor       R$ 150,00
-  Vencimento  20/10/2026 → 30/10/2026
-  Validade    até 19/11/2026, 30 dias após o vencimento → até 29/11/2026, 30 dias após o vencimento
-  Devedor     Cliente Exemplo Ltda (12.345.678/0001-95)
-  Multa       2% → R$ 4,00
-  Juros       1% ao mês (dias corridos)
-  Desconto    R$ 10,00 até 15/10/2026
-  Status      ativa
-Alterar a cobrança? [s/N] s
-Cobrança Pix com vencimento alterada (revisão 1).
-...
-
-$ inter-pj pix cobv consultar cobvexemplo0000000000000000001 --qrcode
-$ inter-pj pix cobv listar --inicio 2026-09-01 --fim 2026-09-30
-Cobranças Pix com vencimento criadas de 01/09/2026 00:00 a 30/09/2026 23:59
-
-Vencimento  Status                Valor  Devedor               txid
-20/10/2026  ativa             R$ 150,00  Cliente Exemplo Ltda  cobvexemplo0000000000000000001
-05/10/2026  concluída (paga)  R$ 300,00  Outro Cliente         cobvexemplo0000000000000000002
-
-2 cobranças · R$ 450,00 · pagas R$ 300,00
-```
-
-A listagem tem os filtros de `pix cob listar` e também `--lote ID`; em CSV, os encargos aparecem com a modalidade e o valor (`valor.multa.modalidade`, `valor.multa.valorPerc`), e os descontos por data, só no JSON.
+A API Pix cria cobranças com QR Code dinâmico, que o cliente paga pelo app de qualquer banco. A cobrança imediata (`pix cob`), para pagar na hora, até expirar, e a cobrança com vencimento (`pix cobv`), o boleto do Pix, com multa, juros, abatimento e desconto, estão no guia [Cobranças Pix](docs/guias/cobrancas-pix.md): a criação, pelas opções ou por um arquivo JSON com os campos da API (`pix cobv modelo`), com o resumo e a confirmação, o txid que torna segura a repetição, a validade depois do vencimento e os encargos, a alteração e a remoção, uma cobrança paga com os seus Pix, a conferência de uma criação de resultado incerto e a listagem de um período com os seus filtros. Criar e alterar precisam do escopo `cob.write` ou `cobv.write`; consultar e listar, do `cob.read` ou `cobv.read`.
 
 Muitas cobranças com vencimento podem ser criadas ou alteradas de uma vez, em um lote, a partir de um arquivo JSON (nos campos da API) ou de uma planilha CSV (uma cobrança por linha; as colunas têm os caminhos dos campos da API, como `valor.multa.valorPerc`). Antes de enviar, a CLI confere todas as cobranças e, se alguma tiver problema, recusa o arquivo inteiro, apontando a linha e o campo de cada uma:
 
