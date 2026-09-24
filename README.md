@@ -630,6 +630,44 @@ Vencimento  Status                Valor  Devedor               txid
 
 A listagem tem os filtros de `pix cob listar` e também `--lote ID`; em CSV, os encargos aparecem com a modalidade e o valor (`valor.multa.modalidade`, `valor.multa.valorPerc`), e os descontos por data, só no JSON.
 
+O QR Code de uma cobrança leva a uma location, o endereço onde o banco do pagador busca os dados dela. A API cria uma para cada cobrança, mas uma location pode ser criada antes (para imprimir o QR Code, por exemplo) e usada depois com `--loc` em `pix cob criar`, `pix cobv criar` ou `revisar`:
+
+```console
+$ inter-pj pix loc criar --tipo cobv
+Location criada.
+
+Location 790
+  Tipo       cobrança com vencimento
+  Criada em  24/09/2026 10:10:00
+  Location   pix.example.com/qr/v2/cobv/5b7e4c1a5d3f4a2b9c8d7e6f5a4b3c2d
+  Cobrança   nenhuma
+
+Use com: inter-pj pix cobv criar ... --loc 790
+
+$ inter-pj pix loc listar --inicio 2026-09-01 --fim 2026-09-30
+Locations criadas de 01/09/2026 00:00 a 30/09/2026 23:59
+
+Criada em             id  Tipo  txid                              Location
+24/09/2026 10:10:00  789  cob   7978c0c97ea847e78e8849634473c1f1  pix.example.com/qr/v2/9d36b84fc70b478fb95c12729b90ca25
+24/09/2026 10:10:00  790  cobv  cobvexemplo0000000000000000001    pix.example.com/qr/v2/cobv/5b7e4c1a5d3f4a2b9c8d7e6f5a4b3c2d
+24/09/2026 10:10:00  791  cobv                                    pix.example.com/qr/v2/cobv/5b7e4c1a5d3f4a2b9c8d7e6f5a4b3c2d
+
+3 locations · 2 com cobrança
+
+$ inter-pj pix loc consultar 790
+$ inter-pj pix loc desvincular 790
+Location 790 a desvincular
+  Ambiente  sandbox (dados fictícios)
+  Location  pix.example.com/qr/v2/cobv/5b7e4c1a5d3f4a2b9c8d7e6f5a4b3c2d
+  Cobrança  cobvexemplo0000000000000000001
+aviso: o QR Code desta location deixa de levar à cobrança cobvexemplo0000000000000000001
+Desvincular a cobrança? [s/N] s
+Cobrança cobvexemplo0000000000000000001 desvinculada: a location está livre.
+...
+```
+
+A listagem filtra por `--tipo cob` ou `cobv` e por `--com-cobranca` ou `--sem-cobranca`. `desvincular` consulta a location antes, recusa sem nenhuma alteração uma location sem cobrança e pede confirmação (sem terminal, `--sim`), porque o QR Code impresso deixa de levar à cobrança. Os escopos são `payloadlocation.write` e `payloadlocation.read`.
+
 ### Pix recebidos e devoluções
 
 Os Pix que a conta recebeu, com ou sem cobrança, ficam na API Pix, com as suas devoluções:
@@ -708,7 +746,7 @@ erro: a devolução de R$ 260,00 passa do que resta do Pix: R$ 250,00 de R$ 300,
 | --- | --- |
 | `texto` (padrão) | leitura: tabelas alinhadas, valores em `R$ 1.234,56`, datas `DD/MM/AAAA` |
 | `json` (ou `--json`) | automação: os nomes de campo da API e valores numéricos exatos |
-| `csv` | planilhas e scripts (`saldo`, `extrato` e as listagens de pagamentos, de cobranças, de cobranças Pix e de Pix recebidos): RFC 4180, datas `AAAA-MM-DD`, ponto decimal, saídas do extrato com valor negativo |
+| `csv` | planilhas e scripts (`saldo`, `extrato` e as listagens de pagamentos, de cobranças, de cobranças Pix, de Pix recebidos e de locations): RFC 4180, datas `AAAA-MM-DD`, ponto decimal, saídas do extrato com valor negativo |
 
 Para o Excel em português, use `--formato csv --separador ';'`: ponto e vírgula, vírgula decimal e UTF-8 com BOM. Textos vindos de terceiros que começam com `=`, `+`, `-` ou `@` (ex.: a mensagem de um Pix) recebem um apóstrofo no CSV, para não serem executados como fórmula pela planilha.
 

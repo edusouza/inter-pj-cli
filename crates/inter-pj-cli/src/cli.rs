@@ -29,7 +29,8 @@ pub(crate) use pix::{
     DescontoAte, DevedorCobvArgs, EncargosCobvArgs, Momento, PeriodoJuros, PeriodoPixArgs,
     PixCobCommand, PixCobConsultarArgs, PixCobCriarArgs, PixCobListarArgs, PixCobRevisarArgs,
     PixCobvCommand, PixCobvConsultarArgs, PixCobvCriarArgs, PixCobvListarArgs, PixCobvRevisarArgs,
-    PixDevolucaoCommand, PixDevolucaoConsultarArgs, PixDevolucaoSolicitarArgs,
+    PixDevolucaoCommand, PixDevolucaoConsultarArgs, PixDevolucaoSolicitarArgs, PixLocCommand,
+    PixLocConsultarArgs, PixLocCriarArgs, PixLocDesvincularArgs, PixLocListarArgs,
     PixRecebidoConsultarArgs, PixRecebidosCommand, PixRecebidosListarArgs, SimNao, StatusCobArg,
 };
 
@@ -340,7 +341,8 @@ impl Command {
             | Self::Pix(
                 PixCommand::Cob(PixCobCommand::Listar(_))
                 | PixCommand::Cobv(PixCobvCommand::Listar(_))
-                | PixCommand::Recebidos(PixRecebidosCommand::Listar(_)),
+                | PixCommand::Recebidos(PixRecebidosCommand::Listar(_))
+                | PixCommand::Loc(PixLocCommand::Listar(_)),
             ) => true,
             Self::Extrato(args) => !matches!(args.comando, Some(ExtratoCommand::Pdf(_))),
             Self::Pix(_)
@@ -534,6 +536,13 @@ pub(crate) enum PixCommand {
         subcommand_value_name = "COMANDO"
     )]
     Devolucao(PixDevolucaoCommand),
+    /// Locations: os endereços dos QR Codes das cobranças
+    #[command(
+        subcommand,
+        subcommand_help_heading = "Comandos",
+        subcommand_value_name = "COMANDO"
+    )]
+    Loc(PixLocCommand),
 }
 
 #[derive(Debug, Args)]
