@@ -96,19 +96,18 @@ pub fn example(schema: &'static Value, name: &str, depth: usize) -> Value {
             }
         }
     }
-    // The first option, with what the `allOf` adds to every option.
+    // The first option, with what the `allOf` and the properties beside it
+    // add to every option.
     if let Some(first) = schema
         .get("oneOf")
         .and_then(Value::as_array)
         .and_then(|options| options.first())
     {
-        return match example(first, name, depth + 1) {
-            Value::Object(object) => {
-                merged.extend(object);
-                Value::Object(merged)
-            }
-            other => other,
-        };
+        match example(first, name, depth + 1) {
+            Value::Object(object) => merged.extend(object),
+            other if merged.is_empty() && schema.get("properties").is_none() => return other,
+            _ => {}
+        }
     }
     if let Some(value) = schema.get("enum").and_then(|e| e.get(0)) {
         return value.clone();
