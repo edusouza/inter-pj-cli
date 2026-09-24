@@ -320,6 +320,34 @@ pub mod pix {
         path: "/pix/v2/cobv",
         scopes: &[Scope::CobvRead],
     };
+
+    /// `GET /pix/v2/pix` — Pix received in a period, paginated.
+    pub const LISTAR_RECEBIDOS: Endpoint = Endpoint {
+        method: Method::Get,
+        path: "/pix/v2/pix",
+        scopes: &[Scope::PixRead],
+    };
+
+    /// `GET /pix/v2/pix/{e2eId}` — a Pix received, with its refunds.
+    pub const CONSULTAR_RECEBIDO: Endpoint = Endpoint {
+        method: Method::Get,
+        path: "/pix/v2/pix/{e2eId}",
+        scopes: &[Scope::PixRead],
+    };
+
+    /// `PUT /pix/v2/pix/{e2eId}/devolucao/{id}` — refunds a Pix received.
+    pub const SOLICITAR_DEVOLUCAO: Endpoint = Endpoint {
+        method: Method::Put,
+        path: "/pix/v2/pix/{e2eId}/devolucao/{id}",
+        scopes: &[Scope::PixWrite],
+    };
+
+    /// `GET /pix/v2/pix/{e2eId}/devolucao/{id}` — where a refund stands.
+    pub const CONSULTAR_DEVOLUCAO: Endpoint = Endpoint {
+        method: Method::Get,
+        path: "/pix/v2/pix/{e2eId}/devolucao/{id}",
+        scopes: &[Scope::PixRead],
+    };
 }
 
 /// Every operation implemented by this crate.
@@ -356,4 +384,8 @@ pub const ALL: &[Endpoint] = &[
     pix::REVISAR_COBV,
     pix::CONSULTAR_COBV,
     pix::LISTAR_COBVS,
+    pix::LISTAR_RECEBIDOS,
+    pix::CONSULTAR_RECEBIDO,
+    pix::SOLICITAR_DEVOLUCAO,
+    pix::CONSULTAR_DEVOLUCAO,
 ];

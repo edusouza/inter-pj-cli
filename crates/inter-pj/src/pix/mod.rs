@@ -32,5 +32,9 @@ pub use comum::{
     MAX_INFO_ADICIONAIS, Paginacao, PeriodoPix, PeriodoPixError, PessoaPix, TipoCob,
     VALOR_MAXIMO_PIX,
 };
-pub use recebido::{Devolucao, HorarioDevolucao, PixRecebido, StatusDevolucao};
+pub use recebido::{
+    Devolucao, DevolucaoSolicitada, FiltroPixRecebidos, HorarioDevolucao, ID_DEVOLUCAO_MAXIMO,
+    IdDevolucao, IdDevolucaoError, MAX_DESCRICAO_DEVOLUCAO, NaturezaDevolucao, PaginaPixRecebidos,
+    PixRecebido, StatusDevolucao,
+};
 pub use txid::{TXID_MAXIMO, TXID_MINIMO, Txid, TxidError};
