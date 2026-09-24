@@ -18,7 +18,7 @@ const ENVIAR: [&str; 6] = [
     "pix",
     "enviar",
     "--chave",
-    "fornecedor@exemplo.com",
+    "fornecedor@empresa.example",
     "--valor",
     "150,00",
 ];
@@ -40,9 +40,12 @@ fn tlv(campos: &[(&str, &str)]) -> String {
     texto
 }
 
-/// A static copia e cola code paying `fornecedor@exemplo.com`.
+/// A static copia e cola code paying `fornecedor@empresa.example`.
 fn copia_e_cola(valor: Option<&str>) -> String {
-    let conta = tlv(&[("00", "br.gov.bcb.pix"), ("01", "fornecedor@exemplo.com")]);
+    let conta = tlv(&[
+        ("00", "br.gov.bcb.pix"),
+        ("01", "fornecedor@empresa.example"),
+    ]);
     let mut campos = vec![
         ("00", "01"),
         ("26", conta.as_str()),
@@ -111,7 +114,7 @@ async fn simulation_shows_the_request_and_sends_nothing() {
     assert!(stdout.contains("x-id-idempotente: "), "{stdout}");
     assert!(stdout.contains("x-conta-corrente: *****21"), "{stdout}");
     assert!(
-        stdout.contains("\"chave\": \"fornecedor@exemplo.com\""),
+        stdout.contains("\"chave\": \"fornecedor@empresa.example\""),
         "{stdout}"
     );
     assert!(stdout.contains("\"valor\": 150"), "{stdout}");
@@ -137,7 +140,7 @@ async fn simulation_shows_the_request_and_sends_nothing() {
         json["corpo"],
         json!({
             "valor": 150,
-            "destinatario": {"tipo": "CHAVE", "chave": "fornecedor@exemplo.com"}
+            "destinatario": {"tipo": "CHAVE", "chave": "fornecedor@empresa.example"}
         })
     );
     assert!(stderr_of(&assert).contains(ID));
@@ -166,7 +169,7 @@ async fn sim_sends_once_with_the_idempotency_key() {
         json!({
             "valor": 150,
             "descricao": "NF 123",
-            "destinatario": {"tipo": "CHAVE", "chave": "fornecedor@exemplo.com"}
+            "destinatario": {"tipo": "CHAVE", "chave": "fornecedor@empresa.example"}
         }),
         resposta("PROCESSADO"),
     )
@@ -203,7 +206,7 @@ async fn operation_limit_is_enforced_even_with_sim() {
     nothing_is_sent(&env).await;
 
     env.cmd()
-        .args(["pix", "enviar", "--chave", "fornecedor@exemplo.com"])
+        .args(["pix", "enviar", "--chave", "fornecedor@empresa.example"])
         .args(["--valor", "100,01", "--sim"])
         .assert()
         .code(2)
@@ -218,13 +221,13 @@ async fn amounts_up_to_the_limit_are_sent() {
     env.write_config("limite_por_operacao = 100");
     mount_pix(
         &env,
-        json!({"valor": 100, "destinatario": {"tipo": "CHAVE", "chave": "fornecedor@exemplo.com"}}),
+        json!({"valor": 100, "destinatario": {"tipo": "CHAVE", "chave": "fornecedor@empresa.example"}}),
         resposta("PROCESSADO"),
     )
     .await;
 
     env.cmd()
-        .args(["pix", "enviar", "--chave", "fornecedor@exemplo.com"])
+        .args(["pix", "enviar", "--chave", "fornecedor@empresa.example"])
         .args(["--valor", "R$ 100,00", "--sim"])
         .assert()
         .success();
@@ -240,7 +243,7 @@ async fn scheduled_and_pending_approval_are_explained() {
         .and(body_json(json!({
             "valor": 150,
             "dataPagamento": "2099-10-01",
-            "destinatario": {"tipo": "CHAVE", "chave": "fornecedor@exemplo.com"}
+            "destinatario": {"tipo": "CHAVE", "chave": "fornecedor@empresa.example"}
         })))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "tipoRetorno": "AGENDADO",
@@ -280,7 +283,7 @@ async fn json_output_includes_the_idempotency_key() {
     env.write_config("");
     mount_pix(
         &env,
-        json!({"valor": 150, "destinatario": {"tipo": "CHAVE", "chave": "fornecedor@exemplo.com"}}),
+        json!({"valor": 150, "destinatario": {"tipo": "CHAVE", "chave": "fornecedor@empresa.example"}}),
         resposta("PROCESSADO"),
     )
     .await;
@@ -356,15 +359,15 @@ async fn invalid_amounts_and_keys_are_usage_errors() {
 
     for (args, mensagem) in [
         (
-            ["--chave", "fornecedor@exemplo.com", "--valor", "1.500"],
+            ["--chave", "fornecedor@empresa.example", "--valor", "1.500"],
             "ambíguo",
         ),
         (
-            ["--chave", "fornecedor@exemplo.com", "--valor", "0"],
+            ["--chave", "fornecedor@empresa.example", "--valor", "0"],
             "maior que zero",
         ),
         (
-            ["--chave", "fornecedor@exemplo.com", "--valor", "10,555"],
+            ["--chave", "fornecedor@empresa.example", "--valor", "10,555"],
             "ambíguo",
         ),
         (["--chave", "11912345678", "--valor", "10"], "+55"),
@@ -403,7 +406,7 @@ async fn secrets_never_reach_the_output() {
     env.write_config("");
     mount_pix(
         &env,
-        json!({"valor": 150, "destinatario": {"tipo": "CHAVE", "chave": "fornecedor@exemplo.com"}}),
+        json!({"valor": 150, "destinatario": {"tipo": "CHAVE", "chave": "fornecedor@empresa.example"}}),
         resposta("PROCESSADO"),
     )
     .await;
@@ -438,7 +441,9 @@ async fn copia_e_cola_pays_the_amount_of_the_code() {
         .stdout(predicate::str::starts_with("Pix enviado."))
         .stderr(
             predicate::str::contains("Recebedor              Fornecedor Exemplo (SAO PAULO)")
-                .and(predicate::str::contains("fornecedor@exemplo.com (e-mail)"))
+                .and(predicate::str::contains(
+                    "fornecedor@empresa.example (e-mail)",
+                ))
                 .and(predicate::str::contains("Identificador          NF123"))
                 .and(predicate::str::contains(
                     "R$ 150,00 (cento e cinquenta reais)",
@@ -499,7 +504,7 @@ async fn wrong_amounts_and_corrupted_codes_are_refused() {
                 "--copia-e-cola",
                 com_valor.as_str(),
                 "--chave",
-                "fornecedor@exemplo.com",
+                "fornecedor@empresa.example",
             ],
             "--chave",
         ),
@@ -601,7 +606,7 @@ fn consulta(status: &str) -> Value {
         "transacaoPix": {
             "status": status,
             "valor": 150,
-            "chave": "fornecedor@exemplo.com",
+            "chave": "fornecedor@empresa.example",
             "codigoSolicitacao": CODIGO,
             "recebedor": {"nome": "Fornecedor Exemplo", "cpfCnpj": "***.456.789-**"}
         },
@@ -756,7 +761,7 @@ async fn sending_points_to_the_query() {
     env.write_config("");
     mount_pix(
         &env,
-        json!({"valor": 150, "destinatario": {"tipo": "CHAVE", "chave": "fornecedor@exemplo.com"}}),
+        json!({"valor": 150, "destinatario": {"tipo": "CHAVE", "chave": "fornecedor@empresa.example"}}),
         resposta("APROVACAO"),
     )
     .await;

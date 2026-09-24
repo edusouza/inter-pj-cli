@@ -2140,7 +2140,7 @@ mod tests {
         };
         let cli = parse(&[
             "--chave",
-            "Fornecedor@Exemplo.com",
+            "Fornecedor@Empresa.Example",
             "--valor",
             "1.500,00",
             "--data",
@@ -2153,7 +2153,7 @@ mod tests {
         let Command::Pix(PixCommand::Enviar(args)) = cli.command else {
             panic!("comando inesperado");
         };
-        assert_eq!(args.chave.unwrap().as_str(), "fornecedor@exemplo.com");
+        assert_eq!(args.chave.unwrap().as_str(), "fornecedor@empresa.example");
         assert_eq!(args.valor, Some("1500.00".parse::<Decimal>().unwrap()));
         assert_eq!(args.data, NaiveDate::from_ymd_opt(2026, 10, 1));
         assert_eq!(
@@ -2165,10 +2165,10 @@ mod tests {
         for args in [
             &["--valor", "10"][..],
             &["--chave", "11912345678", "--valor", "10"],
-            &["--chave", "fornecedor@exemplo.com", "--valor", "1.500"],
+            &["--chave", "fornecedor@empresa.example", "--valor", "1.500"],
             &[
                 "--chave",
-                "fornecedor@exemplo.com",
+                "fornecedor@empresa.example",
                 "--valor",
                 "10",
                 "--sim",
@@ -2176,7 +2176,7 @@ mod tests {
             ],
             &[
                 "--chave",
-                "fornecedor@exemplo.com",
+                "fornecedor@empresa.example",
                 "--valor",
                 "10",
                 "--id-idempotente",
@@ -2221,10 +2221,18 @@ mod tests {
         );
 
         // Exactly one destination.
-        assert!(parse(&["--chave", "fornecedor@exemplo.com", "--ispb", "00000000"]).is_err());
+        assert!(
+            parse(&[
+                "--chave",
+                "fornecedor@empresa.example",
+                "--ispb",
+                "00000000"
+            ])
+            .is_err()
+        );
         // Bank details go together.
         assert!(parse(&dados[..10]).is_err());
-        assert!(parse(&["--chave", "fornecedor@exemplo.com", "--agencia", "0001"]).is_err());
+        assert!(parse(&["--chave", "fornecedor@empresa.example", "--agencia", "0001"]).is_err());
         for (flag, invalido) in [
             ("--ispb", "0041696"),
             ("--agencia", "12345"),

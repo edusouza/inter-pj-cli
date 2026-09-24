@@ -235,8 +235,8 @@ mod tests {
             ChavePix::Cnpj("12345678000195".into())
         );
         assert_eq!(
-            chave(" Financeiro@Exemplo.COM.br "),
-            ChavePix::Email("financeiro@exemplo.com.br".into())
+            chave(" Financeiro@Empresa.EXAMPLE "),
+            ChavePix::Email("financeiro@empresa.example".into())
         );
         assert_eq!(
             chave("+55 (11) 91234-5678"),
@@ -251,7 +251,7 @@ mod tests {
     #[test]
     fn phones_without_country_code_are_not_taken_as_cpfs() {
         // Eleven digits are a CPF; a phone needs +55.
-        assert_eq!(chave("11987654374"), ChavePix::Cpf("11987654374".into()));
+        assert_eq!(chave("11900000083"), ChavePix::Cpf("11900000083".into()));
         for phone in ["11912345678", "(11) 91234-5678"] {
             assert_eq!(
                 ChavePix::parse(phone),
@@ -285,22 +285,22 @@ mod tests {
     #[test]
     fn rejects_invalid_emails() {
         for email in [
-            "@exemplo.com",
+            "@empresa.example",
             "fulano@",
             "fulano@exemplo",
-            "fulano@@exemplo.com",
-            "ful ano@exemplo.com",
-            "fulano@-exemplo.com",
-            "fulano@exemplo..com",
-            "joão@exemplo.com",
-            "fulano(a)@exemplo.com",
+            "fulano@@empresa.example",
+            "ful ano@empresa.example",
+            "fulano@-empresa.example",
+            "fulano@empresa..example",
+            "joão@empresa.example",
+            "fulano(a)@empresa.example",
         ] {
             assert!(
                 matches!(ChavePix::parse(email), Err(ChavePixError::Email(_))),
                 "{email}"
             );
         }
-        let longo = format!("{}@exemplo.com", "a".repeat(70));
+        let longo = format!("{}@empresa.example", "a".repeat(70));
         assert!(matches!(
             ChavePix::parse(&longo),
             Err(ChavePixError::Email(_))

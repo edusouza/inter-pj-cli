@@ -64,7 +64,7 @@ fn completa() -> EmissaoCobranca {
     pagador.numero = Some("3456".to_owned());
     pagador.complemento = Some("apartamento 3 bloco 4".to_owned());
     pagador.bairro = Some("Centro".to_owned());
-    pagador.email = Some("nome.sobrenome@exemplo.com.br".to_owned());
+    pagador.email = Some("nome.sobrenome@empresa.example".to_owned());
     pagador.ddd = Some("31".to_owned());
     pagador.telefone = Some("999999999".to_owned());
     let mut cobranca = EmissaoCobranca::new("123456", dec("2.5"), dia(2026, 10, 20), pagador);
@@ -284,7 +284,8 @@ fn payer_limits_match_the_spec() {
         let maximo = usize::try_from(propriedade["maxLength"].as_u64().unwrap()).unwrap();
         let texto = |tamanho: usize| {
             if campo == "email" {
-                format!("{}@exemplo.com.br", "a".repeat(tamanho - 15))
+                const DOMINIO: &str = "@empresa.example";
+                format!("{}{DOMINIO}", "a".repeat(tamanho - DOMINIO.len()))
             } else {
                 "a".repeat(tamanho)
             }
