@@ -39,9 +39,10 @@ pub(crate) use pix::{
     StatusCobArg,
 };
 pub(crate) use pix_automatico::{
-    PixAutomaticoCommand, Prazo, RecCancelarArgs, RecCommand, RecConsultarArgs, RecCriarArgs,
-    RecListarArgs, RecRevisarArgs, SolicitacaoCancelarArgs, SolicitacaoCommand,
-    SolicitacaoConsultarArgs, SolicitacaoCriarArgs,
+    CobrCancelarArgs, CobrCommand, CobrConsultarArgs, CobrCriarArgs, CobrListarArgs,
+    CobrRetentativaArgs, ContatoDevedorArgs, PixAutomaticoCommand, Prazo, RecCancelarArgs,
+    RecCommand, RecConsultarArgs, RecCriarArgs, RecListarArgs, RecRevisarArgs,
+    SolicitacaoCancelarArgs, SolicitacaoCommand, SolicitacaoConsultarArgs, SolicitacaoCriarArgs,
 };
 pub(crate) use webhook::{
     CallbacksArgs, WebhookBankingCommand, WebhookCadastroArgs, WebhookCobrancaCommand,
@@ -373,7 +374,10 @@ impl Command {
                 | PixCommand::Loc(PixLocCommand::Listar(_))
                 | PixCommand::LoteCobv(PixLoteCobvCommand::Listar(_)),
             )
-            | Self::PixAutomatico(PixAutomaticoCommand::Rec(RecCommand::Listar(_)))
+            | Self::PixAutomatico(
+                PixAutomaticoCommand::Rec(RecCommand::Listar(_))
+                | PixAutomaticoCommand::Cobr(CobrCommand::Listar(_)),
+            )
             | Self::Webhook(
                 WebhookCommand::Banking(WebhookBankingCommand::Callbacks(_))
                 | WebhookCommand::Cobranca(WebhookCobrancaCommand::Callbacks(_))

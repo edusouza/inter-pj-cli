@@ -878,6 +878,34 @@ Solicitação criada: o banco do pagador vai pedir que ele aprove a recorrência
 
 A CLI consulta a recorrência antes e mostra o que o pagador vai aprovar; recorrências já aprovadas ou encerradas são recusadas sem enviar nada. `--ispb` é o código de 8 dígitos do banco do pagador, `--conta` vai com o dígito verificador e `--expiracao` é o prazo para ele responder (`2h`, `7d`, uma data, até o fim do dia, ou data e hora com fuso; padrão: 7 dias). Como na recorrência, não há chave de idempotência: um resultado incerto vem com o comando que confere se a solicitação foi enviada. `solicitacao consultar <idSolicRec>` mostra em que pé ela está (enviada, recebida, aceita, rejeitada, expirada), e `solicitacao cancelar <idSolicRec>` a cancela enquanto não tiver resposta. A resposta do pagador aparece também em `rec consultar`, no status da recorrência e na lista das suas solicitações. Os escopos são `solicrec.write` e `solicrec.read`, além de `rec.read` para a consulta da recorrência.
 
+Aprovada a recorrência, cada pagamento é uma **cobrança recorrente**, uma por ciclo, que o banco do pagador debita no vencimento:
+
+```console
+$ inter-pj pix-automatico cobr criar --rec RR1234567820260924abcdefghijk --valor 149,90 \
+    --vencimento 2026-10-10 --conta 1234567 --agencia 0001 --info "Mensalidade de outubro"
+Cobrança recorrente a criar
+  Ambiente          sandbox (dados fictícios)
+  Recorrência       RR1234567820260924abcdefghijk
+  Devedor           Cliente Exemplo (123.456.789-09)
+  Contrato          contrato-001
+  Objeto            Mensalidade
+  Valor             R$ 149,90 (cento e quarenta e nove reais e noventa centavos)
+  Vencimento        10/10/2026, ou o próximo dia útil
+  Conta que recebe  conta corrente 1234567, agência 0001
+  Informação        Mensalidade de outubro
+  Retentativas      até 3 novas tentativas, em 7 dias
+  txid              7978c0c97ea847e78e8849634473c1f1
+Criar a cobrança recorrente? [s/N] s
+Cobrança recorrente criada: o banco do pagador agenda o débito para o vencimento.
+```
+
+- **A recorrência antes**: a CLI a consulta e recusa, sem enviar nada, uma que o pagador não aprovou (ou que foi encerrada); um valor diferente do fixo da recorrência e um vencimento fora do seu período viram avisos no resumo.
+- **Conta que recebe**: `--conta`, com o dígito verificador (padrão: a de `--conta-corrente`, que pode vir da configuração), `--tipo-conta` (`corrente`, o padrão, `poupanca` ou `pagamento`) e `--agencia`.
+- **Vencimento**: não pode ter passado; em fim de semana ou feriado, vai para o próximo dia útil, pelos feriados da cidade do pagador, a não ser com `--sem-ajuste-dia-util`. `--devedor-email`, `--devedor-endereco`, `--devedor-cidade`, `--devedor-uf` e `--devedor-cep` completam os dados do pagador, que é o da recorrência.
+- **txid**: sem `--txid`, a CLI gera um. Com o mesmo txid, a API não cria uma segunda cobrança; por isso, um resultado incerto vem com o comando que a confere e com o `--txid` para repetir sem risco.
+
+`pix-automatico cobr listar` mostra as cobranças recorrentes criadas em um período (padrão: últimos 30 dias), com filtros de recorrência (`--rec`), devedor (`--documento`), status (`--status criada|ativa|concluida|expirada|rejeitada|cancelada`) e `--convenio`, em texto, JSON ou CSV com os nomes da API. `cobr consultar <txid>` mostra a cobrança com as tentativas de liquidação (a data, o tipo, o status e o motivo de uma rejeição), o histórico e o Pix que a pagou. `cobr cancelar <txid>` a cancela depois de mostrá-la e pedir confirmação; pelas regras do Banco Central, isso vale até as 22h do dia anterior à liquidação, e depois disso o resumo avisa que o banco pode recusar. Quando o débito falha e a recorrência permite novas tentativas, `cobr retentativa <txid> --data AAAA-MM-DD` pede uma: a CLI confere a política e o prazo (até 7 dias depois da liquidação prevista) antes de enviar, e avisa quando já há uma tentativa naquele dia ou quando as 3 permitidas já foram pedidas. Cobranças pagas, expiradas, rejeitadas ou canceladas são recusadas sem nenhuma alteração. Os escopos são `cobr.write` e `cobr.read`, além de `rec.read` para a consulta da recorrência.
+
 ### Webhooks
 
 Webhooks são os endereços que o Inter chama quando algo acontece na conta. Cada API tem os seus:

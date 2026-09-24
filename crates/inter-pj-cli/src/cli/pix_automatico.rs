@@ -7,13 +7,16 @@ use std::path::PathBuf;
 
 use chrono::NaiveDate;
 use clap::{ArgGroup, Args, Subcommand, ValueEnum};
+use inter_pj::cobranca::Uf;
 use inter_pj::documento::Documento;
 use inter_pj::pix::Txid;
-use inter_pj::pix_automatico::{IdRec, IdSolicRec, Periodicidade, StatusRec};
+use inter_pj::pix_automatico::{
+    IdRec, IdSolicRec, Periodicidade, StatusCobR, StatusRec, TipoContaRecebedor,
+};
 use rust_decimal::Decimal;
 
 use super::pix::{Momento, PeriodoPixArgs, QrCodeArgs, parse_expiracao, parse_momento, parse_txid};
-use super::{parse_data, parse_documento};
+use super::{parse_cep, parse_data, parse_documento, parse_uf};
 use crate::valor::parse_valor;
 
 #[derive(Debug, Subcommand)]
@@ -32,6 +35,13 @@ pub(crate) enum PixAutomaticoCommand {
         subcommand_value_name = "COMANDO"
     )]
     Solicitacao(SolicitacaoCommand),
+    /// Cobranças recorrentes: cada pagamento de uma recorrência aprovada, que o banco do pagador debita no vencimento
+    #[command(
+        subcommand,
+        subcommand_help_heading = "Comandos",
+        subcommand_value_name = "COMANDO"
+    )]
+    Cobr(CobrCommand),
 }
 
 #[derive(Debug, Subcommand)]
@@ -403,4 +413,220 @@ pub(crate) struct SolicitacaoCancelarArgs {
 
 fn parse_id_solic_rec(value: &str) -> Result<IdSolicRec, String> {
     IdSolicRec::parse(value).map_err(|err| err.to_string())
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum CobrCommand {
+    /// Cria a cobrança de um ciclo de uma recorrência aprovada, após mostrar um resumo e pedir confirmação
+    Criar(Box<CobrCriarArgs>),
+    /// Cobranças recorrentes criadas em um período (padrão: últimos 30 dias), com filtros
+    Listar(CobrListarArgs),
+    /// Mostra uma cobrança recorrente, suas tentativas de liquidação e o Pix que a pagou
+    Consultar(CobrConsultarArgs),
+    /// Cancela uma cobrança recorrente, após mostrá-la e pedir confirmação
+    Cancelar(CobrCancelarArgs),
+    /// Pede uma nova tentativa de liquidação de uma cobrança não paga, após mostrá-la e pedir confirmação
+    Retentativa(CobrRetentativaArgs),
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Cobrança")]
+pub(crate) struct CobrCriarArgs {
+    /// idRec da recorrência, que o pagador precisa ter aprovado
+    #[arg(long, value_name = "ID_REC", value_parser = parse_id_rec)]
+    pub(crate) rec: IdRec,
+
+    /// Valor: 149,90, 1.500,00 ou 149.90
+    #[arg(long, value_name = "VALOR", value_parser = parse_valor)]
+    pub(crate) valor: Decimal,
+
+    /// Data de vencimento (AAAA-MM-DD)
+    #[arg(long, value_name = "AAAA-MM-DD", value_parser = parse_data)]
+    pub(crate) vencimento: NaiveDate,
+
+    /// Mantém um vencimento em dia não útil [padrão: passa para o próximo dia útil, pelos feriados da cidade do pagador]
+    #[arg(long)]
+    pub(crate) sem_ajuste_dia_util: bool,
+
+    /// Informação sobre a fatura, até 140 caracteres
+    #[arg(long, value_name = "TEXTO")]
+    pub(crate) info: Option<String>,
+
+    /// txid da cobrança: 26 a 35 letras e dígitos [padrão: um novo, aleatório]
+    #[arg(long, value_name = "TXID", value_parser = parse_txid)]
+    pub(crate) txid: Option<Txid>,
+
+    /// Conta que recebe, com o dígito verificador (que pode ser X), sem pontos nem traços [padrão: a de --conta-corrente, que pode vir da configuração]
+    #[arg(long, value_name = "CONTA", help_heading = "Conta que recebe")]
+    pub(crate) conta: Option<String>,
+
+    /// Tipo da conta: corrente, poupanca ou pagamento [padrão: corrente]
+    #[arg(
+        long,
+        value_enum,
+        ignore_case = true,
+        value_name = "TIPO",
+        hide_possible_values = true,
+        default_value = "corrente",
+        hide_default_value = true,
+        help_heading = "Conta que recebe"
+    )]
+    pub(crate) tipo_conta: TipoContaArg,
+
+    /// Agência, sem o dígito verificador
+    #[arg(long, value_name = "AGENCIA", help_heading = "Conta que recebe")]
+    pub(crate) agencia: Option<String>,
+
+    #[command(flatten)]
+    pub(crate) devedor: ContatoDevedorArgs,
+
+    /// Confirma sem perguntar (para scripts)
+    #[arg(long, conflicts_with = "simular", help_heading = "Segurança")]
+    pub(crate) sim: bool,
+
+    /// Mostra a requisição que seria enviada, sem consultar nem enviar nada
+    #[arg(long, help_heading = "Segurança")]
+    pub(crate) simular: bool,
+}
+
+/// The payer's e-mail and address in a recurring charge; the payer
+/// themselves is the one of the recurrence.
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Devedor (opcional)")]
+#[allow(clippy::struct_field_names)] // the fields are the options, --devedor-*
+pub(crate) struct ContatoDevedorArgs {
+    /// E-mail de quem paga
+    #[arg(long, value_name = "EMAIL")]
+    pub(crate) devedor_email: Option<String>,
+
+    /// Endereço de quem paga: rua, número e complemento, até 200 caracteres
+    #[arg(long, value_name = "ENDERECO")]
+    pub(crate) devedor_endereco: Option<String>,
+
+    /// Cidade
+    #[arg(long, value_name = "CIDADE")]
+    pub(crate) devedor_cidade: Option<String>,
+
+    /// UF (sigla do estado)
+    #[arg(long, value_name = "UF", value_parser = parse_uf)]
+    pub(crate) devedor_uf: Option<Uf>,
+
+    /// CEP: 30110-000 ou 30110000
+    #[arg(long, value_name = "CEP", value_parser = parse_cep)]
+    pub(crate) devedor_cep: Option<String>,
+}
+
+/// The kind of the receiver's account, as an option.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum TipoContaArg {
+    Corrente,
+    Poupanca,
+    Pagamento,
+}
+
+impl From<TipoContaArg> for TipoContaRecebedor {
+    fn from(arg: TipoContaArg) -> Self {
+        match arg {
+            TipoContaArg::Corrente => Self::Corrente,
+            TipoContaArg::Poupanca => Self::Poupanca,
+            TipoContaArg::Pagamento => Self::Pagamento,
+        }
+    }
+}
+
+/// The status of a recurring charge, as an option.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum StatusCobrArg {
+    Criada,
+    Ativa,
+    Concluida,
+    Expirada,
+    Rejeitada,
+    Cancelada,
+}
+
+impl From<StatusCobrArg> for StatusCobR {
+    fn from(arg: StatusCobrArg) -> Self {
+        match arg {
+            StatusCobrArg::Criada => Self::Criada,
+            StatusCobrArg::Ativa => Self::Ativa,
+            StatusCobrArg::Concluida => Self::Concluida,
+            StatusCobrArg::Expirada => Self::Expirada,
+            StatusCobrArg::Rejeitada => Self::Rejeitada,
+            StatusCobrArg::Cancelada => Self::Cancelada,
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct CobrListarArgs {
+    #[command(flatten)]
+    pub(crate) periodo: PeriodoPixArgs,
+
+    /// Apenas as desta recorrência
+    #[arg(long, value_name = "ID_REC", value_parser = parse_id_rec)]
+    pub(crate) rec: Option<IdRec>,
+
+    /// Apenas as deste devedor (CPF ou CNPJ)
+    #[arg(long, value_name = "CPF/CNPJ", value_parser = parse_documento)]
+    pub(crate) documento: Option<Documento>,
+
+    /// Apenas neste status: criada, ativa, concluida, expirada, rejeitada ou cancelada
+    #[arg(
+        long,
+        value_enum,
+        ignore_case = true,
+        value_name = "STATUS",
+        hide_possible_values = true
+    )]
+    pub(crate) status: Option<StatusCobrArg>,
+
+    /// Apenas deste convênio, até 60 caracteres
+    #[arg(long, value_name = "CONVENIO")]
+    pub(crate) convenio: Option<String>,
+
+    /// Traz só esta página (a primeira é 0), em vez de todas
+    #[arg(long, value_name = "N")]
+    pub(crate) pagina: Option<u32>,
+
+    /// Itens por página com --pagina, de 1 a 1000 [padrão da API: 100]
+    #[arg(long, value_name = "N", requires = "pagina")]
+    pub(crate) itens_por_pagina: Option<u32>,
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct CobrConsultarArgs {
+    /// txid da cobrança recorrente, mostrado por `pix-automatico cobr criar` e `listar`
+    #[arg(value_name = "TXID", value_parser = parse_txid)]
+    pub(crate) txid: Txid,
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct CobrCancelarArgs {
+    /// txid da cobrança recorrente
+    #[arg(value_name = "TXID", value_parser = parse_txid)]
+    pub(crate) txid: Txid,
+
+    /// Confirma sem perguntar (para scripts)
+    #[arg(long, help_heading = "Segurança")]
+    pub(crate) sim: bool,
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct CobrRetentativaArgs {
+    /// txid da cobrança recorrente não paga
+    #[arg(value_name = "TXID", value_parser = parse_txid)]
+    pub(crate) txid: Txid,
+
+    /// Dia da nova tentativa (AAAA-MM-DD): até 7 dias depois da liquidação prevista, em um dia sem outra tentativa
+    #[arg(long, value_name = "AAAA-MM-DD", value_parser = parse_data)]
+    pub(crate) data: NaiveDate,
+
+    /// Confirma sem perguntar (para scripts)
+    #[arg(long, help_heading = "Segurança")]
+    pub(crate) sim: bool,
 }

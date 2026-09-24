@@ -112,8 +112,31 @@ pub(super) fn pessoa(pessoa: &PessoaPix) -> Option<String> {
     }
 }
 
+/// `Avenida Brasil, 1200 - Belo Horizonte/MG - CEP 30110-000`.
+pub(super) fn endereco(
+    logradouro: Option<&str>,
+    cidade: Option<&str>,
+    uf: Option<&str>,
+    cep: Option<&str>,
+) -> Option<String> {
+    let mut partes: Vec<String> = logradouro.map(str::to_owned).into_iter().collect();
+    match (cidade, uf) {
+        (Some(cidade), Some(uf)) => partes.push(format!("{cidade}/{uf}")),
+        (Some(parte), None) | (None, Some(parte)) => partes.push(parte.to_owned()),
+        (None, None) => {}
+    }
+    if let Some(cep) = cep {
+        let cep = match (cep.get(..5), cep.get(5..)) {
+            (Some(inicio), Some(fim)) if cep.len() == 8 => format!("{inicio}-{fim}"),
+            _ => cep.to_owned(),
+        };
+        partes.push(format!("CEP {cep}"));
+    }
+    (!partes.is_empty()).then(|| partes.join(" - "))
+}
+
 /// The Pix received by a charge, with the times in `fuso`.
-fn tabela_pix<Tz: TimeZone>(pix: &[PixRecebido], fuso: &Tz) -> Tabela
+pub(super) fn tabela_pix<Tz: TimeZone>(pix: &[PixRecebido], fuso: &Tz) -> Tabela
 where
     Tz::Offset: std::fmt::Display,
 {
@@ -181,13 +204,14 @@ fn descrever_status_devolucao(status: &StatusDevolucao) -> &str {
     }
 }
 
-/// The error of a creation: with an unknown outcome, how to check and
-/// repeat it with the same txid.
-fn incerta(err: InterError, tipo: &'static str, txid: &Txid) -> CliError {
+/// The error of the creation of a charge with a txid: with an unknown
+/// outcome, how to check (with `comando`, `pix cob`) and repeat it with the
+/// same txid.
+pub(super) fn incerta(err: InterError, comando: &'static str, txid: &Txid) -> CliError {
     if resultado_incerto(&err) {
         CliError::CobrancaPixIncerta {
             source: err,
-            tipo,
+            comando,
             txid: txid.to_string(),
         }
     } else {
