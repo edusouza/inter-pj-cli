@@ -14,6 +14,7 @@ use secrecy::ExposeSecret;
 
 use crate::cli::{Cli, Command, Formato, GlobalArgs};
 use crate::config::{self as settings, Given, Inputs, Settings, Source};
+use crate::doctor;
 use crate::error::CliError;
 use crate::paths;
 use crate::token_store::FileTokenStore;
@@ -56,6 +57,7 @@ pub(crate) struct Context {
 /// Origin (flag or environment) of each flag-backed setting.
 #[derive(Debug, Default)]
 struct Sources {
+    config: Option<Source>,
     perfil: Option<Source>,
     ambiente: Option<Source>,
     client_id: Option<Source>,
@@ -67,6 +69,7 @@ struct Sources {
 impl Context {
     fn new(global: GlobalArgs, matches: &ArgMatches, env: &dyn Env) -> Result<Self, CliError> {
         let sources = Sources {
+            config: source_of(matches, "config", "INTER_CONFIG"),
             perfil: source_of(matches, "perfil", "INTER_PERFIL"),
             ambiente: source_of(matches, "ambiente", "INTER_AMBIENTE"),
             client_id: source_of(matches, "client_id", "INTER_CLIENT_ID"),
@@ -98,14 +101,51 @@ impl Context {
         &self.cache_dir
     }
 
+    /// A command for the user to run next, with the configuration file
+    /// when it was given by `--config`.
+    pub(crate) fn sugestao(&self, comando: &str) -> String {
+        match self.sources.config {
+            Some(Source::Flag) => format!(
+                "inter-pj --config \"{}\" {comando}",
+                self.config_path.display()
+            ),
+            _ => format!("inter-pj {comando}"),
+        }
+    }
+
     /// Loads the configuration file and resolves the selected profile.
     pub(crate) fn settings(&self) -> Result<Settings, CliError> {
-        let loaded = settings::load(&self.config_path)?;
+        let loaded = settings::load(&self.config_path).map_err(|err| match err {
+            CliError::ConfigFile {
+                mensagem,
+                verificar,
+            } => CliError::ConfigFile {
+                mensagem,
+                verificar: verificar.map(|_| self.sugestao("config verificar")),
+            },
+            err => err,
+        })?;
+        let resolved = Settings::resolve(&loaded, self.inputs())?;
+        for warning in &resolved.warnings {
+            eprintln!("aviso: {warning}");
+        }
+        for (chave, caminho) in resolved.paths_with_control_chars() {
+            eprintln!(
+                "aviso: o caminho de {chave} tem um caractere de controle (\"{}\"): entre aspas duplas, a barra invertida começa um escape; use aspas simples ou execute `{}`",
+                doctor::escapar_controles(&caminho.display().to_string()),
+                self.sugestao("config verificar --corrigir")
+            );
+        }
+        Ok(resolved)
+    }
+
+    /// The settings given by flags and environment variables.
+    pub(crate) fn inputs(&self) -> Inputs {
         let given = |value: &Option<String>, source: Option<Source>| Given {
             value: value.clone(),
             source,
         };
-        let inputs = Inputs {
+        Inputs {
             perfil: given(&self.global.perfil, self.sources.perfil),
             ambiente: given(&self.global.ambiente, self.sources.ambiente),
             client_id: given(&self.global.client_id, self.sources.client_id),
@@ -120,12 +160,7 @@ impl Context {
             conta_corrente: given(&self.global.conta_corrente, self.sources.conta_corrente),
             client_secret: self.client_secret.clone(),
             base_url: self.base_url.clone(),
-        };
-        let resolved = Settings::resolve(&loaded, inputs)?;
-        for warning in &resolved.warnings {
-            eprintln!("aviso: {warning}");
         }
-        Ok(resolved)
     }
 
     /// Builds a client for the selected profile.

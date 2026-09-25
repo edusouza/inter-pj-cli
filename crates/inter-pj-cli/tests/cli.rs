@@ -52,8 +52,18 @@ impl TestEnv {
             self.path("certificado.crt").display(),
             self.path("chave.key").display(),
         );
+        self.write_config_text(&content);
+    }
+
+    /// Writes `content` as the configuration file.
+    fn write_config_text(&self, content: &str) {
         fs::create_dir_all(self.config_path().parent().unwrap()).unwrap();
-        write_private(&self.config_path(), &content);
+        write_private(&self.config_path(), content);
+    }
+
+    /// The copy kept by `config verificar --corrigir`.
+    fn config_backup_path(&self) -> PathBuf {
+        self.path("config").join("config.toml.bak")
     }
 
     /// The binary with an isolated environment.
@@ -681,6 +691,339 @@ async fn avisa_quando_arquivos_com_segredos_estao_abertos() {
                     "aviso: a chave privada pode ser lida",
                 )),
         );
+}
+
+// --- config verificar ----------------------------------------------------------------
+
+/// A profile written by hand on Windows, with the paths between double quotes.
+const CONFIG_COM_ASPAS_DUPLAS: &str = r#"perfil_padrao = "padrao"
+
+[perfis.padrao]
+ambiente = "sandbox"
+client_id = "client-id-e2e-0000-1111"
+certificado = "C:\Users\teste\inter\certificado.crt"
+chave_privada = "C:\Users\teste\inter\chave.key"  # baixada do Internet Banking
+"#;
+
+/// `CONFIG_COM_ASPAS_DUPLAS` after `config verificar --corrigir`.
+const CONFIG_CORRIGIDA: &str = r#"perfil_padrao = "padrao"
+
+[perfis.padrao]
+ambiente = "sandbox"
+client_id = "client-id-e2e-0000-1111"
+certificado = 'C:\Users\teste\inter\certificado.crt'
+chave_privada = 'C:\Users\teste\inter\chave.key'  # baixada do Internet Banking
+"#;
+
+fn assert_contains_all(text: &str, expected: &[&str]) {
+    for item in expected {
+        assert!(text.contains(item), "faltou {item:?} em:\n{text}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn caminho_do_windows_entre_aspas_duplas_e_explicado() {
+    let env = TestEnv::new().await;
+    env.write_config_text(CONFIG_COM_ASPAS_DUPLAS);
+    let assert = env.cmd().args(["config", "mostrar"]).assert().code(3);
+    let stderr = stderr_of(&assert);
+    assert_contains_all(
+        &stderr,
+        &[
+            "erro: arquivo de configuração inválido (",
+            ", linha 6): o valor de certificado está entre aspas duplas e tem uma barra invertida",
+            "use aspas simples (certificado = 'C:\\pasta\\arquivo')",
+            "dica: `inter-pj config verificar` mostra a correção de cada linha; com `--corrigir`, ele a aplica",
+        ],
+    );
+    // Neither the parser's message about escapes nor the line itself.
+    assert!(!stderr.contains("unicode"), "{stderr}");
+    assert!(!stderr.contains("inter\\certificado.crt"), "{stderr}");
+
+    // A file given by --config stays in the suggested command.
+    let config = env.config_path();
+    env.cmd()
+        .env_remove("INTER_CONFIG")
+        .arg("--config")
+        .arg(&config)
+        .arg("saldo")
+        .assert()
+        .code(3)
+        .stderr(predicate::str::contains(format!(
+            "dica: `inter-pj --config \"{}\" config verificar`",
+            config.display()
+        )));
+
+    // Another error of the file has nothing for `--corrigir` to fix.
+    env.write_config_text("[perfis.padrao]\nclientid = \"x\"\n");
+    let assert = env.cmd().args(["config", "mostrar"]).assert().code(3);
+    let stderr = stderr_of(&assert);
+    assert!(stderr.contains(", linha 2): unknown field"), "{stderr}");
+    assert!(!stderr.contains("dica:"), "{stderr}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn config_verificar_aponta_as_linhas_e_a_correcao() {
+    let env = TestEnv::new().await;
+    env.write_config_text(CONFIG_COM_ASPAS_DUPLAS);
+    let assert = env.cmd().args(["config", "verificar"]).assert().code(3);
+    assert_contains_all(
+        &stdout_of(&assert),
+        &[
+            &format!("Arquivo: {}", env.config_path().display()),
+            "erro      linha 6, certificado: caminho do Windows entre aspas duplas: em TOML, a barra invertida começa um escape",
+            "          corrija para: certificado = 'C:\\Users\\teste\\inter\\certificado.crt'\n",
+            "erro      linha 7, chave_privada: caminho do Windows entre aspas duplas",
+            "          corrija para: chave_privada = 'C:\\Users\\teste\\inter\\chave.key'  # baixada do Internet Banking\n",
+            "2 erros e 0 avisos.",
+            "Para trocar as aspas: inter-pj config verificar --corrigir",
+        ],
+    );
+    assert!(stderr_of(&assert).contains("erro: a configuração tem 2 erros"));
+    // Without --corrigir, nothing is written.
+    assert_eq!(
+        fs::read_to_string(env.config_path()).unwrap(),
+        CONFIG_COM_ASPAS_DUPLAS
+    );
+    assert!(!env.config_backup_path().exists());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn config_verificar_corrigir_troca_as_aspas_e_guarda_o_original() {
+    let env = TestEnv::new().await;
+    env.write_config_text(CONFIG_COM_ASPAS_DUPLAS);
+    let copia = env.config_backup_path();
+    let assert = env
+        .cmd()
+        .args(["config", "verificar", "--corrigir"])
+        .assert()
+        .code(3);
+    let stdout = stdout_of(&assert);
+    assert_contains_all(
+        &stdout,
+        &[
+            "corrigido linha 6, certificado: aspas simples no lugar das aspas duplas",
+            "corrigido linha 7, chave_privada: aspas simples no lugar das aspas duplas",
+            "ok        sintaxe: o arquivo é TOML válido",
+            "ok        client_id: ",
+            // The files of the example do not exist here: the check goes on.
+            "erro      certificado: arquivo não encontrado: ",
+            &format!("Cópia do arquivo original: {}", copia.display()),
+        ],
+    );
+    assert!(!stdout.contains("Para trocar as aspas"), "{stdout}");
+    assert_eq!(
+        fs::read_to_string(env.config_path()).unwrap(),
+        CONFIG_CORRIGIDA
+    );
+    assert_eq!(fs::read_to_string(&copia).unwrap(), CONFIG_COM_ASPAS_DUPLAS);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = fs::metadata(&copia).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+    }
+
+    // The file loads again, with the paths as typed.
+    env.cmd()
+        .args(["config", "mostrar"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "C:\\Users\\teste\\inter\\certificado.crt (arquivo)",
+        ));
+
+    // With nothing left to fix, the copy of the original is kept.
+    env.cmd()
+        .args(["config", "verificar", "--corrigir"])
+        .assert()
+        .code(3)
+        .stdout(predicate::str::contains("corrigido").not());
+    assert_eq!(fs::read_to_string(&copia).unwrap(), CONFIG_COM_ASPAS_DUPLAS);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn config_verificar_corrigir_nao_sobrescreve_uma_copia() {
+    let env = TestEnv::new().await;
+    env.write_config_text(CONFIG_COM_ASPAS_DUPLAS);
+    write_private(&env.config_backup_path(), "# cópia feita antes\n");
+    let nova = env.path("config").join("config.toml.bak.2");
+    env.cmd()
+        .args(["config", "verificar", "--corrigir"])
+        .assert()
+        .code(3)
+        .stdout(predicate::str::contains(format!(
+            "Cópia do arquivo original: {}\n",
+            nova.display()
+        )));
+    assert_eq!(
+        fs::read_to_string(env.config_backup_path()).unwrap(),
+        "# cópia feita antes\n"
+    );
+    assert_eq!(fs::read_to_string(&nova).unwrap(), CONFIG_COM_ASPAS_DUPLAS);
+    assert_eq!(
+        fs::read_to_string(env.config_path()).unwrap(),
+        CONFIG_CORRIGIDA
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn config_verificar_confere_o_perfil_completo() {
+    let env = TestEnv::new().await;
+    env.write_config("conta_corrente = \"7654321\"");
+    let assert = env.cmd().args(["config", "verificar"]).assert().success();
+    let stdout = stdout_of(&assert);
+    assert_contains_all(
+        &stdout,
+        &[
+            "ok        sintaxe: o arquivo é TOML válido",
+            "ok        perfil: padrao (arquivo)",
+            "ok        ambiente: sandbox (arquivo)",
+            "ok        client_secret: definido, oculto (variável INTER_CLIENT_SECRET)",
+            &format!(
+                "ok        certificado: {} (arquivo)",
+                env.path("certificado.crt").display()
+            ),
+            "ok        certificado e chave: lidos e aceitos pela biblioteca TLS",
+            "ok        conta_corrente: *****21 (arquivo)",
+            "Nenhum problema encontrado.",
+        ],
+    );
+    let output = format!("{stdout}{}", stderr_of(&assert));
+    assert!(!output.contains(CLIENT_SECRET), "{output}");
+    assert!(!output.contains("7654321"), "{output}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn config_verificar_aponta_o_que_falta_e_o_que_nao_existe() {
+    let env = TestEnv::new().await;
+    let assert = env
+        .cmd()
+        .env_remove("INTER_CLIENT_SECRET")
+        .args(["config", "verificar"])
+        .assert()
+        .code(3);
+    assert_contains_all(
+        &stdout_of(&assert),
+        &[
+            "aviso     arquivo: não existe: crie com `inter-pj config init`",
+            "erro      ambiente: não definido",
+            "erro      client_id: não definido",
+            "erro      client_secret: não definido: defina INTER_CLIENT_SECRET",
+            "erro      certificado: não definido",
+            "erro      chave_privada: não definido",
+            "5 erros e 1 aviso.",
+        ],
+    );
+
+    env.write_config("conta_corrente = \"07654321\"");
+    let assert = env
+        .cmd()
+        .args(["config", "verificar", "--certificado", "nao-existe.crt"])
+        .assert()
+        .code(3);
+    let stdout = stdout_of(&assert);
+    assert_contains_all(
+        &stdout,
+        &[
+            "erro      certificado: arquivo não encontrado: nao-existe.crt (flag)",
+            "erro      conta_corrente: inválida: use apenas dígitos",
+            "2 erros e 0 avisos.",
+        ],
+    );
+    assert!(!stdout.contains("07654321"), "{stdout}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn config_verificar_em_json() {
+    let env = TestEnv::new().await;
+    env.write_config_text(CONFIG_COM_ASPAS_DUPLAS);
+    let assert = env
+        .cmd()
+        .args(["config", "verificar", "--json"])
+        .assert()
+        .code(3);
+    let json: Value = serde_json::from_str(&stdout_of(&assert)).unwrap();
+    assert_eq!(json["arquivo"], env.config_path().display().to_string());
+    assert_eq!(json["existe"], true);
+    assert_eq!(json["copia"], Value::Null);
+    assert_eq!(json["erros"], 2);
+    assert_eq!(json["avisos"], 0);
+    let achado = &json["achados"][0];
+    assert_eq!(achado["nivel"], "erro");
+    assert_eq!(achado["item"], "linha 6, certificado");
+    assert_eq!(achado["linha"], 6);
+    assert_eq!(achado["corrigivel"], true);
+    assert_eq!(
+        achado["sugestao"],
+        "corrija para: certificado = 'C:\\Users\\teste\\inter\\certificado.crt'"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn barra_invertida_no_segredo_nunca_mostra_o_segredo() {
+    let env = TestEnv::new().await;
+    env.write_config("client_secret = \"segredo\\qgravado-no-arquivo\"");
+    let runs: [(&[&str], &str); 3] = [
+        (
+            &["config", "mostrar"],
+            "linha 8): o valor de client_secret está entre aspas duplas",
+        ),
+        (
+            &["config", "verificar"],
+            "o TOML recusa (o valor não é mostrado)\n          use aspas simples no valor",
+        ),
+        (
+            &["config", "verificar", "--corrigir"],
+            "corrigido linha 8, client_secret: aspas simples",
+        ),
+    ];
+    for (args, expected) in runs {
+        let assert = env.cmd().args(args).assert();
+        let output = format!("{}{}", stdout_of(&assert), stderr_of(&assert));
+        assert!(output.contains(expected), "{expected:?} em:\n{output}");
+        assert!(!output.contains("gravado-no-arquivo"), "{output}");
+    }
+    env.cmd()
+        .env_remove("INTER_CLIENT_SECRET")
+        .args(["config", "mostrar"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("definido (oculto) (arquivo)"));
+    assert!(
+        fs::read_to_string(env.config_path())
+            .unwrap()
+            .contains("client_secret = 'segredo\\qgravado-no-arquivo'")
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn caminho_com_escape_valido_e_apontado() {
+    let env = TestEnv::new().await;
+    // "\n" and "\t" are valid escapes: the file loads, with a line break and
+    // a tab in the path.
+    env.write_config_text(&format!(
+        "[perfis.padrao]\nambiente = \"sandbox\"\nclient_id = \"{CLIENT_ID}\"\ncertificado = \"C:\\novo\\teste.crt\"\nchave_privada = '{}'\n",
+        env.path("chave.key").display()
+    ));
+    env.cmd().arg("saldo").assert().code(3).stderr(
+        predicate::str::contains(
+            "aviso: o caminho de certificado tem um caractere de controle (\"",
+        )
+        .and(predicate::str::contains("C:\\novo\\teste.crt\")"))
+        .and(predicate::str::contains(
+            "use aspas simples ou execute `inter-pj config verificar --corrigir`",
+        )),
+    );
+    let assert = env.cmd().args(["config", "verificar"]).assert().code(3);
+    assert_contains_all(
+        &stdout_of(&assert),
+        &[
+            "erro      linha 4, certificado: caminho do Windows entre aspas duplas: em TOML, \\n, \\t e outros escapes viram caracteres de controle",
+            "          corrija para: certificado = 'C:\\novo\\teste.crt'\n",
+            "erro      certificado: o caminho lido tem um caractere de controle",
+        ],
+    );
 }
 
 // --- ajuda ------------------------------------------------------------------------------

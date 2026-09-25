@@ -13,7 +13,7 @@ use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 
 use crate::error::CliError;
-use crate::paths;
+use crate::{doctor, paths};
 
 /// Profile used when none is selected.
 pub(crate) const DEFAULT_PROFILE: &str = "padrao";
@@ -43,9 +43,11 @@ client_id = ""
 # client_secret = ""
 
 # Certificado (.crt) e chave privada (.key) baixados na criação da integração.
-# Caminhos absolutos, relativos a este arquivo ou iniciados por ~/.
-certificado = ""
-chave_privada = ""
+# Caminhos absolutos, relativos a este arquivo ou iniciados por ~/, entre aspas
+# simples: entre aspas duplas, a barra invertida dos caminhos do Windows começa
+# um escape. Exemplo no Windows: certificado = 'C:\inter\certificado.crt'
+certificado = ''
+chave_privada = ''
 
 # Somente dígitos; necessário apenas se a integração tiver mais de uma conta.
 # conta_corrente = ""
@@ -103,23 +105,52 @@ pub(crate) fn load(path: &Path) -> Result<LoadedConfig, CliError> {
             )));
         }
     };
-    let file = toml::from_str(&text).map_err(|err: toml::de::Error| {
-        // Do not print the offending line: it may contain the client_secret.
-        let line = err
-            .span()
-            .map(|span| text[..span.start.min(text.len())].lines().count().max(1));
-        let location = line.map(|n| format!(", linha {n}")).unwrap_or_default();
-        CliError::Config(format!(
-            "arquivo de configuração inválido ({}{location}): {}",
-            path.display(),
-            err.message()
-        ))
-    })?;
+    let file = parse(path, &text)?;
     Ok(LoadedConfig {
         path: path.to_path_buf(),
         exists: true,
         file,
     })
+}
+
+/// Parses the text of the configuration file at `path`.
+pub(crate) fn parse(path: &Path, text: &str) -> Result<ConfigFile, CliError> {
+    toml::from_str(text).map_err(|err: toml::de::Error| {
+        // Do not print the offending line: it may contain the client_secret.
+        let line = err.span().map(|span| line_of(text, span.start));
+        let location = line.map(|n| format!(", linha {n}")).unwrap_or_default();
+        // A backslash between double quotes, the usual Windows path, gets an
+        // explanation instead of the parser's message about escapes.
+        let aspas = line.and_then(|n| {
+            doctor::aspas_duplas(text)
+                .into_iter()
+                .find(|problema| problema.linha == n && problema.invalida)
+        });
+        let detail = match &aspas {
+            Some(problema) => format!(
+                "o valor de {chave} está entre aspas duplas e tem uma barra invertida, que em TOML começa um escape; nos caminhos do Windows, use aspas simples ({chave} = 'C:\\pasta\\arquivo')",
+                chave = problema.chave
+            ),
+            None => err.message().to_owned(),
+        };
+        CliError::ConfigFile {
+            mensagem: format!(
+                "arquivo de configuração inválido ({}{location}): {detail}",
+                path.display()
+            ),
+            verificar: aspas
+                .filter(|problema| problema.correcao.is_some())
+                .map(|_| "inter-pj config verificar".to_owned()),
+        }
+    })
+}
+
+/// Line (from 1) of the byte `offset` of `text`: one more than the line
+/// breaks before it.
+pub(crate) fn line_of(text: &str, offset: usize) -> usize {
+    text.as_bytes()[..offset.min(text.len())]
+        .split(|&byte| byte == b'\n')
+        .count()
 }
 
 /// Where a setting came from.
@@ -318,6 +349,27 @@ impl Settings {
             base_url,
             warnings,
         })
+    }
+
+    /// The paths read from the file that hold a control character: a Windows
+    /// path between double quotes whose backslashes formed valid escapes,
+    /// such as `\n` in `"C:\novo"`.
+    pub(crate) fn paths_with_control_chars(&self) -> Vec<(&'static str, &Path)> {
+        [
+            ("certificado", &self.certificado),
+            ("chave_privada", &self.chave_privada),
+        ]
+        .into_iter()
+        .filter_map(|(chave, setting)| {
+            let setting = setting.as_ref().filter(|s| s.source == Source::File)?;
+            let caminho = setting.value.as_path();
+            caminho
+                .to_string_lossy()
+                .chars()
+                .any(char::is_control)
+                .then_some((chave, caminho))
+        })
+        .collect()
     }
 
     /// Base URL used for requests: the override, or the environment's.
@@ -652,10 +704,50 @@ mod tests {
     }
 
     #[test]
+    fn a_windows_path_in_double_quotes_is_explained() {
+        let texto = "[perfis.padrao]\nclient_id = \"x\"\ncertificado = \"C:\\Users\\teste\\inter\\c.crt\"\n";
+        let err = parse(Path::new("config.toml"), texto).unwrap_err();
+        assert!(matches!(err, CliError::ConfigFile { .. }), "{err:?}");
+        let err = err.to_string();
+        assert!(err.contains("linha 3"), "{err}");
+        assert!(
+            err.contains("o valor de certificado está entre aspas duplas"),
+            "{err}"
+        );
+        assert!(err.contains("use aspas simples"), "{err}");
+        // Only a generic example: never the value of the file.
+        assert!(!err.contains("teste"), "{err}");
+    }
+
+    #[test]
+    fn a_backslash_in_the_secret_is_explained_without_the_secret() {
+        let texto = "[perfis.padrao]\nclient_secret = \"se\\gredo\"\n";
+        let err = parse(Path::new("config.toml"), texto)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("linha 2"), "{err}");
+        assert!(err.contains("o valor de client_secret"), "{err}");
+        assert!(!err.contains("gredo"), "{err}");
+    }
+
+    #[test]
+    fn lines_are_counted_from_one() {
+        let texto = "a = 1\nb = 2\n";
+        assert_eq!(line_of(texto, 0), 1);
+        assert_eq!(line_of(texto, 5), 1);
+        assert_eq!(line_of(texto, 6), 2);
+        assert_eq!(line_of(texto, texto.len()), 3);
+    }
+
+    #[test]
     fn template_is_valid() {
         let file: ConfigFile = toml::from_str(TEMPLATE).unwrap();
         assert_eq!(file.perfil_padrao.as_deref(), Some(DEFAULT_PROFILE));
         assert!(file.perfis.contains_key(DEFAULT_PROFILE));
+        // Paths go between single quotes, where a Windows backslash is kept.
+        assert!(TEMPLATE.contains("\ncertificado = ''\n"), "{TEMPLATE}");
+        assert!(TEMPLATE.contains("\nchave_privada = ''\n"), "{TEMPLATE}");
+        assert!(crate::doctor::aspas_duplas(TEMPLATE).is_empty());
     }
 
     #[test]
