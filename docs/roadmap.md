@@ -14,6 +14,7 @@ Planejado a partir das especificações de todas as APIs do [Portal do Desenvolv
 | Versão | Tema | Épico | Operações |
 | --- | --- | --- | --- |
 | **0.1.0** | Fundação: autenticação mTLS e saldo | [#1](https://github.com/edusouza/inter-pj-cli/issues/1) | `POST /oauth/v2/token`, `GET /banking/v2/saldo` |
+| **0.1.1** | Diagnóstico do arquivo de configuração (`config verificar`) | [#164](https://github.com/edusouza/inter-pj-cli/issues/164) | — |
 | 0.2.0 | Extrato: consulta, enriquecido, PDF e exportação | [#12](https://github.com/edusouza/inter-pj-cli/issues/12) | `GET /banking/v2/extrato`, `/extrato/completo`, `/extrato/exportar` |
 | 0.3.0 | Pix: envio e consulta | [#18](https://github.com/edusouza/inter-pj-cli/issues/18) | `POST /banking/v2/pix`, `GET /banking/v2/pix/{codigoSolicitacao}` |
 | 0.4.0 | Pagamentos: boletos, tributos, DARF e lotes | [#22](https://github.com/edusouza/inter-pj-cli/issues/22) | `/banking/v2/pagamento*` (7 operações) |
@@ -32,6 +33,7 @@ Fora do escopo: a API Fórum (publicações na comunidade de desenvolvedores), q
 inter-pj saldo                                   0.1.0
 inter-pj auth token|limpar                       0.1.0
 inter-pj config init|caminho|mostrar             0.1.0
+inter-pj config verificar [--corrigir]           0.1.1
 inter-pj extrato [completo|pdf]                  0.2.0
 inter-pj pix enviar|consultar                    0.3.0
 inter-pj pagamento boleto|darf|lote ...          0.4.0
