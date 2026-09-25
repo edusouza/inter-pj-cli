@@ -6,6 +6,22 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+## [0.1.1] - 2026-09-25
+
+Diagnóstico do arquivo de configuração.
+
+### Adicionado
+
+- `inter-pj config verificar`: confere o arquivo de configuração e o perfil. Mostra cada problema com a linha e a correção: caminhos do Windows entre aspas duplas, sintaxe do TOML, o que falta no perfil, arquivos que não existem, certificado e chave aceitos pela biblioteca TLS, conta corrente e permissões. Sai com código 3 quando encontra um erro, e `--json` dá o resultado para scripts (#164).
+- `inter-pj config verificar --corrigir`: troca as aspas duplas dos caminhos do Windows por aspas simples, mantendo recuo, comentários e fim de linha, e guarda o original em `config.toml.bak` (permissão 600, sem sobrescrever uma cópia anterior) (#164).
+
+### Corrigido
+
+- Um caminho do Windows entre aspas duplas (`certificado = "C:\Users\..."`) deixava de ser um erro em inglês sobre dígitos unicode. Agora a mensagem, em português, explica o escape do TOML, indica as aspas simples e sugere o `config verificar`. O conteúdo da linha continua sem aparecer, porque pode ter o `client_secret` (#164).
+- Os comandos avisam quando um caminho lido do arquivo tem um caractere de controle. Isso acontece quando `\n` ou `\t` entre aspas duplas viram uma quebra de linha ou uma tabulação (#164).
+- A linha informada num erro do arquivo de configuração saía com um a menos quando o erro apontava o início de uma linha, como numa chave desconhecida (#164).
+- O modelo do `config init` e o README usam aspas simples nos caminhos e explicam o motivo (#164).
+
 ## [0.1.0] - 2026-09-23
 
 Primeira versão: autenticação e saldo.
