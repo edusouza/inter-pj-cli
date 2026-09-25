@@ -117,6 +117,10 @@ impl Default for RetryPolicy {
 pub(crate) enum RetryMode {
     /// Repeating the request has no further effect (`GET`, token request).
     Idempotent,
+    /// The request changes server-side state (e.g. advances a scroll), so it
+    /// is repeated only when it surely was not processed: rate limited
+    /// (`429`) or the connection could not be established.
+    WhenNotProcessed,
     /// Never repeated (payments and other operations with side effects).
     Never,
 }
@@ -126,6 +130,7 @@ impl RetryMode {
     pub(crate) fn retries_status(self, status: StatusCode) -> bool {
         match self {
             Self::Idempotent => matches!(status.as_u16(), 429 | 500 | 502 | 503 | 504),
+            Self::WhenNotProcessed => status == StatusCode::TOO_MANY_REQUESTS,
             Self::Never => false,
         }
     }
@@ -135,6 +140,8 @@ impl RetryMode {
     pub(crate) fn retries_transport(self, err: &reqwest::Error) -> bool {
         let transient = match self {
             Self::Idempotent => err.is_connect() || err.is_timeout(),
+            // A timeout may strike after the server processed the request.
+            Self::WhenNotProcessed => err.is_connect(),
             Self::Never => false,
         };
         transient && !is_tls_failure(err)
@@ -243,6 +250,13 @@ mod tests {
         for code in [200, 400, 401, 403, 404, 409, 422, 501] {
             assert!(
                 !RetryMode::Idempotent.retries_status(status(code)),
+                "{code}"
+            );
+        }
+        assert!(RetryMode::WhenNotProcessed.retries_status(status(429)));
+        for code in [500, 502, 503, 504] {
+            assert!(
+                !RetryMode::WhenNotProcessed.retries_status(status(code)),
                 "{code}"
             );
         }
