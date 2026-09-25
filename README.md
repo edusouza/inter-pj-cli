@@ -63,21 +63,68 @@ perfil_padrao = "padrao"
 [perfis.padrao]
 ambiente = "sandbox"              # ou "producao"
 client_id = "<seu client_id>"
-certificado = "~/inter/certificado.crt"
-chave_privada = "~/inter/chave.key"
+certificado = '~/inter/certificado.crt'
+chave_privada = '~/inter/chave.key'
 # conta_corrente = "<numero>"     # só se a integração tiver mais de uma conta
 # escopos = ["extrato.read"]      # opcional: escopos pedidos em todo token
 ```
+
+Escreva os caminhos entre **aspas simples**, principalmente no Windows (`certificado = 'C:\inter\certificado.crt'`). Entre aspas duplas, a barra invertida começa um escape do TOML. `"C:\Users\..."` impede a leitura do arquivo (`\U` pede 8 dígitos hexadecimais). Já `"C:\novo\teste.crt"` é lido, mas com uma quebra de linha e uma tabulação no lugar de `\n` e `\t`. Caminhos relativos são relativos ao arquivo de configuração, e `~/` é a sua pasta pessoal.
 
 ### 3. Informe o segredo pela variável de ambiente
 
 ```console
 $ export INTER_CLIENT_SECRET='<seu client_secret>'
-$ inter-pj config mostrar     # confere a configuração efetiva (segredos ocultos)
+$ inter-pj config verificar   # confere o arquivo, o perfil, o certificado e a chave
+$ inter-pj config mostrar     # mostra a configuração efetiva (segredos ocultos)
 $ inter-pj saldo
 ```
 
+No PowerShell, defina o segredo com `$env:INTER_CLIENT_SECRET = '<seu client_secret>'`.
+
 O `client_secret` **nunca** é aceito como flag (evita que fique no histórico do shell). Ele pode, alternativamente, ficar no arquivo de configuração — nesse caso a CLI avisa se o arquivo puder ser lido por outros usuários.
+
+### Se o arquivo de configuração não for lido
+
+O `config verificar` aponta cada problema com a linha e a correção. Com `--corrigir`, ele troca as aspas duplas dos caminhos do Windows por aspas simples e guarda o original em `config.toml.bak`:
+
+```console
+PS> inter-pj config mostrar
+erro: arquivo de configuração inválido (C:\Users\voce\AppData\Roaming\inter-pj\config.toml, linha 7): o valor de certificado está entre aspas duplas e tem uma barra invertida, que em TOML começa um escape; nos caminhos do Windows, use aspas simples (certificado = 'C:\pasta\arquivo')
+dica: `inter-pj config verificar` mostra a correção de cada linha; com `--corrigir`, ele a aplica e guarda uma cópia do arquivo original
+
+PS> inter-pj config verificar
+Arquivo: C:\Users\voce\AppData\Roaming\inter-pj\config.toml
+
+erro      linha 7, certificado: caminho do Windows entre aspas duplas: em TOML, a barra invertida começa um escape (\U pede 8 dígitos hexadecimais), e o arquivo não é lido
+          corrija para: certificado = 'C:\Users\voce\inter\certificado.crt'
+erro      linha 8, chave_privada: caminho do Windows entre aspas duplas: em TOML, a barra invertida começa um escape (\U pede 8 dígitos hexadecimais), e o arquivo não é lido
+          corrija para: chave_privada = 'C:\Users\voce\inter\chave.key'
+
+2 erros e 0 avisos.
+Para trocar as aspas: inter-pj config verificar --corrigir
+erro: a configuração tem 2 erros
+
+PS> inter-pj config verificar --corrigir
+Arquivo: C:\Users\voce\AppData\Roaming\inter-pj\config.toml
+
+corrigido linha 7, certificado: aspas simples no lugar das aspas duplas
+corrigido linha 8, chave_privada: aspas simples no lugar das aspas duplas
+ok        sintaxe: o arquivo é TOML válido
+ok        perfil: padrao (arquivo)
+ok        ambiente: sandbox (arquivo)
+ok        client_id: *****************4e5f (arquivo)
+ok        client_secret: definido, oculto (variável INTER_CLIENT_SECRET)
+ok        certificado: C:\Users\voce\inter\certificado.crt (arquivo)
+ok        chave_privada: C:\Users\voce\inter\chave.key (arquivo)
+ok        certificado e chave: lidos e aceitos pela biblioteca TLS
+
+Cópia do arquivo original: C:\Users\voce\AppData\Roaming\inter-pj\config.toml.bak
+
+Nenhum problema encontrado.
+```
+
+O comando sai com código 3 se encontrar algum erro, e `--json` dá o resultado para scripts. O `client_secret` nunca aparece, e a conta corrente sai mascarada, como no `config mostrar`.
 
 ### Perfis, variáveis e precedência
 
