@@ -1,6 +1,7 @@
 //! `inter-pj pagamento`
 
 mod boleto;
+mod pagar;
 
 use chrono::NaiveDate;
 use inter_pj::banking::StatusPagamento;
@@ -38,13 +39,19 @@ fn descrever_status(status: &StatusPagamento) -> &str {
 /// A date as the API sends it (`2026-10-09`, `2026-10-09 00:00:00` or
 /// `09/10/2026`); other formats are kept as text.
 fn data(raw: Option<&str>) -> Celula {
-    let parsed = raw.and_then(|raw| {
-        let raw = raw.trim();
-        NaiveDate::parse_from_str(raw.get(..10).unwrap_or(raw), "%Y-%m-%d")
-            .or_else(|_| NaiveDate::parse_from_str(raw, "%d/%m/%Y"))
-            .ok()
-    });
-    Celula::data(parsed, raw)
+    Celula::data(raw.and_then(parse_data), raw)
+}
+
+/// [`data`] as text: `09/10/2026`, or the raw text.
+fn data_br(raw: &str) -> String {
+    parse_data(raw).map_or_else(|| raw.to_owned(), |dia| dia.format("%d/%m/%Y").to_string())
+}
+
+fn parse_data(raw: &str) -> Option<NaiveDate> {
+    let raw = raw.trim();
+    NaiveDate::parse_from_str(raw.get(..10).unwrap_or(raw), "%Y-%m-%d")
+        .or_else(|_| NaiveDate::parse_from_str(raw, "%d/%m/%Y"))
+        .ok()
 }
 
 #[cfg(test)]
@@ -75,5 +82,7 @@ mod tests {
         }
         assert_eq!(data(Some("amanhã")), Celula::texto(Some("amanhã")));
         assert_eq!(data(None), Celula::Vazia);
+        assert_eq!(data_br("2026-10-09 00:00:00"), "09/10/2026");
+        assert_eq!(data_br("amanhã"), "amanhã");
     }
 }
