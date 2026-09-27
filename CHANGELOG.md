@@ -9,6 +9,7 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 ### Adicionado
 
 - Biblioteca: webhooks, os endereços que o Inter chama quando algo acontece na conta — `cadastrar_webhook`, `consultar_webhook` e `excluir_webhook` em `Banking` (Pix enviados e boletos pagos pela conta, um webhook por `TipoWebhookBanking`), `Cobranca` (cobranças recebidas, canceladas e expiradas) e `Pix` (cobranças Pix pagas, um webhook por chave Pix; chaves de telefone vão sem o `+`, como a documentação pede). `WebhookUrl` confere o endereço antes do envio (`https://`, sem espaços, com um servidor), e a consulta devolve `None` quando não há webhook cadastrado (#41, #42, #43).
+- Biblioteca: o histórico dos callbacks, as tentativas de envio aos webhooks, da mais recente à mais antiga (`listar_callbacks` e `listar_todos_callbacks` em `Banking`, `Cobranca` e `Pix`, por período, com o identificador da operação como filtro: o `endToEnd` de um Pix enviado ou o `codigoTransacao` de um boleto pago, o `codigoSolicitacao` de uma cobrança, o txid de uma cobrança Pix), com a tentativa, o status HTTP que o servidor respondeu e o erro; `Callback::valores` encontra um campo no conteúdo enviado, qualquer que seja o formato. `reenviar_callbacks` pede o reenvio de até 50 operações por vez e devolve as encontradas. O reenvio de cobranças usa o endereço que a própria documentação da operação mostra (`/cobranca/v3/cobrancas/webhook/callbacks/retry`), e não o da sua chave na especificação, sem o `/cobrancas` (#44).
 
 ## [0.6.0] - 2026-09-24
 

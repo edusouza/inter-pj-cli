@@ -203,6 +203,20 @@ pub mod banking {
         path: "/banking/v2/webhooks/{tipoWebhook}",
         scopes: &[Scope::WebhookBankingWrite],
     };
+
+    /// `GET /banking/v2/webhooks/{tipoWebhook}/callbacks` — the callbacks sent, paginated.
+    pub const WEBHOOK_CALLBACKS: Endpoint = Endpoint {
+        method: Method::Get,
+        path: "/banking/v2/webhooks/{tipoWebhook}/callbacks",
+        scopes: &[Scope::WebhookBankingRead],
+    };
+
+    /// `POST /banking/v2/webhooks/{tipoWebhook}/callbacks/retry` — sends callbacks again.
+    pub const WEBHOOK_REENVIAR: Endpoint = Endpoint {
+        method: Method::Post,
+        path: "/banking/v2/webhooks/{tipoWebhook}/callbacks/retry",
+        scopes: &[Scope::WebhookBankingWrite],
+    };
 }
 
 /// Operations of the Cobrança API (`/cobranca/v3`).
@@ -291,6 +305,25 @@ pub mod cobranca {
     pub const WEBHOOK_EXCLUIR: Endpoint = Endpoint {
         method: Method::Delete,
         path: "/cobranca/v3/cobrancas/webhook",
+        scopes: &[Scope::BoletoCobrancaWrite],
+    };
+
+    /// `GET /cobranca/v3/cobrancas/webhook/callbacks` — the callbacks sent, paginated.
+    pub const WEBHOOK_CALLBACKS: Endpoint = Endpoint {
+        method: Method::Get,
+        path: "/cobranca/v3/cobrancas/webhook/callbacks",
+        scopes: &[Scope::BoletoCobrancaRead],
+    };
+
+    /// `POST /cobranca/v3/cobrancas/webhook/callbacks/retry` — sends callbacks again.
+    ///
+    /// The specification lists this operation under
+    /// `/cobranca/v3/webhook/callbacks/retry`, but its own description, like
+    /// the retries of the other APIs (the path of the history plus `/retry`),
+    /// shows this address.
+    pub const WEBHOOK_REENVIAR: Endpoint = Endpoint {
+        method: Method::Post,
+        path: "/cobranca/v3/cobrancas/webhook/callbacks/retry",
         scopes: &[Scope::BoletoCobrancaWrite],
     };
 }
@@ -502,6 +535,20 @@ pub mod pix {
         path: "/pix/v2/webhook/{chave}",
         scopes: &[Scope::WebhookWrite],
     };
+
+    /// `GET /pix/v2/webhook/callbacks` — the callbacks sent, paginated.
+    pub const WEBHOOK_CALLBACKS: Endpoint = Endpoint {
+        method: Method::Get,
+        path: "/pix/v2/webhook/callbacks",
+        scopes: &[Scope::WebhookRead],
+    };
+
+    /// `POST /pix/v2/webhook/callbacks/retry` — sends callbacks again.
+    pub const WEBHOOK_REENVIAR: Endpoint = Endpoint {
+        method: Method::Post,
+        path: "/pix/v2/webhook/callbacks/retry",
+        scopes: &[Scope::WebhookWrite],
+    };
 }
 
 /// Every operation implemented by this crate.
@@ -523,6 +570,8 @@ pub const ALL: &[Endpoint] = &[
     banking::WEBHOOK_CADASTRAR,
     banking::WEBHOOK_CONSULTAR,
     banking::WEBHOOK_EXCLUIR,
+    banking::WEBHOOK_CALLBACKS,
+    banking::WEBHOOK_REENVIAR,
     cobranca::EMITIR,
     cobranca::CONSULTAR,
     cobranca::LISTAR,
@@ -535,6 +584,8 @@ pub const ALL: &[Endpoint] = &[
     cobranca::WEBHOOK_CADASTRAR,
     cobranca::WEBHOOK_CONSULTAR,
     cobranca::WEBHOOK_EXCLUIR,
+    cobranca::WEBHOOK_CALLBACKS,
+    cobranca::WEBHOOK_REENVIAR,
     pix::CRIAR_COB,
     pix::CRIAR_COB_SEM_TXID,
     pix::REVISAR_COB,
@@ -564,4 +615,6 @@ pub const ALL: &[Endpoint] = &[
     pix::WEBHOOK_CADASTRAR,
     pix::WEBHOOK_CONSULTAR,
     pix::WEBHOOK_EXCLUIR,
+    pix::WEBHOOK_CALLBACKS,
+    pix::WEBHOOK_REENVIAR,
 ];
