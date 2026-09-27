@@ -118,7 +118,9 @@ impl<'a> Banking<'a> {
     /// Same as [`saldo`](Self::saldo). In scroll mode, the API also refuses a
     /// new scroll while another one is active for the account (problem type
     /// `SCROLL_ALREADY_ACTIVE`) and expires a scroll after 6 minutes without
-    /// requests (`SCROLL_EXPIRED`).
+    /// requests (`SCROLL_EXPIRED`); and a scroll that ends before every
+    /// transaction its batches announce (`totalElementos`) is an
+    /// [`Error::Decode`], never a partial statement.
     pub async fn extrato_completo_todas(
         &self,
         filtro: &FiltroExtrato,
@@ -159,13 +161,23 @@ impl<'a> Banking<'a> {
         tamanho: u32,
     ) -> Result<Vec<TransacaoCompleta>> {
         let mut lote = self.iniciar_scroll(filtro, Some(tamanho)).await?;
+        // Every batch announces the transactions of the period: the end of
+        // the scroll is trusted only once they all arrived, so that a batch
+        // without `hasMore` does not end the statement in the middle.
+        let total = lote.total_elementos;
         let mut transacoes = Vec::new();
         loop {
             let recebidas = lote.transacoes.len();
             transacoes.append(&mut lote.transacoes);
             tracing::info!("extrato completo (scroll): lote com {recebidas} transações");
             if lote.has_more != Some(true) {
-                return Ok(transacoes);
+                let lidas = transacoes.len() as u64;
+                return match total {
+                    Some(total) if lidas < total => Err(scroll_error(&format!(
+                        "o modo scroll terminou com {lidas} de {total} transações; execute o comando novamente"
+                    ))),
+                    _ => Ok(transacoes),
+                };
             }
             let scroll_id = lote.scroll_id.take().filter(|id| !id.trim().is_empty());
             let Some(scroll_id) = scroll_id else {
