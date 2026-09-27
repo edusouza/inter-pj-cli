@@ -108,6 +108,12 @@ async fn os_exemplos_dos_guias_funcionam() {
         if atualizar {
             guia.gravar(arquivo);
         }
+        // Dropped, the bank checks its mocks blocking on a lock of tokio,
+        // which never comes once this task has spent its cooperative budget
+        // (mounting the mocks spends it), and the test spins: a yield gives
+        // the task a new budget.
+        tokio::task::yield_now().await;
+        drop(banco);
     }
     assert!(comandos > 0, "nenhum exemplo nos guias");
     assert!(
