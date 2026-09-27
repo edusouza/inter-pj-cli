@@ -238,19 +238,8 @@ fn resumo_criacao(id: u64, lote: &LoteCobvSolicitado, ambiente: Option<Environme
     if ambiente.is_some_and(Environment::is_production) {
         texto.push_str("*** PRODUÇÃO: as cobranças valem de verdade ***\n");
     }
-    let _ = write!(
-        texto,
-        "{}\n\n{}",
-        secao("Lote de cobranças com vencimento a criar", &linhas),
-        tabela.texto()
-    );
-    if lote.cobsv.len() > MAX_NO_RESUMO {
-        let _ = write!(
-            texto,
-            "\n... e mais {}",
-            quantas(lote.cobsv.len() - MAX_NO_RESUMO)
-        );
-    }
+    texto.push_str(&secao("Lote de cobranças com vencimento a criar", &linhas));
+    recuada(&mut texto, &tabela, lote.cobsv.len());
     texto
 }
 
@@ -286,20 +275,29 @@ fn resumo_revisao(id: u64, revisao: &LoteCobvRevisado, ambiente: Option<Environm
     if ambiente.is_some_and(Environment::is_production) {
         texto.push_str("*** PRODUÇÃO: as cobranças valem de verdade ***\n");
     }
-    let _ = write!(
-        texto,
-        "{}\n\n{}",
-        secao("Lote de cobranças com vencimento a alterar", &linhas),
-        tabela.texto()
-    );
-    if revisao.cobsv.len() > MAX_NO_RESUMO {
+    texto.push_str(&secao(
+        "Lote de cobranças com vencimento a alterar",
+        &linhas,
+    ));
+    recuada(&mut texto, &tabela, revisao.cobsv.len());
+    texto
+}
+
+/// The table of the charges of a summary, within it, as the table of a
+/// batch of payments: indented under its lines, with the charges past the
+/// first ones counted.
+fn recuada(texto: &mut String, tabela: &Tabela, cobrancas: usize) {
+    texto.push('\n');
+    for linha in tabela.texto().lines() {
+        let _ = write!(texto, "\n  {linha}");
+    }
+    if cobrancas > MAX_NO_RESUMO {
         let _ = write!(
             texto,
-            "\n... e mais {}",
-            quantas(revisao.cobsv.len() - MAX_NO_RESUMO)
+            "\n  ... e mais {}",
+            quantas(cobrancas - MAX_NO_RESUMO)
         );
     }
-    texto
 }
 
 /// `valor R$ 160,00, vencimento 30/10/2026`, or `remover`.

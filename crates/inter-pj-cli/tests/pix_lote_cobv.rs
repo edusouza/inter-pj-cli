@@ -102,7 +102,8 @@ async fn cria_um_lote_a_partir_de_uma_planilha() {
         "  Cobranças    2\n",
         "  Valor total  R$ 239,90\n",
         "  Vencimentos  de 20/10/2099 a 25/10/2099\n",
-        "mensalidade209910cliente0002  25/10/2099   R$ 89,90  Fulano de Tal",
+        // The table of the charges, within the summary.
+        "\n  mensalidade209910cliente0002  25/10/2099   R$ 89,90  Fulano de Tal",
     ] {
         assert!(stderr.contains(linha), "{linha}\n{stderr}");
     }
