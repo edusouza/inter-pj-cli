@@ -167,6 +167,13 @@ pub(crate) enum CliError {
         #[source]
         source: io::Error,
     },
+    /// A configuration file that could not be read as TOML, and the command
+    /// that fixes it, when `config verificar --corrigir` does.
+    #[error("{mensagem}")]
+    ConfigFile {
+        mensagem: String,
+        verificar: Option<String>,
+    },
 }
 
 impl CliError {
@@ -180,7 +187,7 @@ impl CliError {
     pub(crate) fn exit_code(&self) -> u8 {
         match self {
             Self::Usage(_) | Self::PagamentosRepetidos { .. } | Self::Periodo { .. } => exit::USAGE,
-            Self::Config(_) => exit::CONFIG,
+            Self::Config(_) | Self::ConfigFile { .. } => exit::CONFIG,
             Self::Io { .. } => exit::UNEXPECTED,
             Self::Cancelado | Self::AssistenteInterrompido => exit::CANCELLED,
             Self::PixNaoPago { .. }
@@ -311,6 +318,12 @@ impl CliError {
                     format!("confira antes de tentar de novo: {consulta}"),
                 ]
             }
+            Self::ConfigFile {
+                verificar: Some(verificar),
+                ..
+            } => vec![format!(
+                "`{verificar}` mostra a correção de cada linha; com `--corrigir`, ele a aplica e guarda uma cópia do arquivo original"
+            )],
             _ => Vec::new(),
         }
     }
