@@ -11,6 +11,7 @@ mod cli;
 mod commands;
 mod config;
 mod confirmacao;
+mod doctor;
 mod error;
 mod files;
 mod logging;
