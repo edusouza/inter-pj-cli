@@ -18,7 +18,8 @@ use chrono::{DateTime, Days, FixedOffset, Local, NaiveDate, NaiveTime, TimeZone}
 use inter_pj::Error as InterError;
 use inter_pj::documento::Documento;
 use inter_pj::pix::{
-    ParametrosConsulta, PeriodoPix, PessoaPix, PixRecebido, StatusCob, StatusDevolucao, Txid,
+    Paginacao, ParametrosConsulta, PeriodoPix, PessoaPix, PixRecebido, StatusCob, StatusDevolucao,
+    Txid,
 };
 use rust_decimal::Decimal;
 
@@ -96,12 +97,12 @@ fn descrever_status(status: &StatusCob) -> &str {
 }
 
 /// A CPF or CNPJ with punctuation, or as received.
-fn documento(texto: &str) -> String {
+pub(super) fn documento(texto: &str) -> String {
     Documento::parse(texto).map_or_else(|_| texto.to_owned(), |doc| doc.formatado())
 }
 
 /// `Empresa Exemplo (12.345.678/0001-95)`.
-fn pessoa(pessoa: &PessoaPix) -> Option<String> {
+pub(super) fn pessoa(pessoa: &PessoaPix) -> Option<String> {
     let nome = pessoa.nome.as_deref().unwrap_or_default().trim();
     match (nome.is_empty(), pessoa.documento()) {
         (true, None) => None,
@@ -226,7 +227,7 @@ fn copia_e_cola_ativa<'a>(
 }
 
 /// `R$ 37,00 → R$ 40,00`, or what stays.
-fn antes_e_depois(antes: Option<String>, depois: Option<String>) -> Option<String> {
+pub(super) fn antes_e_depois(antes: Option<String>, depois: Option<String>) -> Option<String> {
     match (antes, depois) {
         (Some(antes), Some(depois)) => Some(format!("{antes} → {depois}")),
         (None, Some(depois)) => Some(format!("→ {depois}")),
@@ -317,8 +318,18 @@ fn totais<'a>(cobs: impl IntoIterator<Item = (Option<Decimal>, Option<&'a Status
 /// the parameters of the page and its number of items, `nome` in the
 /// period (`cobranças`).
 fn paginacao(numero: u32, parametros: &ParametrosConsulta, itens: usize, nome: &str) -> String {
+    pagina(
+        numero,
+        parametros.paginacao.unwrap_or_default(),
+        itens,
+        nome,
+    )
+}
+
+/// Where the page `numero` stands, from its `paginacao` and its number of
+/// items, `nome` in the period.
+pub(super) fn pagina(numero: u32, paginacao: Paginacao, itens: usize, nome: &str) -> String {
     let mut texto = format!("\n\nPágina {numero}");
-    let paginacao = parametros.paginacao.unwrap_or_default();
     if let Some(total) = paginacao.quantidade_de_paginas {
         let _ = write!(texto, " de {} (a primeira é 0)", total.saturating_sub(1));
     }
