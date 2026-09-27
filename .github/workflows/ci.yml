@@ -61,6 +61,12 @@ jobs:
         with:
           toolchain: stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      # Os testes de `inter-pj completions` e `inter-pj manual` conferem os
+      # scripts em cada shell e as páginas com o groff, onde estiverem
+      # instalados (o PowerShell já vem em todos os runners).
+      - name: Instalar shells e groff
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends zsh fish elvish groff-base
       - run: cargo test --workspace --locked
 
   msrv:

@@ -56,9 +56,37 @@ jobs:
             echo "publicar=$PUBLICAR"
           } >> "$GITHUB_OUTPUT"
 
+  documentacao:
+    name: Páginas de manual e completions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
+        with:
+          toolchain: stable
+      # Geradas da definição dos comandos: as mesmas em todos os alvos.
+      - name: Gerar
+        run: |
+          cargo build --locked -p inter-pj-cli
+          BIN=target/debug/inter-pj
+          "$BIN" manual documentacao/man/man1
+          mkdir -p documentacao/completions
+          "$BIN" completions bash > documentacao/completions/inter-pj.bash
+          "$BIN" completions zsh > documentacao/completions/_inter-pj
+          "$BIN" completions fish > documentacao/completions/inter-pj.fish
+          "$BIN" completions powershell > documentacao/completions/_inter-pj.ps1
+          "$BIN" completions elvish > documentacao/completions/inter-pj.elv
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: documentacao
+          path: documentacao
+          if-no-files-found: error
+
   compilar:
     name: Compilar (${{ matrix.target }})
-    needs: preparar
+    needs: [preparar, documentacao]
     strategy:
       fail-fast: false
       matrix:
@@ -92,6 +120,10 @@ jobs:
           SAIDA=$("target/$TARGET/release/inter-pj" --version)
           echo "$SAIDA"
           [ "$SAIDA" = "inter-pj $VERSAO" ]
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: documentacao
+          path: documentacao
       - name: Empacotar
         shell: bash
         run: |
@@ -100,6 +132,9 @@ jobs:
           if [ "$RUNNER_OS" = "Windows" ]; then BIN=inter-pj.exe; fi
           mkdir -p "dist/$NOME"
           cp "target/$TARGET/release/$BIN" README.md CHANGELOG.md LICENSE-MIT LICENSE-APACHE "dist/$NOME/"
+          cp -R documentacao/completions "dist/$NOME/"
+          # Páginas de manual não servem no Windows.
+          if [ "$RUNNER_OS" != "Windows" ]; then cp -R documentacao/man "dist/$NOME/"; fi
           cd dist
           if [ "$RUNNER_OS" = "Windows" ]; then
             7z a -tzip "$NOME.zip" "$NOME" > /dev/null

@@ -23,6 +23,8 @@ doc = false
 inter-pj.workspace = true
 chrono.workspace = true
 clap.workspace = true
+clap_complete.workspace = true
+clap_mangen.workspace = true
 etcetera.workspace = true
 # Not used directly: pins the IDNA back end of `url` to its ASCII-only
 # implementation, which drops the ~20 ICU4X crates behind Unicode domain

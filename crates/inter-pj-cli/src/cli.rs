@@ -359,6 +359,12 @@ pub(crate) enum Command {
         subcommand_value_name = "COMANDO"
     )]
     Config(ConfigCommand),
+    /// Script de completion do shell (bash, zsh, fish, powershell ou elvish)
+    #[command(after_help = COMPLETIONS_AFTER_HELP)]
+    Completions(CompletionsArgs),
+    /// Grava as páginas de manual (man) de todos os comandos num diretório
+    #[command(after_help = MANUAL_AFTER_HELP)]
+    Manual(ManualArgs),
 }
 
 impl Command {
@@ -395,9 +401,47 @@ impl Command {
             | Self::Cobranca(_)
             | Self::Webhook(_)
             | Self::Auth(_)
-            | Self::Config(_) => false,
+            | Self::Config(_)
+            | Self::Completions(_)
+            | Self::Manual(_) => false,
         }
     }
+}
+
+const COMPLETIONS_AFTER_HELP: &str = "\
+Instalação (abra um novo shell depois):
+  bash
+    inter-pj completions bash > ~/.local/share/bash-completion/completions/inter-pj
+  zsh, com fpath=(~/.zfunc $fpath) antes do compinit no ~/.zshrc
+    inter-pj completions zsh > ~/.zfunc/_inter-pj
+  fish
+    inter-pj completions fish > ~/.config/fish/completions/inter-pj.fish
+  powershell
+    inter-pj completions powershell >> $PROFILE
+  elvish
+    inter-pj completions elvish >> ~/.config/elvish/rc.elv";
+
+const MANUAL_AFTER_HELP: &str = "\
+Uma página por comando: inter-pj.1, inter-pj-saldo.1, inter-pj-pix-enviar.1...
+Por exemplo:
+  inter-pj manual ~/.local/share/man/man1
+  man inter-pj-pix-enviar
+Se o man não encontrar as páginas, inclua o diretório acima de man1 no MANPATH.";
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Argumentos")]
+pub(crate) struct CompletionsArgs {
+    /// bash, zsh, fish, powershell ou elvish
+    #[arg(value_enum, value_name = "SHELL", hide_possible_values = true)]
+    pub(crate) shell: clap_complete::Shell,
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Argumentos")]
+pub(crate) struct ManualArgs {
+    /// Diretório das páginas (criado se não existir); as que já estiverem lá são atualizadas
+    #[arg(value_name = "DIRETÓRIO")]
+    pub(crate) diretorio: PathBuf,
 }
 
 #[derive(Debug, Args)]
