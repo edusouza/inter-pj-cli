@@ -453,16 +453,29 @@ async fn valores_invalidos_sao_erros_de_configuracao() {
     }
 }
 
+/// `INTER_BASE_URL` is for tests and local mocks: another host would get the
+/// `client_secret` and every request, under the profile's environment name.
 #[tokio::test(flavor = "multi_thread")]
-async fn url_base_http_externa_e_recusada() {
+async fn url_base_fora_desta_maquina_e_recusada() {
     let env = TestEnv::new().await;
     env.write_config("");
-    env.cmd()
-        .env("INTER_BASE_URL", "http://api.empresa.example")
-        .arg("saldo")
-        .assert()
-        .code(3)
-        .stderr(predicate::str::contains("https"));
+    for url in [
+        "http://api.empresa.example",
+        "https://cdpj.partners.bancointer.com.br",
+        "https://127.0.0.1.empresa.example",
+        "https://localhost.empresa.example:8443",
+    ] {
+        env.cmd()
+            .env("INTER_BASE_URL", url)
+            .arg("saldo")
+            .assert()
+            .code(3)
+            .stderr(predicate::str::contains(
+                "INTER_BASE_URL só aceita um servidor desta máquina",
+            ));
+    }
+    // Nothing reached the mock, not even for a token.
+    assert!(env.server.received_requests().await.unwrap().is_empty());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -770,6 +783,29 @@ async fn config_verificar_corrigir_nao_sobrescreve_uma_copia() {
         fs::read_to_string(env.config_path()).unwrap(),
         CONFIG_CORRIGIDA
     );
+}
+
+/// A link where the copy would go, even to a file that does not exist, is
+/// neither followed nor replaced: the copy goes to the next name.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn config_verificar_corrigir_nao_segue_um_link_no_lugar_da_copia() {
+    let env = TestEnv::new().await;
+    env.write_config_text(CONFIG_COM_ASPAS_DUPLAS);
+    let alvo = env.path("alvo-do-link");
+    std::os::unix::fs::symlink(&alvo, env.config_backup_path()).unwrap();
+    let nova = env.path("config").join("config.toml.bak.2");
+    env.cmd()
+        .args(["config", "verificar", "--corrigir"])
+        .assert()
+        .code(3)
+        .stdout(predicate::str::contains(format!(
+            "Cópia do arquivo original: {}\n",
+            nova.display()
+        )));
+    assert!(!alvo.exists(), "o link foi seguido");
+    assert!(env.config_backup_path().is_symlink());
+    assert_eq!(fs::read_to_string(&nova).unwrap(), CONFIG_COM_ASPAS_DUPLAS);
 }
 
 #[tokio::test(flavor = "multi_thread")]

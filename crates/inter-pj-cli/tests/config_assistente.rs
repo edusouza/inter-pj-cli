@@ -147,6 +147,13 @@ async fn num_arquivo_existente_acrescenta_o_perfil() {
     let env = TestEnv::new().await;
     env.write_config("");
     let antes = fs::read_to_string(env.config_path()).unwrap();
+    // Opened to others by hand: writing again closes it, and a key that
+    // others can read is pointed out.
+    #[cfg(unix)]
+    for arquivo in [env.config_path(), env.path("chave.key")] {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(arquivo, fs::Permissions::from_mode(0o644)).unwrap();
+    }
     let assert = env
         .cmd()
         .args(["config", "init", "--interativo"])
@@ -178,6 +185,22 @@ async fn num_arquivo_existente_acrescenta_o_perfil() {
     );
     let depois = fs::read_to_string(env.config_path()).unwrap();
     assert!(depois.starts_with(&antes), "{depois}");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let modo = fs::metadata(env.config_path())
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(modo & 0o777, 0o600);
+        assert!(
+            stderr_of(&assert).contains(
+                "  aviso: a chave privada pode ser lida por outros usuários (permissão 644)"
+            ),
+            "{}",
+            stderr_of(&assert)
+        );
+    }
     assert_eq!(mostrar(&env, "producao")["ambiente"]["valor"], "producao");
     assert_eq!(mostrar(&env, "padrao")["ambiente"]["valor"], "sandbox");
 }

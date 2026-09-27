@@ -6,6 +6,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use inter_pj::ClientIdentity;
+use secrecy::zeroize::Zeroizing;
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -15,7 +16,7 @@ use crate::config::{ConfigFile, LoadedConfig, Setting, Settings, TEMPLATE};
 use crate::confirmacao::Stdio;
 use crate::doctor::{self, Aspas};
 use crate::error::CliError;
-use crate::files::write_private;
+use crate::files::{create_private, write_private};
 use crate::output;
 
 pub(super) fn run(context: &Context, command: &ConfigCommand) -> Result<(), CliError> {
@@ -32,18 +33,27 @@ fn init(context: &Context, args: &InitArgs) -> Result<(), CliError> {
         return super::assistente::run(context, args, &mut Stdio);
     }
     let path = context.config_path();
-    if path.exists() && !args.forcar {
-        return Err(CliError::Config(format!(
-            "o arquivo {} já existe; use --forcar para sobrescrevê-lo",
-            path.display()
-        )));
-    }
     if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
         fs::create_dir_all(parent)
             .map_err(|err| CliError::io(format!("falha ao criar {}", parent.display()), err))?;
     }
-    write_private(path, TEMPLATE.as_bytes())
-        .map_err(|err| CliError::io(format!("falha ao gravar {}", path.display()), err))?;
+    // Without --forcar, the file is created only if nothing is there, which
+    // the OS checks when creating it (a link included).
+    let gravado = if args.forcar {
+        write_private(path, TEMPLATE.as_bytes())
+    } else {
+        create_private(path, TEMPLATE.as_bytes())
+    };
+    gravado.map_err(|err| {
+        if err.kind() == io::ErrorKind::AlreadyExists {
+            CliError::Config(format!(
+                "o arquivo {} já existe; use --forcar para sobrescrevê-lo",
+                path.display()
+            ))
+        } else {
+            CliError::io(format!("falha ao gravar {}", path.display()), err)
+        }
+    })?;
     output::print(&format!(
         "Arquivo de configuração criado em {}\n\
          Próximos passos:\n  \
@@ -256,8 +266,10 @@ fn verificar(context: &Context, args: &VerificarArgs) -> Result<(), CliError> {
     let path = context.config_path();
     let mut achados = Vec::new();
     let mut copia = None;
+    // The text may carry the client_secret: zeroed when dropped, like the
+    // one the other commands read.
     let texto = match fs::read_to_string(path) {
-        Ok(texto) => Some(texto),
+        Ok(texto) => Some(Zeroizing::new(texto)),
         Err(err) if err.kind() == io::ErrorKind::NotFound => None,
         Err(err) => {
             return Err(CliError::io(
@@ -270,8 +282,7 @@ fn verificar(context: &Context, args: &VerificarArgs) -> Result<(), CliError> {
         Some(texto) if args.corrigir => {
             let (corrigido, linhas) = doctor::corrigir(&texto);
             if !linhas.is_empty() {
-                let original = copia_de(path);
-                gravar(&original, &texto)?;
+                let original = guardar_copia(path, &texto)?;
                 gravar(path, &corrigido)?;
                 achados.extend(linhas.iter().map(|problema| Achado {
                     linha: Some(problema.linha),
@@ -283,7 +294,7 @@ fn verificar(context: &Context, args: &VerificarArgs) -> Result<(), CliError> {
                 }));
                 copia = Some(original);
             }
-            Some(corrigido)
+            Some(Zeroizing::new(corrigido))
         }
         texto => texto,
     };
@@ -605,9 +616,11 @@ fn plural(quantos: usize, singular: &str, varios: &str) -> String {
     format!("{quantos} {}", if quantos == 1 { singular } else { varios })
 }
 
-/// `config.toml.bak`, next to `config.toml`, or `config.toml.bak.2`, `.3`...
-/// when an earlier copy exists: a copy is never overwritten.
-fn copia_de(path: &Path) -> PathBuf {
+/// Keeps `texto` in `config.toml.bak`, next to `config.toml`, or in
+/// `config.toml.bak.2`, `.3`... when an earlier copy exists: a copy is never
+/// overwritten, which the OS checks when creating the file (a link
+/// included, never followed).
+fn guardar_copia(path: &Path, texto: &str) -> Result<PathBuf, CliError> {
     let com_sufixo = |sufixo: &str| {
         let mut nome = path.file_name().unwrap_or_default().to_os_string();
         nome.push(sufixo);
@@ -615,11 +628,21 @@ fn copia_de(path: &Path) -> PathBuf {
     };
     let mut copia = com_sufixo(".bak");
     let mut numero = 2;
-    while copia.exists() {
-        copia = com_sufixo(&format!(".bak.{numero}"));
-        numero += 1;
+    loop {
+        match create_private(&copia, texto.as_bytes()) {
+            Ok(()) => return Ok(copia),
+            Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {
+                copia = com_sufixo(&format!(".bak.{numero}"));
+                numero += 1;
+            }
+            Err(err) => {
+                return Err(CliError::io(
+                    format!("falha ao gravar {}", copia.display()),
+                    err,
+                ));
+            }
+        }
     }
-    copia
 }
 
 fn gravar(path: &Path, texto: &str) -> Result<(), CliError> {
