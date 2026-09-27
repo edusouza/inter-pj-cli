@@ -38,8 +38,8 @@ pub(crate) use pix::{
     StatusCobArg,
 };
 pub(crate) use webhook::{
-    WebhookBankingCommand, WebhookCadastroArgs, WebhookCobrancaCommand, WebhookCommand,
-    WebhookExclusaoArgs, WebhookPixCommand,
+    CallbacksArgs, WebhookBankingCommand, WebhookCadastroArgs, WebhookCobrancaCommand,
+    WebhookCommand, WebhookExclusaoArgs, WebhookPixCommand,
 };
 
 const AFTER_HELP: &str = "\
@@ -359,6 +359,11 @@ impl Command {
                 | PixCommand::Recebidos(PixRecebidosCommand::Listar(_))
                 | PixCommand::Loc(PixLocCommand::Listar(_))
                 | PixCommand::LoteCobv(PixLoteCobvCommand::Listar(_)),
+            )
+            | Self::Webhook(
+                WebhookCommand::Banking(WebhookBankingCommand::Callbacks(_))
+                | WebhookCommand::Cobranca(WebhookCobrancaCommand::Callbacks(_))
+                | WebhookCommand::Pix(WebhookPixCommand::Callbacks(_)),
             ) => true,
             Self::Extrato(args) => !matches!(args.comando, Some(ExtratoCommand::Pdf(_))),
             Self::Pix(_)

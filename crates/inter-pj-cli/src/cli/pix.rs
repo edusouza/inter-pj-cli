@@ -1033,7 +1033,7 @@ pub(crate) enum StatusCobArg {
     RemovidaPeloPsp,
 }
 
-fn parse_txid(value: &str) -> Result<Txid, String> {
+pub(super) fn parse_txid(value: &str) -> Result<Txid, String> {
     value.parse().map_err(|err: TxidError| err.to_string())
 }
 
@@ -1087,7 +1087,7 @@ fn parse_desconto(value: &str) -> Result<DescontoAte, String> {
 }
 
 /// The end-to-end id of a Pix: letters and digits (`E1234...`).
-fn parse_e2e(value: &str) -> Result<String, String> {
+pub(super) fn parse_e2e(value: &str) -> Result<String, String> {
     let id = value.trim();
     if (1..=64).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_alphanumeric()) {
         Ok(id.to_owned())
