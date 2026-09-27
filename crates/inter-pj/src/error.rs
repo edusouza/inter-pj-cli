@@ -124,13 +124,19 @@ impl ApiError {
 
 impl fmt::Display for ApiError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{} respondeu {} ({})",
-            self.operation,
-            self.status,
-            status_text(self.status)
-        )?;
+        if (200..300).contains(&self.status) {
+            // The request succeeded, and its answer is what was refused (a
+            // token without the scopes asked for): no status to show.
+            write!(f, "{}", self.operation)?;
+        } else {
+            write!(
+                f,
+                "{} respondeu {} ({})",
+                self.operation,
+                self.status,
+                status_text(self.status)
+            )?;
+        }
         if let Some(note) = &self.note {
             write!(f, ": {note}")?;
         }
