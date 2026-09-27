@@ -24,6 +24,7 @@ $ inter-pj saldo --json | jq .disponivel
 | Versão | Funcionalidades |
 | --- | --- |
 | **0.1.0** | Autenticação OAuth2 com mTLS e cache de token · `saldo` · `auth token`/`auth limpar` · `config init`/`caminho`/`mostrar` |
+| **0.1.1** | `config verificar [--corrigir]`: confere o arquivo de configuração e o perfil e corrige caminhos do Windows entre aspas duplas |
 
 O plano completo — extrato, Pix, pagamentos, cobranças (boleto com Pix), Pix Cobrança, webhooks e Pix Automático — está em [`docs/roadmap.md`](docs/roadmap.md) e é acompanhado pelas [issues do projeto](https://github.com/edusouza/inter-pj-cli/issues).
 
@@ -34,7 +35,7 @@ O plano completo — extrato, Pix, pagamentos, cobranças (boleto com Pix), Pix 
 **Com Cargo** (Rust 1.88 ou superior):
 
 ```console
-$ cargo install --locked --git https://github.com/edusouza/inter-pj-cli --tag v0.1.0 inter-pj-cli
+$ cargo install --locked --git https://github.com/edusouza/inter-pj-cli --tag v0.1.1 inter-pj-cli
 ```
 
 ## Configuração

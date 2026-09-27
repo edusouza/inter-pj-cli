@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/inter-pj", "crates/inter-pj-cli"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT OR Apache-2.0"
@@ -12,7 +12,7 @@ homepage = "https://github.com/edusouza/inter-pj-cli"
 publish = false
 
 [workspace.dependencies]
-inter-pj = { path = "crates/inter-pj", version = "0.1.0" }
+inter-pj = { path = "crates/inter-pj", version = "0.1.1" }
 
 # SHA-256 of the token cache key. Already compiled as the TLS crypto provider.
 aws-lc-rs = { version = "1.18", default-features = false, features = ["aws-lc-sys", "prebuilt-nasm"] }
