@@ -7,6 +7,7 @@ mod consultar;
 mod devolucao;
 mod encargos;
 mod enviar;
+mod loc;
 mod recebidos;
 
 use std::fmt::Write as _;
@@ -38,6 +39,7 @@ pub(super) async fn run(context: &Context, command: PixCommand) -> Result<(), Cl
         PixCommand::Cobv(command) => cobv::run(context, command).await,
         PixCommand::Recebidos(command) => recebidos::run(context, command).await,
         PixCommand::Devolucao(command) => devolucao::run(context, command).await,
+        PixCommand::Loc(command) => loc::run(context, command).await,
     }
 }
 
