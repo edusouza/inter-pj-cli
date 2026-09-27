@@ -5,6 +5,7 @@ mod alteracao;
 mod consulta;
 mod emissao;
 mod listagem;
+mod webhook;
 
 pub use alteracao::{
     ConsultaEdicao, EdicaoCobranca, MAX_MOTIVO_CANCELAMENTO, PagarCom, SolicitacaoEdicao,

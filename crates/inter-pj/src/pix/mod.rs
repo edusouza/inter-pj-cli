@@ -13,6 +13,7 @@ mod loc;
 mod lote_cobv;
 mod recebido;
 mod txid;
+mod webhook;
 
 pub use api::Pix;
 pub use brcode::{BrCode, BrCodeError, crc16};
