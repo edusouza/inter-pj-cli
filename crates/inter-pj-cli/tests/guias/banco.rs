@@ -6,12 +6,13 @@
 //! [`cobranca`], the charges it issues to its clients, [`cob`], the
 //! immediate Pix charges, [`cobv`], those with a due date, [`loc`], the
 //! locations of their QR Codes, [`lote_cobv`], the batches of charges with
-//! a due date, and [`sandbox_pix`], the payments of the sandbox, which
-//! share one state ([`cobrancas_pix`]). The data tell one story: the
-//! balance follows from the statement, the Pix received, the bills paid and
-//! the charges paid before are those of the statement, and what is sent,
-//! refunded, paid or issued can be queried. Every name, document, key and
-//! amount is synthetic.
+//! a due date, [`sandbox_pix`], the payments of the sandbox, which share
+//! one state ([`cobrancas_pix`]), and [`webhooks`], the addresses the bank
+//! notifies and the history of the notifications. The data tell one story:
+//! the balance follows from the statement, the Pix received, the bills
+//! paid, the charges paid before and the notifications of the webhooks are
+//! those of the statement, and what is sent, refunded, paid or issued can
+//! be queried. Every name, document, key and amount is synthetic.
 
 mod cob;
 mod cobranca;
@@ -24,6 +25,7 @@ mod pagamentos;
 mod pix;
 mod recebidos;
 mod sandbox_pix;
+mod webhooks;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -58,6 +60,7 @@ impl Banco {
         loc::montar(&servidor, &cobrancas).await;
         lote_cobv::montar(&servidor, &cobrancas).await;
         sandbox_pix::montar(&servidor, &cobrancas).await;
+        webhooks::montar(&servidor).await;
         Self { servidor }
     }
 
