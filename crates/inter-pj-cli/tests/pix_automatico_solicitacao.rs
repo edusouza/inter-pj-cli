@@ -178,17 +178,20 @@ async fn simulacao_e_erros_nao_consultam_nem_enviam() {
 async fn a_expiracao_conta_do_dia_do_banco() {
     let env = env().await;
     nothing_is_sent(&env).await;
+    // The end of the day is the bank's, in Brasília, whatever the time zone
+    // of the machine.
     let assert = env
         .cmd()
         .env("INTER_HOJE", "2020-01-10")
+        .env("TZ", "UTC")
         .args(criar_com("--expiracao", "2020-01-15"))
         .arg("--simular")
         .assert()
         .success();
     assert!(
-        stderr_of(&assert).contains("15/01/2020 23:59:59"),
+        stdout_of(&assert).contains(r#""dataExpiracaoSolicitacao": "2020-01-15T23:59:59-03:00""#),
         "{}",
-        stderr_of(&assert)
+        stdout_of(&assert)
     );
     let assert = env
         .cmd()

@@ -18,7 +18,7 @@ use crate::cli::{
     SolicitacaoCriarArgs,
 };
 use crate::commands::pix::{documento, pessoa};
-use crate::commands::{Context, agora, simulacao};
+use crate::commands::{BRASILIA, Context, agora, simulacao};
 use crate::confirmacao::{Stdio, Terminal, confirmar, descrever_ambiente, pode_confirmar};
 use crate::error::{CliError, resultado_incerto};
 use crate::output::{self, horario_em, secao};
@@ -39,7 +39,7 @@ async fn criar(
     args: &SolicitacaoCriarArgs,
     terminal: &mut dyn Terminal,
 ) -> Result<(), CliError> {
-    let expiracao = expira_em(args.expiracao, agora(), &Local)?;
+    let expiracao = expira_em(args.expiracao, agora(), &BRASILIA)?;
     let mut destinatario =
         DestinatarioSolicRec::new(args.documento.clone(), args.conta.trim(), args.ispb.trim());
     destinatario.agencia = args
@@ -104,7 +104,7 @@ async fn criar(
 }
 
 /// When the request expires: `prazo` from `agora`, the end of a day in
-/// `fuso`, or a moment; never in the past.
+/// `fuso` (the bank's, in Brasília), or a moment; never in the past.
 fn expira_em<Tz: TimeZone>(
     prazo: Option<Prazo>,
     agora: DateTime<FixedOffset>,
@@ -124,9 +124,7 @@ fn expira_em<Tz: TimeZone>(
                 .latest()
                 .map(|momento| momento.fixed_offset())
                 .ok_or_else(|| {
-                    CliError::Usage(format!(
-                        "--expiracao: {dia} 23:59:59 não existe no fuso local"
-                    ))
+                    CliError::Usage(format!("--expiracao: {dia} 23:59:59 não existe no fuso"))
                 })?
         }
     };

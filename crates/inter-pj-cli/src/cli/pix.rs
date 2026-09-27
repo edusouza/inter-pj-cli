@@ -993,11 +993,11 @@ pub(crate) struct PixPagarQrcodeArgs {
 /// `--inicio` and `--fim` of the Pix listings.
 #[derive(Debug, Clone, Copy, Args)]
 pub(crate) struct PeriodoPixArgs {
-    /// Início: AAAA-MM-DD (desde o começo do dia, no fuso local) ou data e hora com fuso (2026-09-01T08:00:00-03:00) [padrão: 30 dias atrás]
+    /// Início: AAAA-MM-DD (desde o começo do dia, em Brasília) ou data e hora com fuso (2026-09-01T08:00:00-03:00) [padrão: 30 dias atrás]
     #[arg(long, value_name = "DATA", value_parser = parse_momento)]
     pub(crate) inicio: Option<Momento>,
 
-    /// Fim: AAAA-MM-DD (até o fim do dia) ou data e hora com fuso [padrão: agora]
+    /// Fim: AAAA-MM-DD (até o fim do dia, em Brasília) ou data e hora com fuso [padrão: agora]
     #[arg(long, value_name = "DATA", value_parser = parse_momento)]
     pub(crate) fim: Option<Momento>,
 }

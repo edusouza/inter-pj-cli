@@ -14,7 +14,7 @@ mod sandbox;
 
 use std::fmt::Write as _;
 
-use chrono::{DateTime, Days, FixedOffset, Local, NaiveDate, NaiveTime, TimeZone};
+use chrono::{DateTime, Days, FixedOffset, NaiveDate, NaiveTime, TimeZone};
 use inter_pj::Error as InterError;
 use inter_pj::documento::Documento;
 use inter_pj::pix::{
@@ -50,10 +50,11 @@ pub(super) async fn run(context: &Context, command: PixCommand) -> Result<(), Cl
     }
 }
 
-/// The period of the arguments, in the local time zone: by default, from
-/// the start of the day 30 days ago (today included) to now.
+/// The period of the arguments, with the days of the bank's calendar, in
+/// Brasília, as the statement's, whatever the time zone of the machine: by
+/// default, from the start of the day 30 days ago (today included) to now.
 pub(crate) fn periodo(args: PeriodoPixArgs) -> Result<PeriodoPix, CliError> {
-    periodo_em(args, super::agora(), &Local)
+    periodo_em(args, super::agora(), &super::BRASILIA)
 }
 
 fn periodo_em<Tz: TimeZone>(
@@ -65,7 +66,7 @@ fn periodo_em<Tz: TimeZone>(
         fuso.from_local_datetime(&dia.and_time(hora))
             .earliest()
             .map(|momento| momento.fixed_offset())
-            .ok_or_else(|| CliError::Usage(format!("{dia}: horário inexistente no fuso local")))
+            .ok_or_else(|| CliError::Usage(format!("{dia}: horário inexistente no fuso")))
     };
     let fim_do_dia = NaiveTime::from_hms_opt(23, 59, 59).unwrap_or(NaiveTime::MIN);
     let fim = match args.fim {

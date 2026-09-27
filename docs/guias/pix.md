@@ -367,7 +367,7 @@ Horário                    Valor  Devolvido  endToEndId                        
 3 Pix · R$ 5.350,00
 ```
 
-`--inicio` e `--fim` aceitam uma data, o dia inteiro no fuso local, ou uma data e hora com fuso (`2026-09-01T08:00:00-03:00`). Sem eles, a listagem é dos últimos 30 dias. Todas as páginas são lidas, ou só uma, com `--pagina`. A consulta de um Pix mostra também a mensagem de quem pagou:
+`--inicio` e `--fim` aceitam uma data, o dia inteiro do calendário do banco, em Brasília, como no extrato, ou uma data e hora com fuso (`2026-09-01T08:00:00-03:00`). Sem eles, a listagem é dos últimos 30 dias. Todas as páginas são lidas, ou só uma, com `--pagina`. A consulta de um Pix mostra também a mensagem de quem pagou:
 
 ```console
 $ inter-pj pix recebidos consultar E12345678202608282202Lk5jH3gF1dS
