@@ -9,7 +9,7 @@ use std::fs;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use chrono::{Days, Local};
-use common::{TestEnv, stderr_of, stdout_of};
+use common::{COPIA_E_COLA, TestEnv, ler_qr_code, stderr_of, stdout_of};
 use serde_json::{Value, json};
 use wiremock::matchers::{
     any, body_json, body_partial_json, method, path, query_param, query_param_is_missing,
@@ -18,7 +18,6 @@ use wiremock::{Mock, ResponseTemplate};
 
 const CODIGO: &str = "0b7e4c1a-5d3f-4a2b-9c8d-7e6f5a4b3c2d";
 const LINHA: &str = "07790001161234567800212345678903116050000015000";
-const COPIA_E_COLA: &str = "00020126580014br.gov.bcb.pix0136123e4567-e12b-12d1-a456-4266554400005204000053039865802BR5913Fulano de Tal6008BRASILIA62070503***63041D3D";
 
 fn cobranca(pix: bool) -> Value {
     let mut corpo = json!({
@@ -94,37 +93,6 @@ async fn consulta_uma_cobranca() {
     ))
     .unwrap();
     assert_eq!(json, cobranca(true));
-}
-
-/// The modules of the QR Code drawn without colors (light modules drawn),
-/// read back as a phone would.
-fn ler_qr_code(texto: &str) -> String {
-    const PX: usize = 4;
-    let linhas: Vec<&str> = texto
-        .lines()
-        .filter(|linha| !linha.is_empty() && linha.chars().all(|c| "█▀▄ ".contains(c)))
-        .collect();
-    assert!(!linhas.is_empty(), "sem QR Code:\n{texto}");
-    let lado = linhas[0].chars().count();
-    let mut escuros = vec![vec![false; lado]; linhas.len() * 2];
-    for (i, linha) in linhas.iter().enumerate() {
-        for (x, c) in linha.chars().enumerate() {
-            let (cima, baixo) = match c {
-                '█' => (true, true),
-                '▀' => (true, false),
-                '▄' => (false, true),
-                _ => (false, false),
-            };
-            escuros[2 * i][x] = !cima;
-            escuros[2 * i + 1][x] = !baixo;
-        }
-    }
-    let mut imagem = rqrr::PreparedImage::prepare_from_greyscale(lado * PX, lado * PX, |x, y| {
-        if escuros[y / PX][x / PX] { 0 } else { 255 }
-    });
-    let grades = imagem.detect_grids();
-    assert_eq!(grades.len(), 1, "QR Code não encontrado:\n{texto}");
-    grades[0].decode().unwrap().1
 }
 
 #[tokio::test(flavor = "multi_thread")]
