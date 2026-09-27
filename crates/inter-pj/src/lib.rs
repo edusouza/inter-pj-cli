@@ -45,6 +45,7 @@ mod error;
 mod identity;
 mod pdf;
 pub mod pix;
+pub mod pix_automatico;
 pub mod problem;
 mod retry;
 mod scope;
