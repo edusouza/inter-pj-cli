@@ -175,13 +175,32 @@ impl Sessao {
         leitor.read_to_end(&mut bytes).unwrap();
         let status = filho.wait().unwrap();
         let raiz = self.dir.path().display().to_string();
+        let saida = String::from_utf8_lossy(&bytes)
+            .replace(&raiz, "")
+            .replace(&self.servidor, endereco_da_api(linha));
         Execucao {
-            saida: String::from_utf8_lossy(&bytes)
-                .replace(&raiz, "")
-                .replace(&self.servidor, endereco_da_api(linha)),
+            saida: sem_a_url_do_banco(&saida),
             sucesso: status.success(),
         }
     }
+}
+
+/// What `config mostrar` shows without `INTER_BASE_URL`, which only the
+/// mock needs: the URL of the API is not a setting of the guides.
+fn sem_a_url_do_banco(saida: &str) -> String {
+    let mut texto = String::with_capacity(saida.len());
+    for linha in saida.split_inclusive('\n') {
+        let url_do_banco = linha.starts_with("URL base ")
+            && linha.trim_end().ends_with("(variável INTER_BASE_URL)");
+        if url_do_banco {
+            let valor = linha["URL base".len()..].trim_start();
+            texto.push_str(&linha[..linha.len() - valor.len()]);
+            texto.push_str("(não definido)\n");
+        } else {
+            texto.push_str(linha);
+        }
+    }
+    texto
 }
 
 /// The address of the API that the profile of `linha` calls, which the
@@ -356,6 +375,18 @@ fn certificado(pasta: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_url_of_the_mock_is_not_a_setting() {
+        let saida = "Limite por operação  R$ 20.000,00 (arquivo)\n\
+                     URL base             https://cdpj.partners.bancointer.com.br (variável INTER_BASE_URL)\n";
+        assert_eq!(
+            sem_a_url_do_banco(saida),
+            "Limite por operação  R$ 20.000,00 (arquivo)\nURL base             (não definido)\n"
+        );
+        let outra = "URL base  https://api.empresa.example (arquivo)\n";
+        assert_eq!(sem_a_url_do_banco(outra), outra);
+    }
 
     #[test]
     fn lines_are_read_as_a_shell_would() {
