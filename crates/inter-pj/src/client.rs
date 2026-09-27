@@ -729,19 +729,19 @@ mod tests {
 
     #[test]
     fn base_url_requires_https_except_loopback() {
-        assert!(parse_base_url("https://exemplo.com.br").is_ok());
+        assert!(parse_base_url("https://api.empresa.example").is_ok());
         assert!(parse_base_url("http://127.0.0.1:8080").is_ok());
         assert!(parse_base_url("http://localhost:1234/prefixo").is_ok());
         assert!(parse_base_url("http://[::1]:1234").is_ok());
-        let err = parse_base_url("http://exemplo.com.br").unwrap_err();
+        let err = parse_base_url("http://api.empresa.example").unwrap_err();
         assert!(err.to_string().contains("https"), "{err}");
         assert!(parse_base_url("ftp://127.0.0.1").is_err());
     }
 
     #[test]
     fn base_url_rejects_credentials_query_and_garbage() {
-        assert!(parse_base_url("https://user:pass@exemplo.com.br").is_err());
-        assert!(parse_base_url("https://exemplo.com.br/?a=1").is_err());
+        assert!(parse_base_url("https://user:pass@empresa.example").is_err());
+        assert!(parse_base_url("https://api.empresa.example/?a=1").is_err());
         assert!(parse_base_url("não é url").is_err());
     }
 

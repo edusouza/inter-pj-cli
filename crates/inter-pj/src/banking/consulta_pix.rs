@@ -260,7 +260,7 @@ mod tests {
                 "status": "PAGO",
                 "dataHoraMovimento": "2026-09-23T12:00:01",
                 "dataHoraSolicitacao": "2026-09-23T12:00:00",
-                "chave": "fornecedor@exemplo.com",
+                "chave": "fornecedor@empresa.example",
                 "codigoSolicitacao": "c42f0787-02cb-4b31-827e-459ec9d7ece1"
             },
             "historico": [

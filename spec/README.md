@@ -24,7 +24,7 @@ A especificação é a **fonte de verdade dos testes de contrato** (`crates/inte
 
 ## Dados pessoais nos exemplos
 
-Alguns exemplos do portal traziam CPFs com dígitos verificadores válidos, telefone e números de conta com aparência real (por exemplo, no detalhe de transferências e nos pagadores de cobranças). Para não manter possíveis dados de terceiros no repositório, eles foram substituídos por valores sintéticos (`123.456.789-09`, `+5500000000000`, contas `1234…`) pelo script [`sanitizar.py`](sanitizar.py), que preserva o restante do arquivo byte a byte.
+Alguns exemplos do portal traziam CPFs e CNPJs com dígitos verificadores válidos, e-mails em provedores reais, telefone e números de conta com aparência real (por exemplo, no detalhe de transferências e nos pagadores de cobranças). Para não manter possíveis dados de terceiros no repositório, eles foram substituídos por valores sintéticos (`123.456.789-09`, `12.345.678/0001-95`, endereços em `example.com`, `+5500000000000`, contas `1234…`) pelo script [`sanitizar.py`](sanitizar.py), que preserva o restante do arquivo byte a byte. CNPJs, CPFs formatados e e-mails são procurados em qualquer texto, inclusive nas descrições; só os domínios reservados para documentação (RFC 2606 e RFC 6761) ficam como estão.
 
 O teste `spec_examples_contain_no_real_looking_personal_data` falha se um dado desse tipo voltar à especificação.
 

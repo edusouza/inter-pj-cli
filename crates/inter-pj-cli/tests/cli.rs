@@ -458,7 +458,7 @@ async fn url_base_http_externa_e_recusada() {
     let env = TestEnv::new().await;
     env.write_config("");
     env.cmd()
-        .env("INTER_BASE_URL", "http://exemplo.com.br")
+        .env("INTER_BASE_URL", "http://api.empresa.example")
         .arg("saldo")
         .assert()
         .code(3)

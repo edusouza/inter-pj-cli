@@ -35,7 +35,7 @@ fn cobv(status: &str) -> Value {
         "loc": {"id": 790, "location": "pix.example.com/qr/v2/cobv/9d36b84fc70b478fb95c12729b90ca25", "tipoCob": "cobv"},
         "status": status,
         "devedor": {
-            "cnpj": "12345678000195", "nome": "Cliente Exemplo Ltda", "email": "financeiro@exemplo.com.br",
+            "cnpj": "12345678000195", "nome": "Cliente Exemplo Ltda", "email": "financeiro@empresa.example",
             "logradouro": "Avenida Brasil, 1200", "cidade": "Belo Horizonte", "uf": "MG", "cep": "30110000"
         },
         "recebedor": {"cnpj": "11222333000181", "nome": "Empresa Exemplo Ltda", "nomeFantasia": "Empresa Exemplo"},
@@ -69,7 +69,7 @@ fn criar() -> Vec<&'static str> {
         "--devedor-nome",
         "Cliente Exemplo Ltda",
         "--devedor-email",
-        "financeiro@exemplo.com.br",
+        "financeiro@empresa.example",
         "--devedor-endereco",
         "Avenida Brasil, 1200",
         "--devedor-cidade",
@@ -104,7 +104,7 @@ fn corpo() -> Value {
         "calendario": {"dataDeVencimento": "2099-10-20", "validadeAposVencimento": 30},
         "devedor": {
             "logradouro": "Avenida Brasil, 1200", "cidade": "Belo Horizonte", "uf": "MG", "cep": "30110000",
-            "cnpj": "12345678000195", "nome": "Cliente Exemplo Ltda", "email": "financeiro@exemplo.com.br"
+            "cnpj": "12345678000195", "nome": "Cliente Exemplo Ltda", "email": "financeiro@empresa.example"
         },
         "valor": {
             "original": "150.00",
@@ -174,7 +174,7 @@ async fn cria_por_arquivo_ou_pela_entrada_padrao() {
     let arquivo = json!({
         "calendario": {"dataDeVencimento": "2099-10-20", "validadeAposVencimento": 30},
         "devedor": {
-            "cnpj": "12.345.678/0001-95", "nome": "Cliente Exemplo Ltda", "email": "financeiro@exemplo.com.br",
+            "cnpj": "12.345.678/0001-95", "nome": "Cliente Exemplo Ltda", "email": "financeiro@empresa.example",
             "logradouro": "Avenida Brasil, 1200", "cidade": "Belo Horizonte", "uf": "MG", "cep": "30110-000"
         },
         "valor": {

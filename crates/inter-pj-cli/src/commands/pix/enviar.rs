@@ -417,7 +417,7 @@ mod tests {
         let construido = pagamento(
             &args(&[
                 "--chave",
-                "fornecedor@exemplo.com",
+                "fornecedor@empresa.example",
                 "--valor",
                 "150,00",
                 "--descricao",
@@ -439,7 +439,7 @@ mod tests {
         let construido = pagamento(
             &args(&[
                 "--chave",
-                "fornecedor@exemplo.com",
+                "fornecedor@empresa.example",
                 "--valor",
                 "1",
                 "--data",
@@ -455,7 +455,7 @@ mod tests {
 
         let passado = args(&[
             "--chave",
-            "fornecedor@exemplo.com",
+            "fornecedor@empresa.example",
             "--valor",
             "1",
             "--data",
@@ -468,7 +468,7 @@ mod tests {
         let err = pagamento(
             &args(&[
                 "--chave",
-                "fornecedor@exemplo.com",
+                "fornecedor@empresa.example",
                 "--valor",
                 "1",
                 "--descricao",
@@ -508,7 +508,7 @@ Pix a enviar
         let pagamento = PagamentoPix::new(
             "0.5".parse().unwrap(),
             Destinatario::Chave {
-                chave: "11987654374".parse().unwrap(),
+                chave: "11900000083".parse().unwrap(),
             },
         );
         let texto = resumo(&pagamento, None, Some(Environment::Production), &id());
@@ -517,7 +517,7 @@ Pix a enviar
             "{texto}"
         );
         assert!(texto.contains("PRODUÇÃO (conta real)"), "{texto}");
-        assert!(texto.contains("119.876.543-74 (CPF)"), "{texto}");
+        assert!(texto.contains("119.000.000-83 (CPF)"), "{texto}");
         assert!(texto.contains("R$ 0,50 (cinquenta centavos)"), "{texto}");
         assert!(texto.contains("Quando                 agora"), "{texto}");
         assert!(
@@ -574,7 +574,7 @@ Pix a enviar
 
     #[test]
     fn copia_e_cola_amount_rules() {
-        let chave = [("01", "fornecedor@exemplo.com")];
+        let chave = [("01", "fornecedor@empresa.example")];
         let estatico = codigo(&chave, Some("150.00"), "Fornecedor Exemplo");
         let sem_valor = codigo(&chave, None, "Fornecedor Exemplo");
         let dinamico = codigo(
@@ -613,13 +613,13 @@ Pix a enviar
             valor_de(&["--copia-e-cola", &dinamico, "--valor", "151,20"]).unwrap(),
             dec("151.20")
         );
-        assert!(valor_de(&["--chave", "fornecedor@exemplo.com"]).is_err());
+        assert!(valor_de(&["--chave", "fornecedor@empresa.example"]).is_err());
     }
 
     #[test]
     fn summary_of_a_copia_e_cola_code_is_sanitized() {
         let texto = codigo(
-            &[("01", "fornecedor@exemplo.com"), ("02", "NF 123")],
+            &[("01", "fornecedor@empresa.example"), ("02", "NF 123")],
             Some("150.00"),
             "Fornecedor\u{1b}[2K Exemplo",
         );
@@ -633,7 +633,7 @@ Pix a enviar
   Ambiente               sandbox (dados fictícios)
   Copia e cola           estático
   Recebedor              Fornecedor\u{FFFD}[2K Exemplo (SAO PAULO)
-  Chave Pix              fornecedor@exemplo.com (e-mail)
+  Chave Pix              fornecedor@empresa.example (e-mail)
   Identificador          NF123
   Mensagem do código     NF 123
   Valor                  R$ 150,00 (cento e cinquenta reais)
@@ -705,7 +705,10 @@ Pix a enviar
     fn describes_every_kind_of_key() {
         for (chave, esperado) in [
             ("12.345.678/0001-95", "12.345.678/0001-95 (CNPJ)"),
-            ("Fornecedor@Exemplo.com", "fornecedor@exemplo.com (e-mail)"),
+            (
+                "Fornecedor@Empresa.Example",
+                "fornecedor@empresa.example (e-mail)",
+            ),
             (
                 "123E4567-E89B-42D3-A456-426614174000",
                 "123e4567-e89b-42d3-a456-426614174000 (chave aleatória)",
@@ -820,7 +823,7 @@ Acompanhe com: inter-pj pix consultar c42f0787-02cb-4b31-827e-459ec9d7ece1 --agu
         }
     }
 
-    const PAGAMENTO: [&str; 4] = ["--chave", "fornecedor@exemplo.com", "--valor", "10"];
+    const PAGAMENTO: [&str; 4] = ["--chave", "fornecedor@empresa.example", "--valor", "10"];
 
     #[tokio::test]
     async fn declined_confirmation_sends_nothing() {

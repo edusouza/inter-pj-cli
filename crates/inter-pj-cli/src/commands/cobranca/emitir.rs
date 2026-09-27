@@ -372,7 +372,7 @@ fn endereco(pagador: &Pagador) -> String {
     texto
 }
 
-/// `financeiro@exemplo.com.br · (31) 99999-9999`.
+/// `financeiro@empresa.example · (31) 99999-9999`.
 fn contato(pagador: &Pagador) -> Option<String> {
     let telefone = match (&pagador.ddd, &pagador.telefone) {
         (Some(ddd), Some(numero)) => {
@@ -598,7 +598,7 @@ mod tests {
     fn summary_shows_what_goes_to_the_client() {
         let mut cobranca = das_opcoes(&args(&OPCOES)).unwrap();
         cobranca.data_vencimento = dia(2026, 10, 20);
-        cobranca.pagador.email = Some("financeiro@exemplo.com.br".to_owned());
+        cobranca.pagador.email = Some("financeiro@empresa.example".to_owned());
         cobranca.mensagem = vec!["Referente à NF 123".to_owned(), "Obrigado".to_owned()];
         assert_eq!(
             resumo(&cobranca, dia(2026, 9, 23), Some(Environment::Sandbox)),
@@ -610,7 +610,7 @@ Cobrança a emitir
   Vencimento    20/10/2026
   Pagador       Cliente Exemplo Ltda (12.345.678/0001-95)
   Endereço      Avenida Brasil, 1200 - Centro - Belo Horizonte/MG - CEP 30110-000
-  Contato       financeiro@exemplo.com.br · (31) 99999-9999
+  Contato       financeiro@empresa.example · (31) 99999-9999
   Desconto      2,5% para pagamentos até 15/10/2026
   Multa         R$ 4,00
   Juros         1% ao mês

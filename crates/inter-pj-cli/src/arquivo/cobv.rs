@@ -368,7 +368,7 @@ const MODELO: &str = r#"{
   "devedor": {
     "cnpj": "12.345.678/0001-95",
     "nome": "Cliente Exemplo Ltda",
-    "email": "financeiro@exemplo.com.br",
+    "email": "financeiro@empresa.example",
     "logradouro": "Avenida Brasil, 1200",
     "cidade": "Belo Horizonte",
     "uf": "MG",
@@ -430,7 +430,7 @@ mod tests {
                     "cep": "30110000",
                     "cnpj": "12345678000195",
                     "nome": "Cliente Exemplo Ltda",
-                    "email": "financeiro@exemplo.com.br"
+                    "email": "financeiro@empresa.example"
                 },
                 "valor": {
                     "original": "150.00",

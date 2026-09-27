@@ -1186,7 +1186,7 @@ Cobrança Pix com vencimento {TXID} a alterar
     #[test]
     fn a_new_payer_replaces_address_and_e_mail() {
         let mut atual = cobv("ATIVA");
-        atual.devedor.as_mut().unwrap().email = Some("antigo@exemplo.com.br".to_owned());
+        atual.devedor.as_mut().unwrap().email = Some("antigo@empresa.example".to_owned());
         let revisao = revisao_das_opcoes(
             &revisar_args(&[
                 "--devedor-documento",
@@ -1210,7 +1210,7 @@ Cobrança Pix com vencimento {TXID} a alterar
             "{resumo}"
         );
         assert!(
-            resumo.contains("  E-mail      antigo@exemplo.com.br → sem e-mail\n"),
+            resumo.contains("  E-mail      antigo@empresa.example → sem e-mail\n"),
             "{resumo}"
         );
     }

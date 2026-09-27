@@ -365,7 +365,7 @@ fn charges_with_a_due_date_are_the_documentation_examples() {
 #[test]
 fn every_charge_with_a_due_date_field_is_documented() {
     let mut cobv = cobv_do_exemplo();
-    cobv.devedor.email = Some("financeiro@exemplo.com.br".to_owned());
+    cobv.devedor.email = Some("financeiro@empresa.example".to_owned());
     cobv.valor.abatimento = Some(AbatimentoCobv::ValorFixo("5".parse().unwrap()));
     cobv.info_adicionais = vec![InfoAdicional::new("Pedido", "123")];
     for desconto in [
