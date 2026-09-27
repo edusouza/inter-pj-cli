@@ -5,8 +5,13 @@ mod spec;
 
 use std::collections::BTreeSet;
 
+use inter_pj::cobranca::Uf;
 use inter_pj::endpoint;
-use inter_pj::pix::{Cob, PaginaCobs, PixRecebido};
+use inter_pj::pix::{
+    AbatimentoCobv, Cob, Cobv, CobvRevisada, CobvSolicitada, DescontoCobv, DescontoData,
+    DevedorCobv, JurosCobv, MAX_DESCONTOS_DATA_FIXA, ModalidadeJuros, MultaCobv, PaginaCobs,
+    PaginaCobvs, PixRecebido, ValorCobvRevisada,
+};
 use inter_pj::pix::{
     CobRevisada, CobSolicitada, Devedor, ITENS_POR_PAGINA_MAXIMO_PIX, InfoAdicional, LocCob,
     MAX_INFO_ADICIONAIS, MAX_SOLICITACAO_PAGADOR, ModalidadeAgente, Retirada, StatusCob,
@@ -345,4 +350,168 @@ fn listing_filters_are_documented_parameters() {
     ] {
         assert!(documentados.contains(nome), "{nome}");
     }
+}
+
+// --- cobv ------------------------------------------------------------------------
+
+fn dia(ano: i32, mes: u32, dia: u32) -> chrono::NaiveDate {
+    chrono::NaiveDate::from_ymd_opt(ano, mes, dia).unwrap()
+}
+
+/// The documented creation of a charge with a due date (`cobBody1`), whose
+/// codes the example writes as text.
+fn cobv_do_exemplo() -> CobvSolicitada {
+    let mut devedor = DevedorCobv::new("12345678909".parse().unwrap(), "Francisco da Silva");
+    devedor.logradouro = Some("Alameda Souza, Numero 80, Bairro Braz".to_owned());
+    devedor.cidade = Some("Recife".to_owned());
+    devedor.uf = Some(Uf::Pe);
+    devedor.cep = Some("70011750".to_owned());
+    let mut cobv = CobvSolicitada::new(
+        "5f84a4c5-c5cb-4599-9f13-7eb4d419dacc".parse().unwrap(),
+        "123.45".parse().unwrap(),
+        dia(2020, 12, 31),
+        devedor,
+    );
+    cobv.calendario.validade_apos_vencimento = Some(30);
+    cobv.loc = Some(LocCob::new(789));
+    cobv.valor.multa = Some(MultaCobv::Percentual("15".parse().unwrap()));
+    cobv.valor.juros = Some(JurosCobv::new(
+        ModalidadeJuros::PercentualDiaDiasCorridos,
+        "2".parse().unwrap(),
+    ));
+    cobv.valor.desconto = Some(DescontoCobv::ValorFixoAteDatas(vec![DescontoData::new(
+        dia(2020, 11, 30),
+        "30".parse().unwrap(),
+    )]));
+    cobv.solicitacao_pagador = Some("Cobrança dos serviços prestados.".to_owned());
+    cobv
+}
+
+/// Codes written as text (`"2"`) and as numbers (`2`) compare equal.
+fn codigos_como_numeros(valor: &Value) -> Value {
+    match valor {
+        Value::Object(campos) => Value::Object(
+            campos
+                .iter()
+                .map(|(nome, valor)| {
+                    let valor = match (nome.as_str(), valor) {
+                        ("modalidade", Value::String(texto)) => texto
+                            .parse::<u64>()
+                            .map_or_else(|_| valor.clone(), Value::from),
+                        _ => codigos_como_numeros(valor),
+                    };
+                    (nome.clone(), valor)
+                })
+                .collect(),
+        ),
+        Value::Array(itens) => Value::Array(itens.iter().map(codigos_como_numeros).collect()),
+        outro => outro.clone(),
+    }
+}
+
+#[test]
+fn charges_with_a_due_date_are_the_documentation_examples() {
+    let cobv = cobv_do_exemplo();
+    cobv.validar().unwrap();
+    assert_eq!(
+        serde_json::to_value(&cobv).unwrap(),
+        codigos_como_numeros(example("cobBody1"))
+    );
+    // Revisions share the examples of the immediate charge.
+    let mut valor = ValorCobvRevisada::default();
+    valor.original = Some("567.89".parse().unwrap());
+    let mut revisao = CobvRevisada::new();
+    revisao.valor = Some(valor);
+    revisao.solicitacao_pagador = Some("Informar cartão fidelidade".to_owned());
+    assert_eq!(
+        &serde_json::to_value(&revisao).unwrap(),
+        example("cobBody4")
+    );
+    assert_eq!(
+        &serde_json::to_value(CobvRevisada::remocao()).unwrap(),
+        example("cobBody5")
+    );
+}
+
+#[test]
+fn every_charge_with_a_due_date_field_is_documented() {
+    let mut cobv = cobv_do_exemplo();
+    cobv.devedor.email = Some("financeiro@exemplo.com.br".to_owned());
+    cobv.valor.abatimento = Some(AbatimentoCobv::ValorFixo("5".parse().unwrap()));
+    cobv.info_adicionais = vec![InfoAdicional::new("Pedido", "123")];
+    for desconto in [
+        DescontoCobv::PercentualAteDatas(vec![DescontoData::new(
+            dia(2020, 11, 30),
+            "5".parse().unwrap(),
+        )]),
+        DescontoCobv::ValorPorDiaCorrido("0.5".parse().unwrap()),
+    ] {
+        cobv.valor.desconto = Some(desconto);
+        cobv.validar().unwrap();
+        assert_documentado("CobVSolicitada", &serde_json::to_value(&cobv).unwrap());
+    }
+    let mut revisao = CobvRevisada::remocao();
+    revisao.calendario = Some(cobv.calendario);
+    revisao.devedor = Some(cobv.devedor.clone());
+    revisao.loc = cobv.loc;
+    let mut valor = ValorCobvRevisada::default();
+    valor.original = Some(cobv.valor.original);
+    valor.multa = cobv.valor.multa;
+    valor.juros = cobv.valor.juros;
+    valor.abatimento = cobv.valor.abatimento;
+    valor.desconto.clone_from(&cobv.valor.desconto);
+    revisao.valor = Some(valor);
+    revisao.chave = Some(cobv.chave.clone());
+    revisao
+        .solicitacao_pagador
+        .clone_from(&cobv.solicitacao_pagador);
+    revisao.info_adicionais = Some(cobv.info_adicionais.clone());
+    revisao.validar().unwrap();
+    assert_documentado("CobVRevisada", &serde_json::to_value(&revisao).unwrap());
+}
+
+#[test]
+fn charges_with_a_due_date_keep_every_documented_field() {
+    let exemplo = example("cobResponse4");
+    let cobv: Cobv = serde_json::from_value(exemplo.clone()).unwrap();
+    assert_eq!(&serde_json::to_value(&cobv).unwrap(), exemplo);
+
+    let mut completo = example_for_schema("CobVCompleta");
+    completo["valor"]["original"] = "10.50".into();
+    let cobv: Cobv = serde_json::from_value(completo).unwrap();
+    let de_volta = serde_json::to_value(&cobv).unwrap();
+    assert_eq!(keys(&de_volta), property_names("CobVCompleta"));
+    assert_eq!(
+        keys(&de_volta["valor"]),
+        ["abatimento", "desconto", "juros", "multa", "original"]
+            .map(str::to_owned)
+            .into_iter()
+            .collect()
+    );
+    let mut pagina = example_for_schema("CobsVConsultadas");
+    pagina["cobs"] = Value::Array(Vec::new());
+    let pagina: PaginaCobvs = serde_json::from_value(pagina).unwrap();
+    assert_eq!(
+        keys(&serde_json::to_value(&pagina).unwrap()),
+        property_names("CobsVConsultadas")
+    );
+}
+
+#[test]
+fn charge_with_a_due_date_limits_are_the_documented_ones() {
+    let valor = resolve(propriedade(schema("CobVSolicitada"), "valor").unwrap());
+    let desconto = propriedade(valor, "desconto").unwrap();
+    let datas = propriedade(desconto, "descontoDataFixa").unwrap();
+    assert_eq!(datas["maxItems"], MAX_DESCONTOS_DATA_FIXA);
+    let juros = propriedade(valor, "juros").unwrap();
+    assert_eq!(
+        propriedade(juros, "modalidade").unwrap()["maximum"],
+        ModalidadeJuros::TODAS.len()
+    );
+    let multa = propriedade(valor, "multa").unwrap();
+    assert_eq!(propriedade(multa, "modalidade").unwrap()["maximum"], 2);
+    let abatimento = propriedade(valor, "abatimento").unwrap();
+    assert_eq!(propriedade(abatimento, "modalidade").unwrap()["maximum"], 2);
+    let listagem = parameter_names(&endpoint::pix::LISTAR_COBVS);
+    assert!(listagem.contains("loteCobVId"));
 }

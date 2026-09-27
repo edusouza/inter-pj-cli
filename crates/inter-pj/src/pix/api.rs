@@ -5,6 +5,7 @@ use std::future::Future;
 use serde::Serialize;
 
 use super::cob::{Cob, CobRevisada, CobSolicitada, FiltroCobs, PaginaCobs};
+use super::cobv::{Cobv, CobvRevisada, CobvSolicitada, FiltroCobvs, PaginaCobvs};
 use super::comum::{ITENS_POR_PAGINA_MAXIMO_PIX, Paginacao};
 use super::txid::Txid;
 use crate::client::{ApiRequest, InterClient};
@@ -140,6 +141,89 @@ impl<'a> Pix<'a> {
         todas("cobranças imediatas", |numero| async move {
             let pagina = self
                 .listar_cobs(filtro, numero, Some(ITENS_POR_PAGINA_MAXIMO_PIX))
+                .await?;
+            Ok((pagina.cobs, pagina.parametros.paginacao.unwrap_or_default()))
+        })
+        .await
+    }
+}
+
+impl Pix<'_> {
+    /// Creates a charge with a due date (`PUT /pix/v2/cobv/{txid}`, scope
+    /// `cobv.write`). As with [`criar_cob`](Self::criar_cob), the txid makes
+    /// a creation with an unknown outcome safe to repeat.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`criar_cob`](Self::criar_cob).
+    pub async fn criar_cobv(&self, txid: &Txid, cobv: &CobvSolicitada) -> Result<Cobv> {
+        cobv.validar()
+            .map_err(|err| Error::InvalidInput(Box::new(err)))?;
+        let request = ApiRequest::new(endpoint::pix::CRIAR_COBV)
+            .path_param("txid", txid.as_str().to_owned())
+            .json(corpo(cobv)?)
+            .retry(RetryMode::WhenNotProcessed);
+        self.client.execute(request).await
+    }
+
+    /// Changes a charge with a due date, or removes it (`PATCH
+    /// /pix/v2/cobv/{txid}`, scope `cobv.write`).
+    ///
+    /// # Errors
+    ///
+    /// Same as [`revisar_cob`](Self::revisar_cob).
+    pub async fn revisar_cobv(&self, txid: &Txid, revisao: &CobvRevisada) -> Result<Cobv> {
+        revisao
+            .validar()
+            .map_err(|err| Error::InvalidInput(Box::new(err)))?;
+        let request = ApiRequest::new(endpoint::pix::REVISAR_COBV)
+            .path_param("txid", txid.as_str().to_owned())
+            .json(corpo(revisao)?)
+            .retry(RetryMode::WhenNotProcessed);
+        self.client.execute(request).await
+    }
+
+    /// A charge with a due date, with the Pix that paid it (`GET
+    /// /pix/v2/cobv/{txid}`, scope `cobv.read`).
+    ///
+    /// # Errors
+    ///
+    /// Same as [`consultar_cob`](Self::consultar_cob).
+    pub async fn consultar_cobv(&self, txid: &Txid) -> Result<Cobv> {
+        let request = ApiRequest::new(endpoint::pix::CONSULTAR_COBV)
+            .path_param("txid", txid.as_str().to_owned());
+        self.client.execute(request).await
+    }
+
+    /// One page of the charges with a due date created in a period (`GET
+    /// /pix/v2/cobv`, scope `cobv.read`).
+    ///
+    /// # Errors
+    ///
+    /// Same as [`listar_cobs`](Self::listar_cobs).
+    pub async fn listar_cobvs(
+        &self,
+        filtro: &FiltroCobvs,
+        pagina: u32,
+        itens_por_pagina: Option<u32>,
+    ) -> Result<PaginaCobvs> {
+        let request = paginada(
+            ApiRequest::new(endpoint::pix::LISTAR_COBVS).queries(filtro.query()),
+            pagina,
+            itens_por_pagina,
+        )?;
+        self.client.execute(request).await
+    }
+
+    /// Every charge with a due date of the period.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`listar_cobs`](Self::listar_cobs).
+    pub async fn listar_todas_cobvs(&self, filtro: &FiltroCobvs) -> Result<Vec<Cobv>> {
+        todas("cobranças com vencimento", |numero| async move {
+            let pagina = self
+                .listar_cobvs(filtro, numero, Some(ITENS_POR_PAGINA_MAXIMO_PIX))
                 .await?;
             Ok((pagina.cobs, pagina.parametros.paginacao.unwrap_or_default()))
         })
