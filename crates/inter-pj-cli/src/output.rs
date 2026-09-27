@@ -1,5 +1,6 @@
 //! Output helpers: Brazilian formatting and writing to stdout.
 
+use std::borrow::Cow;
 use std::io::{self, Write};
 
 use rust_decimal::{Decimal, RoundingStrategy};
@@ -31,6 +32,38 @@ fn group_thousands(integer: &str) -> String {
     out
 }
 
+/// Text from the API or from a code on one line, without control
+/// characters: names and descriptions come from third parties, and an
+/// escape sequence or a line break in them could rewrite or fake what the
+/// terminal shows (e.g. a line with another amount).
+pub(crate) fn limpo(texto: &str) -> Cow<'_, str> {
+    if texto.chars().any(char::is_control) {
+        Cow::Owned(
+            texto
+                .chars()
+                .map(|c| if c.is_control() { '\u{FFFD}' } else { c })
+                .collect(),
+        )
+    } else {
+        Cow::Borrowed(texto)
+    }
+}
+
+/// Like [`limpo`], but keeps the line breaks of a text made of lines.
+pub(crate) fn sem_controle(texto: &str) -> Cow<'_, str> {
+    let controle = |c: char| c.is_control() && c != '\n';
+    if texto.chars().any(controle) {
+        Cow::Owned(
+            texto
+                .chars()
+                .map(|c| if controle(c) { '\u{FFFD}' } else { c })
+                .collect(),
+        )
+    } else {
+        Cow::Borrowed(texto)
+    }
+}
+
 /// Renders label/value rows with aligned columns (values right-aligned).
 pub(crate) fn key_values(rows: &[(&str, String)]) -> String {
     let label_width = rows
@@ -44,7 +77,10 @@ pub(crate) fn key_values(rows: &[(&str, String)]) -> String {
         .max()
         .unwrap_or(0);
     rows.iter()
-        .map(|(label, value)| format!("{label:<label_width$}  {value:>value_width$}"))
+        .map(|(label, value)| {
+            let value = limpo(value);
+            format!("{label:<label_width$}  {value:>value_width$}")
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -58,7 +94,7 @@ pub(crate) fn key_values_left(rows: &[(&str, String)]) -> String {
         .unwrap_or(0);
     rows.iter()
         .map(|(label, value)| {
-            format!("{label:<label_width$}  {value}")
+            format!("{label:<label_width$}  {}", limpo(value))
                 .trim_end()
                 .to_owned()
         })
@@ -67,7 +103,11 @@ pub(crate) fn key_values_left(rows: &[(&str, String)]) -> String {
 }
 
 /// Prints `text` and a newline to stdout. A closed pipe is not an error.
+///
+/// Control characters other than line breaks never reach the terminal,
+/// whatever the renderer did with the data.
 pub(crate) fn print(text: &str) -> Result<(), CliError> {
+    let text = sem_controle(text);
     let mut stdout = io::stdout().lock();
     match writeln!(stdout, "{text}").and_then(|()| stdout.flush()) {
         Err(err) if err.kind() != io::ErrorKind::BrokenPipe => {
@@ -155,6 +195,28 @@ mod tests {
     fn left_aligned_rows_trim_trailing_space() {
         let rows = [("Perfil", "padrao".to_owned()), ("Vazio", String::new())];
         assert_eq!(key_values_left(&rows), "Perfil  padrao\nVazio");
+    }
+
+    #[test]
+    fn third_party_text_cannot_rewrite_the_terminal() {
+        assert_eq!(limpo("Fornecedor Exemplo"), "Fornecedor Exemplo");
+        assert!(matches!(limpo("Fornecedor"), Cow::Borrowed(_)));
+        assert_eq!(
+            limpo("Loja\u{1b}[2K\rR$ 0,01\nValor"),
+            "Loja\u{FFFD}[2K\u{FFFD}R$ 0,01\u{FFFD}Valor"
+        );
+        assert_eq!(
+            sem_controle("linha 1\nlinha\t2\u{7}"),
+            "linha 1\nlinha\u{FFFD}2\u{FFFD}"
+        );
+
+        // A value with a line break cannot fake another row.
+        let rows = [
+            ("Recebedor", "Loja\n  Valor  R$ 0,01".to_owned()),
+            ("Valor", "R$ 150,00".to_owned()),
+        ];
+        assert_eq!(key_values_left(&rows).lines().count(), 2);
+        assert_eq!(key_values(&rows).lines().count(), 2);
     }
 
     #[test]

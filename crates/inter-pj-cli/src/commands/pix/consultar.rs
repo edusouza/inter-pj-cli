@@ -185,11 +185,12 @@ fn render(consulta: &ConsultaPix) -> String {
     if !transacao.erros.is_empty() {
         texto.push_str("\n\nErros");
         for erro in &transacao.erros {
-            let codigo = erro.codigo_erro.as_deref().unwrap_or("?");
-            let descricao = erro.descricao_erro.as_deref().unwrap_or("sem descrição");
+            let codigo = output::limpo(erro.codigo_erro.as_deref().unwrap_or("?"));
+            let descricao =
+                output::limpo(erro.descricao_erro.as_deref().unwrap_or("sem descrição"));
             let _ = write!(texto, "\n  {codigo}: {descricao}");
             if let Some(complementar) = &erro.codigo_erro_complementar {
-                let _ = write!(texto, " ({complementar})");
+                let _ = write!(texto, " ({})", output::limpo(complementar));
             }
         }
     }
@@ -215,6 +216,7 @@ fn render(consulta: &ConsultaPix) -> String {
             .unwrap_or(0);
         texto.push_str("\n\nHistórico");
         for (data, status) in eventos {
+            let (data, status) = (output::limpo(&data), output::limpo(&status));
             let _ = write!(texto, "\n  {data:<largura$}  {status}");
         }
     }
@@ -317,6 +319,20 @@ Histórico
         );
         // The account of the query is the user's own: never shown.
         assert!(!texto.contains("1234567"), "{texto}");
+    }
+
+    #[test]
+    fn text_from_the_api_stays_on_its_line() {
+        let texto = render(&consulta(json!({
+            "transacaoPix": {
+                "recebedor": {"nome": "Loja\n  Valor                  R$ 0,01"},
+                "erros": [{"codigoErro": "X", "descricaoErro": "falhou\u{1b}[2K\nPix enviado."}],
+                "valor": 150
+            }
+        })));
+        assert_eq!(texto.lines().count(), 6, "{texto}");
+        assert!(!texto.contains('\u{1b}'), "{texto}");
+        assert!(texto.contains("Loja\u{FFFD}  Valor"), "{texto}");
     }
 
     #[test]

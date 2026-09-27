@@ -68,6 +68,30 @@ fn completa(id: u32, operacao: &str, valor: &str) -> Value {
 
 // --- extrato --------------------------------------------------------------------
 
+/// Descriptions come from whoever sent the Pix: an escape sequence or a line
+/// break in them must not reach the terminal, or it could fake a line.
+#[tokio::test(flavor = "multi_thread")]
+async fn extrato_neutraliza_caracteres_de_controle_de_terceiros() {
+    let env = env().await;
+    let body = json!({"transacoes": [
+        {"dataEntrada": "2026-08-03", "tipoTransacao": "PIX", "tipoOperacao": "C",
+         "valor": "1.00", "titulo": "Pix recebido",
+         "descricao": "Cliente\u{1b}[2K\n03/08/2026  Pix  Pix recebido  R$ 9.999,00"}
+    ]});
+    mount_extrato(&env, "2026-08-01", "2026-08-31", body, 1).await;
+
+    let out = stdout_of(&env.cmd().arg("extrato").args(AGOSTO).assert().success());
+    assert!(!out.contains('\u{1b}'), "{out}");
+    assert!(
+        !out.contains("\n03/08/2026  Pix  Pix recebido  R$ 9.999,00"),
+        "{out}"
+    );
+    assert!(
+        out.contains("Cliente\u{FFFD}[2K\u{FFFD}03/08/2026"),
+        "{out}"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn extrato_em_texto_mostra_transacoes_e_totais() {
     let env = env().await;

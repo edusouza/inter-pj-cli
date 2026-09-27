@@ -2,6 +2,8 @@
 
 use std::io::{self, BufRead, IsTerminal, Write};
 
+use inter_pj::Environment;
+
 use crate::error::CliError;
 
 /// Where confirmations are asked: the process' terminal, or a fake in tests.
@@ -49,18 +51,38 @@ pub(crate) fn confirmar(
     if sim {
         return Ok(());
     }
-    if !terminal.interativo() {
-        return Err(CliError::Usage(
-            "confirmação necessária: execute em um terminal para responder, ou use --sim para confirmar sem perguntar"
-                .to_owned(),
-        ));
-    }
+    pode_confirmar(terminal, sim)?;
     let resposta = terminal
         .perguntar(&format!("{pergunta} [s/N] "))
         .map_err(|err| CliError::io("falha ao ler a confirmação", err))?;
     match resposta.as_deref().map(str::trim) {
         Some(sim) if sim.eq_ignore_ascii_case("s") || sim.eq_ignore_ascii_case("sim") => Ok(()),
         _ => Err(CliError::Cancelado),
+    }
+}
+
+/// Fails early, before any request, when [`confirmar`] could not ask.
+///
+/// # Errors
+///
+/// [`CliError::Usage`] when there is no terminal to ask and no `--sim`.
+pub(crate) fn pode_confirmar(terminal: &dyn Terminal, sim: bool) -> Result<(), CliError> {
+    if sim || terminal.interativo() {
+        Ok(())
+    } else {
+        Err(CliError::Usage(
+            "confirmação necessária: execute em um terminal para responder, ou use --sim para confirmar sem perguntar"
+                .to_owned(),
+        ))
+    }
+}
+
+/// The environment of a summary, with production made evident.
+pub(crate) fn descrever_ambiente(ambiente: Option<Environment>) -> String {
+    match ambiente {
+        Some(ambiente) if ambiente.is_production() => "PRODUÇÃO (conta real)".to_owned(),
+        Some(_) => "sandbox (dados fictícios)".to_owned(),
+        None => "não definido".to_owned(),
     }
 }
 
@@ -136,5 +158,9 @@ pub(crate) mod testes {
         let mut terminal = TerminalFalso::default();
         assert!(confirmar(&mut terminal, true, "Enviar?").is_ok());
         assert!(terminal.perguntas.is_empty());
+
+        assert!(pode_confirmar(&TerminalFalso::default(), false).is_err());
+        assert!(pode_confirmar(&TerminalFalso::default(), true).is_ok());
+        assert!(pode_confirmar(&TerminalFalso::respondendo("n"), false).is_ok());
     }
 }
