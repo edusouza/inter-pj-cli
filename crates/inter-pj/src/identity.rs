@@ -8,6 +8,8 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use rustls_pki_types::pem::{self, SectionKind};
 use secrecy::{ExposeSecret, SecretSlice};
 
+use crate::certificate::CertificateInfo;
+
 /// Client certificate and private key used for mutual TLS.
 ///
 /// Inter issues a certificate (`.crt`) and a private key (`.key`) in PEM
@@ -19,6 +21,9 @@ pub struct ClientIdentity {
     /// Private key followed by the certificate chain, PEM encoded.
     pem: SecretSlice<u8>,
     certificates: usize,
+    /// The leaf certificate, DER encoded: public, read without touching
+    /// the key.
+    leaf: Vec<u8>,
 }
 
 impl ClientIdentity {
@@ -91,6 +96,7 @@ impl ClientIdentity {
         let identity = Self {
             pem: SecretSlice::from(combined.into_bytes()),
             certificates: certificates.len(),
+            leaf: certificates[0].clone(),
         };
         // Fail early if the TLS backend does not accept the material.
         identity.to_reqwest()?;
@@ -100,6 +106,16 @@ impl ClientIdentity {
     /// Number of certificates in the chain (leaf first).
     pub fn certificate_count(&self) -> usize {
         self.certificates
+    }
+
+    /// The leaf certificate: whom it identifies, who issued it and its
+    /// validity.
+    ///
+    /// # Errors
+    ///
+    /// [`IdentityError::InvalidCertificate`] when it cannot be read.
+    pub fn certificate(&self) -> Result<CertificateInfo, IdentityError> {
+        CertificateInfo::from_der(&self.leaf)
     }
 
     pub(crate) fn to_reqwest(&self) -> Result<reqwest::Identity, IdentityError> {
@@ -159,6 +175,9 @@ pub enum IdentityError {
     /// The TLS backend rejected the certificate or key.
     #[error("certificado ou chave rejeitados pela biblioteca TLS: {0}")]
     Tls(String),
+    /// The certificate is not a valid X.509 structure: the part that failed.
+    #[error("certificado inválido: não foi possível ler {0}")]
+    InvalidCertificate(&'static str),
 }
 
 fn read(path: &Path) -> Result<Vec<u8>, IdentityError> {
@@ -178,6 +197,15 @@ fn sections(pem_bytes: &[u8]) -> Result<Vec<(SectionKind, Vec<u8>)>, IdentityErr
             Err(err) => return Err(IdentityError::InvalidPem(err.to_string())),
         }
     }
+}
+
+/// The DER of the first certificate of a PEM file, the leaf of the chain.
+pub(crate) fn first_certificate(pem_bytes: &[u8]) -> Result<Vec<u8>, IdentityError> {
+    sections(pem_bytes)?
+        .into_iter()
+        .find(|(kind, _)| *kind == SectionKind::Certificate)
+        .map(|(_, der)| der)
+        .ok_or(IdentityError::NoCertificate)
 }
 
 fn is_private_key(kind: SectionKind) -> bool {
@@ -276,6 +304,18 @@ mod tests {
     fn reports_unreadable_file_with_path() {
         let err = ClientIdentity::from_pem_files("/nao/existe.crt", "/nao/existe.key").unwrap_err();
         assert!(err.to_string().contains("/nao/existe.crt"), "{err}");
+    }
+
+    #[test]
+    fn the_leaf_certificate_is_read_without_the_key() {
+        let (cert, key) = generated();
+        let identity = ClientIdentity::from_pem(cert.as_bytes(), key.as_bytes()).unwrap();
+        let certificado = identity.certificate().unwrap();
+        assert_eq!(
+            certificado,
+            CertificateInfo::from_pem(cert.as_bytes()).unwrap()
+        );
+        assert!(certificado.not_before < certificado.not_after);
     }
 
     #[test]
