@@ -17,10 +17,11 @@ Outras proteções:
 - TLS com rustls, verificação de certificados pelo repositório do sistema, `https` obrigatório (exceto `localhost`, para testes) e sem seguir redirecionamentos.
 - Logs (`-v`/`-vv`) restritos aos crates do projeto: bibliotecas de HTTP/TLS não registram nada, então cabeçalhos e corpos não vazam.
 - Erros de parse do arquivo de configuração indicam apenas a linha, sem reproduzir o conteúdo (que pode conter o segredo).
-- Operações que movimentam dinheiro (`pix enviar`) validam tudo localmente e mostram um resumo antes de enviar. Só enviam com confirmação explícita: `s`/`sim` digitado em um terminal (respostas vindas de um *pipe* não valem) ou `--sim`.
-- Essas operações têm `--simular`, idempotência (`x-id-idempotente`, com repetição segura por `--id-idempotente`) e um `limite_por_operacao` por perfil, que vale mesmo com `--sim`.
+- Operações que movimentam dinheiro (`pix enviar`, `pagamento boleto pagar`, `pagamento darf pagar` e `pagamento lote enviar`) validam tudo localmente e mostram um resumo antes de enviar. Só enviam com confirmação explícita: `s`/`sim` digitado em um terminal (respostas vindas de um *pipe* não valem) ou `--sim`. O cancelamento de um agendamento também pede confirmação.
+- Essas operações têm `--simular` e um `limite_por_operacao` por perfil, que vale mesmo com `--sim` e, num lote, para cada pagamento. O Pix tem idempotência (`x-id-idempotente`, com repetição segura por `--id-idempotente`); os pagamentos não a têm na API, então um resultado incerto vem com o comando que confere se o pagamento foi feito antes de uma nova tentativa.
+- Arquivos de pagamento (DARF, lotes) são conferidos por inteiro antes de qualquer envio: campos desconhecidos são recusados, e um único problema impede o envio do lote todo.
 - Um envio nunca é repetido automaticamente depois de um erro após o qual ele pode ter sido processado (tempo esgotado, `5xx`).
-- Textos de terceiros exibidos na confirmação (nome e cidade de um copia e cola, por exemplo) passam por um filtro de caracteres de controle, para que sequências de escape não alterem o que o terminal mostra.
+- Na saída em texto e nas mensagens, textos de terceiros (nomes, descrições e mensagens de erro da API; o nome e a cidade de um copia e cola) passam por um filtro de caracteres de controle, para que sequências de escape e quebras de linha não alterem o que o terminal mostra. JSON e CSV mantêm o texto original.
 
 ## Política do repositório: nenhum dado pessoal
 
