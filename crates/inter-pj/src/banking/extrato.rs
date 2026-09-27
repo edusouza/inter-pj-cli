@@ -275,7 +275,8 @@ pub struct TransacaoCompleta {
 
 impl TransacaoCompleta {
     /// Date of the transaction ([`data_transacao`](Self::data_transacao), or
-    /// [`data_inclusao`](Self::data_inclusao) when absent), when it can be parsed.
+    /// [`data_inclusao`](Self::data_inclusao) when that one is absent or
+    /// unreadable), when it can be parsed.
     pub fn data(&self) -> Option<NaiveDate> {
         self.data_transacao
             .as_deref()
