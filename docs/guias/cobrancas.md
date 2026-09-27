@@ -11,6 +11,10 @@ Os exemplos são da Empresa Exemplo Ltda, uma empresa fictícia, no perfil de pr
 - [Depois do vencimento](#depois-do-vencimento)
 - [As cobranças de um período](#as-cobranças-de-um-período)
 - [O resumo por situação](#o-resumo-por-situação)
+- [Alterar o valor ou o vencimento](#alterar-o-valor-ou-o-vencimento)
+- [Cancelar](#cancelar)
+- [Quando o resultado fica incerto](#quando-o-resultado-fica-incerto)
+- [Testar no sandbox](#testar-no-sandbox)
 
 ## Emitir uma cobrança
 
@@ -303,3 +307,179 @@ recebida                                     1    R$ 890,00
 expirada (cancelada sem pagamento)           1    R$ 300,00
 Total                                        6  R$ 6.080,00
 ```
+
+## Alterar o valor ou o vencimento
+
+Uma cobrança ainda não paga pode ter o valor e o vencimento alterados; o resto, a API não altera. A Cliente Exemplo pediu para pagar a nota NF-0910 dez dias depois, com o valor corrigido. A CLI primeiro consulta a cobrança e mostra o que vai mudar:
+
+```console
+$ inter-pj cobranca editar 9d7b5f3e-1c0a-4e8f-9b7d-5f3e1c0a8e25 --valor 2.400,00 --vencimento 2026-10-20
+Cobrança a alterar
+  Ambiente    PRODUÇÃO (conta real)
+  Seu número  NF-0910
+  Situação    a receber
+  Valor       R$ 2.350,00 → R$ 2.400,00
+  Vencimento  10/10/2026 → 20/10/2026
+  Pagador     Cliente Exemplo Ltda (11.222.333/0001-81)
+  Código      9d7b5f3e-1c0a-4e8f-9b7d-5f3e1c0a8e25
+aviso: a consulta pode levar até 30 minutos para mostrar o novo valor ou vencimento
+Alterar a cobrança? [s/N] s
+Alteração em processamento.
+Código da alteração  3c5e7a9b-1d2f-4a6c-8e0b-2d4f6a8c0e19
+
+Acompanhe com: inter-pj cobranca edicao 3c5e7a9b-1d2f-4a6c-8e0b-2d4f6a8c0e19 --aguardar
+```
+
+A alteração é processada depois do pedido. `cobranca edicao` mostra em que pé ela está e, com `--aguardar` (aceito também por `editar`), consulta a cada 6 segundos até o fim, saindo com o código 0 quando a alteração é feita, 5 quando não é e 8 quando o tempo acaba (`--timeout`, de 60 segundos por padrão):
+
+```console
+$ inter-pj cobranca edicao 3c5e7a9b-1d2f-4a6c-8e0b-2d4f6a8c0e19 --aguardar
+Alteração feita: a consulta pode levar até 30 minutos para mostrar o novo valor ou vencimento.
+Código da alteração  3c5e7a9b-1d2f-4a6c-8e0b-2d4f6a8c0e19
+```
+
+Mesmo feita, a alteração pode levar até 30 minutos para aparecer em `cobranca consultar`. O novo valor vai de R$ 2,50 a R$ 99.999.999,99, e o novo vencimento é hoje ou depois. Uma cobrança paga, cancelada ou expirada é recusada antes de qualquer alteração:
+
+```console
+$ inter-pj cobranca editar 8e1f3a5c-7b9d-4e2f-8a4c-6e8f0a2c4e61 --valor 900,00 --sim
+erro: a cobrança já foi paga: não pode ser alterada
+```
+
+## Cancelar
+
+A Beltrana de Tal desistiu do pedido da nota NF-0925. O cancelamento pede um motivo, de até 50 caracteres, e, como a alteração, mostra a cobrança antes de pedir a confirmação:
+
+```console
+$ inter-pj cobranca cancelar 6f4d2b0e-8c6a-4e4f-9d2b-0e8c6a4f2d17 --motivo "Pedido cancelado pela cliente"
+Cobrança a cancelar
+  Ambiente    PRODUÇÃO (conta real)
+  Seu número  NF-0925
+  Situação    a receber
+  Valor       R$ 890,00
+  Vencimento  09/10/2026
+  Pagador     Beltrana de Tal (012.345.678-90)
+  Código      6f4d2b0e-8c6a-4e4f-9d2b-0e8c6a4f2d17
+  Motivo      Pedido cancelado pela cliente
+Cancelar a cobrança? [s/N] s
+Cancelamento solicitado.
+
+Confira com: inter-pj cobranca consultar 6f4d2b0e-8c6a-4e4f-9d2b-0e8c6a4f2d17
+
+$ inter-pj cobranca consultar 6f4d2b0e-8c6a-4e4f-9d2b-0e8c6a4f2d17
+Cobrança NF-0925
+  Situação    cancelada
+  Valor       R$ 890,00
+  Vencimento  09/10/2026
+  Motivo      Pedido cancelado pela cliente
+  Pagador     Beltrana de Tal (012.345.678-90)
+  Emitida em  24/09/2026
+  Tipo        simples
+  Multa       2%
+  Juros       1% ao mês
+  Código      6f4d2b0e-8c6a-4e4f-9d2b-0e8c6a4f2d17
+
+Boleto
+  Nosso número      0012345712
+  Linha digitável   07790.00116 12001.234579 12000.000005 7 15940000089000
+  Código de barras  07797159400000890000001112001234571200000000
+
+Pix
+  Copia e cola  00020101021226810014br.gov.bcb.pix2559qrcodepix.inter.example/cobv/cobv0925empresaexemplo202609245204000053039865802BR5920EMPRESA EXEMPLO LTDA6014BELO HORIZONTE62070503***6304825F
+  txid          cobv0925empresaexemplo20260924
+```
+
+Os dois comandos, `editar` e `cancelar`, pedem a confirmação; sem um terminal, exigem `--sim`, e sem ele nem a consulta é feita. Precisam do escopo `boleto-cobranca.write`, além do `boleto-cobranca.read` para a consulta, e a API aceita até 10 alterações por minuto.
+
+## Quando o resultado fica incerto
+
+Esta API não tem chave de idempotência, mas, por 30 minutos, recusa outra cobrança com o mesmo seu número, valor, vencimento e pagador. Se a resposta da emissão se perder (um tempo esgotado, um erro 5xx), a cobrança pode ter sido emitida: a CLI sai com o código 9 e mostra como procurá-la.
+
+```console
+$ inter-pj cobranca emitir --seu-numero NF-0927 --valor 640,00 --vencimento 2026-10-27 \
+    --pagador-documento 11.222.333/0001-81 --pagador-nome "Cliente Exemplo Ltda" \
+    --pagador-endereco "Avenida Brasil" --pagador-numero 1200 --pagador-cidade "Belo Horizonte" \
+    --pagador-uf MG --pagador-cep 30110-000 --dias-agenda 30 --sim
+*** PRODUÇÃO: a cobrança vai para o cliente de verdade ***
+Cobrança a emitir
+  Ambiente      PRODUÇÃO (conta real)
+  Seu número    NF-0927
+  Valor         R$ 640,00 (seiscentos e quarenta reais)
+  Vencimento    27/10/2026
+  Pagador       Cliente Exemplo Ltda (11.222.333/0001-81)
+  Endereço      Avenida Brasil, 1200 - Belo Horizonte/MG - CEP 30110-000
+  Cancelamento  26/11/2026, 30 dias após o vencimento, se não for paga
+  Recebimento   boleto e Pix (se a conta tiver chave Pix)
+erro: POST /cobranca/v3/cobrancas respondeu 504 (tempo esgotado no gateway)
+dica: a cobrança pode ter sido emitida; por 30 minutos, a API recusa outra com o mesmo seu número, valor, vencimento e pagador
+dica: confira antes de tentar de novo: inter-pj cobranca listar --filtrar-por emissao --seu-numero NF-0927
+
+$ inter-pj cobranca listar --filtrar-por emissao --seu-numero NF-0927
+Cobranças emitidas de 26/08/2026 a 24/09/2026 (seu número NF-0927)
+
+Vencimento  Seu número  Pagador               Situação       Valor  Código
+27/10/2026  NF-0927     Cliente Exemplo Ltda  a receber  R$ 640,00  7a9c1e3f-5b7d-4f9a-8c2e-4f6a8c0e2b58
+
+1 cobrança · R$ 640,00
+```
+
+A cobrança foi emitida: não emita de novo. Passados os 30 minutos, a API aceitaria uma segunda cobrança igual, e o cliente receberia duas.
+
+## Testar no sandbox
+
+No sandbox, `cobranca pagar` paga uma cobrança, com o boleto ou o Pix, para testar o fluxo inteiro: emitir, pagar, consultar e, com um webhook cadastrado, receber a notificação. Em produção, quem paga é o cliente, e o comando é recusado antes de qualquer requisição:
+
+```console
+$ inter-pj cobranca pagar 0b7e4c1a-5d3f-4a2b-9c8d-7e6f5a4b3c2d --com pix
+erro: cobranca pagar existe só no sandbox, para testes: em produção, quem paga é o cliente, com o boleto ou o Pix
+```
+
+No perfil do sandbox, com uma cobrança de teste:
+
+```console
+$ inter-pj -p sandbox cobranca emitir --seu-numero TESTE-1 --valor 10,00 --vencimento 2026-09-30 \
+    --pagador-documento 123.456.789-09 --pagador-nome "Fulano de Tal" \
+    --pagador-endereco "Rua da Bahia" --pagador-cidade "Belo Horizonte" --pagador-uf MG \
+    --pagador-cep 30160-011
+Cobrança a emitir
+  Ambiente      sandbox (dados fictícios)
+  Seu número    TESTE-1
+  Valor         R$ 10,00 (dez reais)
+  Vencimento    30/09/2026
+  Pagador       Fulano de Tal (123.456.789-09)
+  Endereço      Rua da Bahia - Belo Horizonte/MG - CEP 30160-011
+  Cancelamento  no vencimento, se não for paga: pagamentos atrasados não são aceitos
+  Recebimento   boleto e Pix (se a conta tiver chave Pix)
+Emitir a cobrança? [s/N] s
+Cobrança solicitada: a emissão termina em instantes.
+Código  1e3a5c7d-9f1b-4d3e-8a5c-7e9b1d3f5a74
+
+Acompanhe com: inter-pj -p sandbox cobranca consultar 1e3a5c7d-9f1b-4d3e-8a5c-7e9b1d3f5a74
+
+$ inter-pj -p sandbox cobranca pagar 1e3a5c7d-9f1b-4d3e-8a5c-7e9b1d3f5a74 --com pix
+Cobrança paga no sandbox, com o Pix.
+
+Confira com: inter-pj -p sandbox cobranca consultar 1e3a5c7d-9f1b-4d3e-8a5c-7e9b1d3f5a74
+
+$ inter-pj -p sandbox cobranca consultar 1e3a5c7d-9f1b-4d3e-8a5c-7e9b1d3f5a74
+aviso: ambiente sandbox — os dados retornados são fictícios
+Cobrança TESTE-1
+  Situação    recebida
+  Valor       R$ 10,00
+  Vencimento  30/09/2026
+  Recebido    R$ 10,00 por Pix em 24/09/2026
+  Pagador     Fulano de Tal (123.456.789-09)
+  Emitida em  24/09/2026
+  Tipo        simples
+  Código      1e3a5c7d-9f1b-4d3e-8a5c-7e9b1d3f5a74
+
+Boleto
+  Nosso número      0012345734
+  Linha digitável   07790.00116 12001.234579 34000.000009 3 15850000001000
+  Código de barras  07793158500000010000001112001234573400000000
+
+Pix
+  Copia e cola  00020101021226830014br.gov.bcb.pix2561qrcodepix.inter.example/cobv/cobvteste1empresaexemplo202609245204000053039865802BR5920EMPRESA EXEMPLO LTDA6014BELO HORIZONTE62070503***6304A4D7
+  txid          cobvteste1empresaexemplo20260924
+```
+
+O pagamento precisa do escopo `boleto-cobranca.write`.

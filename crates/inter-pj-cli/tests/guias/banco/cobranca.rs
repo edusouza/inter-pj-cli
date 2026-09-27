@@ -4,7 +4,11 @@
 //! August, which is in the statement, one that expired unpaid, one overdue
 //! and one to receive. A charge the guides issue is in processing when
 //! asked for, and issued, with its boleto and its Pix, by the next request;
-//! its codes are those of [`CODIGOS`], by its seu número.
+//! its codes are those of [`CODIGOS`], by its seu número. The answer to the
+//! issue of one charge gets lost, and the same charge is refused again, as
+//! the API does for 30 minutes. A change is done by the first look at it,
+//! though the charge keeps its values, as the API takes up to 30 minutes to
+//! show them; a charge is cancelled, or paid in the sandbox, at once.
 
 use std::sync::{Arc, Mutex};
 
@@ -12,7 +16,7 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use rust_decimal::Decimal;
 use serde_json::{Value, json};
-use wiremock::matchers::{path, path_regex};
+use wiremock::matchers::path_regex;
 use wiremock::{MockServer, Request, ResponseTemplate};
 
 use super::{conta, parametros, problema, requisicao};
@@ -30,7 +34,16 @@ struct Codigos {
     copia_e_cola: &'static str,
 }
 
-const CODIGOS: [Codigos; 6] = [
+/// The charge whose issue is made but whose answer gets lost.
+const RESPOSTA_PERDIDA: &str = "NF-0927";
+
+/// The codes of the changes asked for, in order.
+const EDICOES: [&str; 2] = [
+    "3c5e7a9b-1d2f-4a6c-8e0b-2d4f6a8c0e19",
+    "4d6f8b0c-2e3a-4b7d-9f1c-3e5a7b9d1f2a",
+];
+
+const CODIGOS: [Codigos; 8] = [
     Codigos {
         seu_numero: "NF-0805",
         codigo: "5c2e8a41-7d3b-4f6e-9a1c-2b4d6f8e0a13",
@@ -85,6 +98,24 @@ const CODIGOS: [Codigos; 6] = [
         txid: "cobv0925empresaexemplo20260924",
         copia_e_cola: "00020101021226810014br.gov.bcb.pix2559qrcodepix.inter.example/cobv/cobv0925empresaexemplo202609245204000053039865802BR5920EMPRESA EXEMPLO LTDA6014BELO HORIZONTE62070503***6304825F",
     },
+    Codigos {
+        seu_numero: "NF-0927",
+        codigo: "7a9c1e3f-5b7d-4f9a-8c2e-4f6a8c0e2b58",
+        nosso_numero: "0012345723",
+        barras: "07799161200000640000001112001234572300000000",
+        linha: "07790001161200123457923000000002916120000064000",
+        txid: "cobv0927empresaexemplo20260924",
+        copia_e_cola: "00020101021226810014br.gov.bcb.pix2559qrcodepix.inter.example/cobv/cobv0927empresaexemplo202609245204000053039865802BR5920EMPRESA EXEMPLO LTDA6014BELO HORIZONTE62070503***63044F1D",
+    },
+    Codigos {
+        seu_numero: "TESTE-1",
+        codigo: "1e3a5c7d-9f1b-4d3e-8a5c-7e9b1d3f5a74",
+        nosso_numero: "0012345734",
+        barras: "07793158500000010000001112001234573400000000",
+        linha: "07790001161200123457934000000009315850000001000",
+        txid: "cobvteste1empresaexemplo20260924",
+        copia_e_cola: "00020101021226830014br.gov.bcb.pix2561qrcodepix.inter.example/cobv/cobvteste1empresaexemplo202609245204000053039865802BR5920EMPRESA EXEMPLO LTDA6014BELO HORIZONTE62070503***6304A4D7",
+    },
 ];
 
 /// The order of the situations in the summary.
@@ -104,6 +135,8 @@ const SITUACOES: [&str; 9] = [
 struct Estado {
     /// Each charge as the API shows it (`cobranca`, `boleto`, `pix`).
     cobrancas: Vec<Value>,
+    /// How many changes were asked for.
+    edicoes: usize,
 }
 
 impl Estado {
@@ -196,6 +229,7 @@ impl Estado {
                 .zip(&CODIGOS)
                 .map(|(cobranca, codigos)| emitida(codigos, cobranca))
                 .collect(),
+            edicoes: 0,
         }
     }
 
@@ -229,6 +263,45 @@ impl Estado {
             .iter()
             .find(|cobranca| cobranca["cobranca"]["codigoSolicitacao"] == codigo)
     }
+
+    /// The charge of the path (`/cobranca/v3/cobrancas/{codigo}/...`), to
+    /// change: one that is paid, cancelled or expired cannot be.
+    fn alteravel(&mut self, request: &Request) -> Result<&mut Value, Recusa> {
+        let codigo = request.url.path().split('/').nth(4).unwrap_or_default();
+        let cobranca = self
+            .cobrancas
+            .iter_mut()
+            .find(|cobranca| cobranca["cobranca"]["codigoSolicitacao"] == codigo)
+            .ok_or(Recusa::NaoEncontrada)?;
+        let situacao = &cobranca["cobranca"]["situacao"];
+        if ["RECEBIDO", "MARCADO_RECEBIDO", "CANCELADO", "EXPIRADO"]
+            .iter()
+            .any(|encerrada| situacao == encerrada)
+        {
+            return Err(Recusa::Encerrada);
+        }
+        Ok(&mut cobranca["cobranca"])
+    }
+}
+
+/// Why a charge cannot be changed.
+#[derive(Debug, Clone, Copy)]
+enum Recusa {
+    NaoEncontrada,
+    Encerrada,
+}
+
+impl Recusa {
+    fn resposta(self) -> ResponseTemplate {
+        match self {
+            Self::NaoEncontrada => nao_encontrada(),
+            Self::Encerrada => problema(
+                400,
+                "Cobrança não pode ser alterada",
+                "A cobrança já foi paga, cancelada ou expirou.",
+            ),
+        }
+    }
 }
 
 /// A charge issued, with its boleto and its Pix.
@@ -251,65 +324,115 @@ fn emitida(codigos: &Codigos, mut cobranca: Value) -> Value {
     })
 }
 
+/// What answers a request, with the charges.
+type Rota = fn(&mut Estado, &Request) -> ResponseTemplate;
+
 pub(super) async fn montar(servidor: &MockServer) {
     let estado = Arc::new(Mutex::new(Estado::novo()));
-    let emissao = Arc::clone(&estado);
-    requisicao("POST", path("/cobranca/v3/cobrancas"))
-        .respond_with(move |request: &Request| emitir(&mut emissao.lock().unwrap(), request))
-        .mount(servidor)
-        .await;
-    let listagem = Arc::clone(&estado);
-    requisicao("GET", path("/cobranca/v3/cobrancas"))
-        .respond_with(move |request: &Request| {
-            let mut estado = listagem.lock().unwrap();
-            estado.processar();
-            listar(&estado, request)
-        })
-        .mount(servidor)
-        .await;
-    let resumo = Arc::clone(&estado);
-    requisicao("GET", path("/cobranca/v3/cobrancas/sumario"))
-        .respond_with(move |request: &Request| {
-            let mut estado = resumo.lock().unwrap();
-            estado.processar();
-            sumario(&estado, request)
-        })
-        .mount(servidor)
-        .await;
-    let documento = Arc::clone(&estado);
-    requisicao("GET", path_regex(r"^/cobranca/v3/cobrancas/[^/]+/pdf$"))
-        .respond_with(move |request: &Request| {
-            let mut estado = documento.lock().unwrap();
-            estado.processar();
-            let partes: Vec<&str> = request.url.path().split('/').collect();
-            match estado.achar(partes[4]) {
-                Some(cobranca) => {
-                    let titulo = format!(
-                        "Boleto {} - Empresa Exemplo Ltda",
-                        cobranca["cobranca"]["seuNumero"]
-                            .as_str()
-                            .unwrap_or_default()
-                    );
-                    ResponseTemplate::new(200)
-                        .set_body_json(json!({ "pdf": BASE64.encode(conta::pdf(&titulo)) }))
-                }
-                None => nao_encontrada(),
-            }
-        })
-        .mount(servidor)
-        .await;
-    requisicao("GET", path_regex(r"^/cobranca/v3/cobrancas/[0-9a-f-]+$"))
-        .respond_with(move |request: &Request| {
-            let mut estado = estado.lock().unwrap();
-            estado.processar();
-            let codigo = request.url.path().rsplit('/').next().unwrap_or_default();
-            match estado.achar(codigo) {
-                Some(cobranca) => ResponseTemplate::new(200).set_body_json(cobranca),
-                None => nao_encontrada(),
-            }
-        })
-        .mount(servidor)
-        .await;
+    let rotas: [(&str, &str, Rota); 9] = [
+        ("POST", r"^/cobranca/v3/cobrancas$", emitir),
+        ("GET", r"^/cobranca/v3/cobrancas$", |estado, request| {
+            listar(estado, request)
+        }),
+        (
+            "GET",
+            r"^/cobranca/v3/cobrancas/sumario$",
+            |estado, request| sumario(estado, request),
+        ),
+        ("GET", r"^/cobranca/v3/cobrancas/[^/]+/pdf$", pdf),
+        ("PATCH", r"^/cobranca/v3/cobrancas/[0-9a-f-]+$", editar),
+        ("GET", r"^/cobranca/v3/cobrancas/edicao/[^/]+$", edicao),
+        ("POST", r"^/cobranca/v3/cobrancas/[^/]+/cancelar$", cancelar),
+        ("POST", r"^/cobranca/v3/cobrancas/[^/]+/pagar$", pagar),
+        ("GET", r"^/cobranca/v3/cobrancas/[0-9a-f-]+$", consultar),
+    ];
+    for (metodo, caminho, rota) in rotas {
+        let estado = Arc::clone(&estado);
+        requisicao(metodo, path_regex(caminho))
+            .respond_with(move |request: &Request| {
+                let mut estado = estado.lock().unwrap();
+                estado.processar();
+                rota(&mut estado, request)
+            })
+            .mount(servidor)
+            .await;
+    }
+}
+
+fn consultar(estado: &mut Estado, request: &Request) -> ResponseTemplate {
+    let codigo = request.url.path().rsplit('/').next().unwrap_or_default();
+    match estado.achar(codigo) {
+        Some(cobranca) => ResponseTemplate::new(200).set_body_json(cobranca),
+        None => nao_encontrada(),
+    }
+}
+
+/// The boleto in PDF, with the seu número in its title.
+fn pdf(estado: &mut Estado, request: &Request) -> ResponseTemplate {
+    let codigo = request.url.path().split('/').nth(4).unwrap_or_default();
+    let Some(cobranca) = estado.achar(codigo) else {
+        return nao_encontrada();
+    };
+    let titulo = format!(
+        "Boleto {} - Empresa Exemplo Ltda",
+        cobranca["cobranca"]["seuNumero"]
+            .as_str()
+            .unwrap_or_default()
+    );
+    ResponseTemplate::new(200).set_body_json(json!({ "pdf": BASE64.encode(conta::pdf(&titulo)) }))
+}
+
+/// A change of the value or of the due date: in processing, and done by
+/// the first look at it.
+fn editar(estado: &mut Estado, request: &Request) -> ResponseTemplate {
+    if let Err(recusa) = estado.alteravel(request) {
+        return recusa.resposta();
+    }
+    let codigo = EDICOES[estado.edicoes];
+    estado.edicoes += 1;
+    ResponseTemplate::new(200)
+        .set_body_json(json!({ "codigoEdicao": codigo, "status": "PROCESSANDO" }))
+}
+
+fn edicao(estado: &mut Estado, request: &Request) -> ResponseTemplate {
+    let codigo = request.url.path().rsplit('/').next().unwrap_or_default();
+    if EDICOES[..estado.edicoes].contains(&codigo) {
+        ResponseTemplate::new(200).set_body_json(json!({ "status": "SUCESSO" }))
+    } else {
+        problema(
+            404,
+            "Alteração não encontrada",
+            "Não há alteração com este código.",
+        )
+    }
+}
+
+fn cancelar(estado: &mut Estado, request: &Request) -> ResponseTemplate {
+    let corpo: Value = serde_json::from_slice(&request.body).unwrap();
+    match estado.alteravel(request) {
+        Ok(cobranca) => {
+            cobranca["situacao"] = json!("CANCELADO");
+            cobranca["dataSituacao"] = json!(HOJE);
+            cobranca["motivoCancelamento"] = corpo["motivoCancelamento"].clone();
+            ResponseTemplate::new(202)
+        }
+        Err(recusa) => recusa.resposta(),
+    }
+}
+
+/// A charge paid in the sandbox, with the boleto or the Pix.
+fn pagar(estado: &mut Estado, request: &Request) -> ResponseTemplate {
+    let corpo: Value = serde_json::from_slice(&request.body).unwrap();
+    match estado.alteravel(request) {
+        Ok(cobranca) => {
+            cobranca["situacao"] = json!("RECEBIDO");
+            cobranca["dataSituacao"] = json!(HOJE);
+            cobranca["valorTotalRecebido"] = cobranca["valorNominal"].clone();
+            cobranca["origemRecebimento"] = corpo["pagarCom"].clone();
+            ResponseTemplate::new(204)
+        }
+        Err(recusa) => recusa.resposta(),
+    }
 }
 
 fn nao_encontrada() -> ResponseTemplate {
@@ -364,6 +487,9 @@ fn emitir(estado: &mut Estado, request: &Request) -> ResponseTemplate {
         "cobranca": cobranca,
         "formasRecebimento": corpo["formasRecebimento"],
     }));
+    if seu_numero == RESPOSTA_PERDIDA {
+        return ResponseTemplate::new(504);
+    }
     ResponseTemplate::new(200).set_body_json(json!({ "codigoSolicitacao": codigos.codigo }))
 }
 
