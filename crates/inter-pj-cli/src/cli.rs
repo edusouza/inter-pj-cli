@@ -40,13 +40,14 @@ pub(crate) use pix::{
 };
 pub(crate) use pix_automatico::{
     CobrCancelarArgs, CobrCommand, CobrConsultarArgs, CobrCriarArgs, CobrListarArgs,
-    CobrRetentativaArgs, ContatoDevedorArgs, PixAutomaticoCommand, Prazo, RecCancelarArgs,
+    CobrRetentativaArgs, ContatoDevedorArgs, LocrecCommand, LocrecConsultarArgs,
+    LocrecDesvincularArgs, LocrecListarArgs, PixAutomaticoCommand, Prazo, RecCancelarArgs,
     RecCommand, RecConsultarArgs, RecCriarArgs, RecListarArgs, RecRevisarArgs,
     SolicitacaoCancelarArgs, SolicitacaoCommand, SolicitacaoConsultarArgs, SolicitacaoCriarArgs,
 };
 pub(crate) use webhook::{
     CallbacksArgs, WebhookBankingCommand, WebhookCadastroArgs, WebhookCobrancaCommand,
-    WebhookCommand, WebhookExclusaoArgs, WebhookPixCommand,
+    WebhookCommand, WebhookExclusaoArgs, WebhookPixAutomaticoCommand, WebhookPixCommand,
 };
 
 const AFTER_HELP: &str = "\
@@ -376,7 +377,8 @@ impl Command {
             )
             | Self::PixAutomatico(
                 PixAutomaticoCommand::Rec(RecCommand::Listar(_))
-                | PixAutomaticoCommand::Cobr(CobrCommand::Listar(_)),
+                | PixAutomaticoCommand::Cobr(CobrCommand::Listar(_))
+                | PixAutomaticoCommand::Locrec(LocrecCommand::Listar(_)),
             )
             | Self::Webhook(
                 WebhookCommand::Banking(WebhookBankingCommand::Callbacks(_))
