@@ -14,6 +14,7 @@ mod commands;
 mod config;
 mod confirmacao;
 mod cores;
+mod doctor;
 mod error;
 mod files;
 mod logging;
