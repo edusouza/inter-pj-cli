@@ -7,6 +7,10 @@ use serde::Serialize;
 use super::cob::{Cob, CobRevisada, CobSolicitada, FiltroCobs, PaginaCobs};
 use super::cobv::{Cobv, CobvRevisada, CobvSolicitada, FiltroCobvs, PaginaCobvs};
 use super::comum::{ITENS_POR_PAGINA_MAXIMO_PIX, Paginacao};
+use super::recebido::{
+    Devolucao, DevolucaoSolicitada, FiltroPixRecebidos, IdDevolucao, PaginaPixRecebidos,
+    PixRecebido,
+};
 use super::txid::Txid;
 use crate::client::{ApiRequest, InterClient};
 use crate::endpoint;
@@ -228,6 +232,123 @@ impl Pix<'_> {
             Ok((pagina.cobs, pagina.parametros.paginacao.unwrap_or_default()))
         })
         .await
+    }
+}
+
+impl Pix<'_> {
+    /// One page of the Pix received in a period (`GET /pix/v2/pix`, scope
+    /// `pix.read`).
+    ///
+    /// # Errors
+    ///
+    /// Same as [`listar_cobs`](Self::listar_cobs).
+    pub async fn listar_pix_recebidos(
+        &self,
+        filtro: &FiltroPixRecebidos,
+        pagina: u32,
+        itens_por_pagina: Option<u32>,
+    ) -> Result<PaginaPixRecebidos> {
+        let request = paginada(
+            ApiRequest::new(endpoint::pix::LISTAR_RECEBIDOS).queries(filtro.query()),
+            pagina,
+            itens_por_pagina,
+        )?;
+        self.client.execute(request).await
+    }
+
+    /// Every Pix received in the period.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`listar_cobs`](Self::listar_cobs).
+    pub async fn listar_todos_pix_recebidos(
+        &self,
+        filtro: &FiltroPixRecebidos,
+    ) -> Result<Vec<PixRecebido>> {
+        todas("Pix recebidos", |numero| async move {
+            let pagina = self
+                .listar_pix_recebidos(filtro, numero, Some(ITENS_POR_PAGINA_MAXIMO_PIX))
+                .await?;
+            Ok((pagina.pix, pagina.parametros.paginacao.unwrap_or_default()))
+        })
+        .await
+    }
+
+    /// A Pix received, with its refunds (`GET /pix/v2/pix/{e2eId}`, scope
+    /// `pix.read`).
+    ///
+    /// # Errors
+    ///
+    /// [`Error::InvalidInput`] when `end_to_end_id` has other characters
+    /// than letters and digits; otherwise the same as
+    /// [`consultar_cob`](Self::consultar_cob).
+    pub async fn consultar_pix_recebido(&self, end_to_end_id: &str) -> Result<PixRecebido> {
+        let request = ApiRequest::new(endpoint::pix::CONSULTAR_RECEBIDO)
+            .path_param("e2eId", e2e_id(end_to_end_id)?);
+        self.client.execute(request).await
+    }
+
+    /// Refunds all or part of a Pix received (`PUT
+    /// /pix/v2/pix/{e2eId}/devolucao/{id}`, scope `pix.write`). **Money
+    /// leaves the account.**
+    ///
+    /// The API does not refund twice with the same `id`, so, after an
+    /// unknown outcome, the same call can be repeated safely; the request
+    /// itself is repeated automatically only when it surely was not
+    /// processed. The refund is processed afterwards: follow it with
+    /// [`consultar_devolucao`](Self::consultar_devolucao).
+    ///
+    /// # Errors
+    ///
+    /// [`Error::InvalidInput`] when the refund or the end-to-end id is
+    /// invalid (nothing is sent); otherwise the same as
+    /// [`criar_cob`](Self::criar_cob).
+    pub async fn devolver(
+        &self,
+        end_to_end_id: &str,
+        id: &IdDevolucao,
+        devolucao: &DevolucaoSolicitada,
+    ) -> Result<Devolucao> {
+        devolucao
+            .validar()
+            .map_err(|err| Error::InvalidInput(Box::new(err)))?;
+        let request = ApiRequest::new(endpoint::pix::SOLICITAR_DEVOLUCAO)
+            .path_param("e2eId", e2e_id(end_to_end_id)?)
+            .path_param("id", id.as_str().to_owned())
+            .json(corpo(devolucao)?)
+            .retry(RetryMode::WhenNotProcessed);
+        self.client.execute(request).await
+    }
+
+    /// Where a refund stands (`GET /pix/v2/pix/{e2eId}/devolucao/{id}`,
+    /// scope `pix.read`).
+    ///
+    /// # Errors
+    ///
+    /// Same as [`consultar_pix_recebido`](Self::consultar_pix_recebido).
+    pub async fn consultar_devolucao(
+        &self,
+        end_to_end_id: &str,
+        id: &IdDevolucao,
+    ) -> Result<Devolucao> {
+        let request = ApiRequest::new(endpoint::pix::CONSULTAR_DEVOLUCAO)
+            .path_param("e2eId", e2e_id(end_to_end_id)?)
+            .path_param("id", id.as_str().to_owned());
+        self.client.execute(request).await
+    }
+}
+
+/// An end-to-end id: letters and digits. The documentation defines 32, but
+/// its own examples have more, so only the characters are checked.
+fn e2e_id(texto: &str) -> Result<String> {
+    let id = texto.trim();
+    if (1..=64).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_alphanumeric()) {
+        Ok(id.to_owned())
+    } else {
+        Err(Error::InvalidInput(
+            "endToEndId inválido: esperados letras e dígitos (ex.: E12345678202609231200abcdef12345)"
+                .into(),
+        ))
     }
 }
 

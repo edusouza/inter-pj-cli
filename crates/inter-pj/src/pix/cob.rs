@@ -651,6 +651,13 @@ pub struct ParametrosConsulta {
         deserialize_with = "lenient::string"
     )]
     pub status: Option<String>,
+    /// txid filter, in the listing of the Pix received.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient::string"
+    )]
+    pub txid: Option<String>,
     /// The page.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub paginacao: Option<Paginacao>,
