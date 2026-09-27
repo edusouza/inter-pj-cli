@@ -77,7 +77,7 @@ if let Some(codigo) = solicitacao.codigo_solicitacao {
 
 Também há DARF sem código de barras (`pagar_darf`, `darfs`) e lotes de 2 a 150 boletos e DARFs (`enviar_lote`, `consultar_lote`).
 
-Na API de Cobrança, além de emitir e consultar: `listar` (uma página) e `listar_todas`, `sumario` por situação, `pdf`, `cancelar`, `editar` (vencimento e valor) com `consultar_edicao`, e `pagar_no_sandbox`, recusado fora do sandbox antes de qualquer requisição.
+Na API de Cobrança, além de emitir e consultar: `listar` (uma página) e `listar_todas`, `sumario` por situação, `pdf`, `cancelar` (o motivo é conferido por `motivo_cancelamento`), `editar` (vencimento e valor) com `consultar_edicao`, e `pagar_no_sandbox`, recusado fora do sandbox antes de qualquer requisição.
 
 Consultas são repetidas automaticamente em falhas temporárias (`429`, `5xx`, conexão), conforme a `RetryPolicy` do cliente. Operações com efeitos só são repetidas quando certamente não foram processadas (`429`, conexão recusada): o Pix com a mesma chave de idempotência; boletos, DARFs e lotes, que não têm essa chave, devem ser consultados antes de uma nova tentativa quando o resultado for incerto.
 
