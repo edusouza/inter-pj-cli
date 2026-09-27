@@ -7,10 +7,13 @@ use std::sync::OnceLock;
 
 use chrono::NaiveDate;
 use inter_pj::banking::{
-    ConsultaPix, DadosBancarios, DataDoPagamento, Destinatario, Detalhe, IdIdempotente,
-    InstituicaoFinanceira, LoteScroll, MAX_DESCRICAO, Pagamento, PagamentoBoleto, PagamentoPix,
-    PaginaExtrato, Saldo, SolicitacaoPagamento, SolicitacaoPix, StatusPagamento, StatusPix,
-    TipoConta, TipoOperacao, TipoRetornoPix, TipoTransacao, TransacaoCompleta, TransacaoSimples,
+    ConsultaPix, DadosBancarios, Darf, DataDoPagamento, Destinatario, Detalhe, IdIdempotente,
+    InstituicaoFinanceira, ItemLote, Lote, LotePagamentos, LoteScroll, MAX_DESCRICAO,
+    MAX_MEU_IDENTIFICADOR, MAX_PAGAMENTOS_LOTE, MIN_PAGAMENTOS_LOTE, Pagamento, PagamentoBoleto,
+    PagamentoDarf, PagamentoDoLote, PagamentoPix, PaginaExtrato, Saldo, SolicitacaoDarf,
+    SolicitacaoLote, SolicitacaoPagamento, SolicitacaoPix, StatusBoletoDoLote, StatusDarfDoLote,
+    StatusLote, StatusPagamento, StatusPix, TipoConta, TipoOperacao, TipoRetornoDarf,
+    TipoRetornoPix, TipoTransacao, TransacaoCompleta, TransacaoSimples,
 };
 use inter_pj::endpoint::{self, Endpoint};
 use inter_pj::{Environment, Scope};
@@ -569,6 +572,234 @@ fn boleto_payment_endpoints_document_the_parameters_we_send() {
     let cancelar = parameters(&endpoint::banking::PAGAMENTO_CANCELAR);
     assert_eq!(cancelar["codigoTransacao"]["in"], json!("path"));
     assert!(parameters(&endpoint::banking::PAGAMENTO_INCLUIR).contains_key("x-conta-corrente"));
+}
+
+/// The documented DARF, rebuilt from the examples of each field.
+fn darf_do_exemplo() -> PagamentoDarf {
+    let example = example_for_schema("DarfRequest");
+    let texto = |campo: &str| example[campo].as_str().unwrap().to_owned();
+    let dia = |campo: &str| example[campo].as_str().unwrap().parse().unwrap();
+    let valor = |campo: &str| Decimal::try_from(example[campo].as_f64().unwrap()).unwrap();
+    PagamentoDarf {
+        cnpj_cpf: texto("cnpjCpf").parse().unwrap(),
+        codigo_receita: texto("codigoReceita"),
+        data_vencimento: dia("dataVencimento"),
+        descricao: texto("descricao"),
+        nome_empresa: texto("nomeEmpresa"),
+        telefone_empresa: Some(texto("telefoneEmpresa")),
+        periodo_apuracao: dia("periodoApuracao"),
+        valor_principal: valor("valorPrincipal"),
+        valor_multa: Some(valor("valorMulta")),
+        valor_juros: Some(valor("valorJuros")),
+        referencia: texto("referencia"),
+    }
+}
+
+#[test]
+fn darf_body_reproduces_the_spec_example() {
+    let darf = darf_do_exemplo();
+    assert_eq!(darf.validar(), Ok(()));
+    assert_eq!(
+        serde_json::to_value(&darf).unwrap(),
+        example_for_schema("DarfRequest")
+    );
+}
+
+#[test]
+fn darf_limits_match_the_spec() {
+    type Alteracao = fn(&mut PagamentoDarf, String);
+    let properties = &schema("DarfRequest")["properties"];
+    let maximo =
+        |campo: &str| usize::try_from(properties[campo]["maxLength"].as_u64().unwrap()).unwrap();
+    let casos: [(&str, Alteracao); 4] = [
+        ("descricao", |d, texto| d.descricao = texto),
+        ("nomeEmpresa", |d, texto| d.nome_empresa = texto),
+        ("telefoneEmpresa", |d, texto| {
+            d.telefone_empresa = Some(texto);
+        }),
+        ("referencia", |d, texto| d.referencia = texto),
+    ];
+    for (campo, alterar) in casos {
+        let mut darf = darf_do_exemplo();
+        alterar(&mut darf, "1".repeat(maximo(campo)));
+        assert_eq!(darf.validar(), Ok(()), "{campo}");
+        alterar(&mut darf, "1".repeat(maximo(campo) + 1));
+        assert!(darf.validar().is_err(), "{campo}");
+    }
+    assert_eq!(properties["codigoReceita"]["minLength"], json!(4));
+    assert_eq!(properties["codigoReceita"]["maxLength"], json!(4));
+    for required in schema("DarfRequest")["required"].as_array().unwrap() {
+        let body = serde_json::to_value(darf_do_exemplo()).unwrap();
+        assert!(body.get(required.as_str().unwrap()).is_some(), "{required}");
+    }
+}
+
+#[test]
+fn darf_models_map_every_documented_field() {
+    let example = example_for_schema("DarfResponse");
+    let resposta: SolicitacaoDarf = serde_json::from_value(example).unwrap();
+    assert_same_keys("DarfResponse", &serde_json::to_value(&resposta).unwrap());
+
+    let example = example_for_schema("InformacoesPagamentoDarf");
+    let darf: Darf = serde_json::from_value(example).unwrap();
+    assert_same_keys(
+        "InformacoesPagamentoDarf",
+        &serde_json::to_value(&darf).unwrap(),
+    );
+
+    let ours: BTreeSet<&str> = TipoRetornoDarf::DOCUMENTADOS
+        .iter()
+        .map(TipoRetornoDarf::as_str)
+        .collect();
+    assert_eq!(ours, enum_values("TipoRetornoEnum"));
+}
+
+#[test]
+fn darf_and_batch_endpoints_document_the_parameters_we_send() {
+    let buscar = parameters(&endpoint::banking::PAGAMENTO_DARF_BUSCAR);
+    for name in [
+        "codigoSolicitacao",
+        "codigoReceita",
+        "dataInicio",
+        "dataFim",
+        "x-conta-corrente",
+    ] {
+        assert!(buscar.contains_key(name), "{name}");
+    }
+    let consultar = parameters(&endpoint::banking::PAGAMENTO_LOTE_CONSULTAR);
+    assert_eq!(consultar["idLote"]["in"], json!("path"));
+    assert_eq!(consultar["idLote"]["schema"]["minLength"], json!(24));
+    assert_eq!(consultar["idLote"]["schema"]["maxLength"], json!(24));
+    for incluir in [
+        endpoint::banking::PAGAMENTO_DARF_INCLUIR,
+        endpoint::banking::PAGAMENTO_LOTE_INCLUIR,
+    ] {
+        assert!(
+            parameters(&incluir).contains_key("x-conta-corrente"),
+            "{incluir}"
+        );
+    }
+    let accepted: Vec<&String> = operation(&endpoint::banking::PAGAMENTO_LOTE_INCLUIR)["responses"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .filter(|status| status.starts_with('2'))
+        .collect();
+    assert_eq!(accepted, ["202"]);
+}
+
+#[test]
+fn batch_body_matches_the_request_schemas() {
+    let pagamentos = &schema("PagarLoteRequest")["properties"]["pagamentos"];
+    assert_eq!(pagamentos["minItems"], json!(MIN_PAGAMENTOS_LOTE));
+    assert_eq!(pagamentos["maxItems"], json!(MAX_PAGAMENTOS_LOTE));
+    assert_eq!(
+        schema("PagarLoteRequest")["properties"]["meuIdentificador"]["maxLength"],
+        json!(MAX_MEU_IDENTIFICADOR)
+    );
+    let mapping: BTreeSet<&str> = pagamentos["items"]["discriminator"]["mapping"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(mapping, enum_values("TipoPagamentoEnum"));
+
+    let mut boleto = PagamentoBoleto::new(
+        "07797777051167847115990071126347192950000003010"
+            .parse()
+            .unwrap(),
+        "26.80".parse().unwrap(),
+        NaiveDate::from_ymd_opt(2026, 10, 10).unwrap(),
+    );
+    boleto.data_pagamento = NaiveDate::from_ymd_opt(2026, 10, 9);
+    boleto.cpf_cnpj_beneficiario = Some("12345678000195".parse().unwrap());
+    let lote = LotePagamentos {
+        meu_identificador: Some("Lote de teste".to_owned()),
+        pagamentos: vec![ItemLote::from(boleto), ItemLote::from(darf_do_exemplo())],
+    };
+    assert_eq!(lote.validar(), Ok(()));
+    let body = serde_json::to_value(&lote).unwrap();
+    assert_eq!(keys(&body), property_names("PagarLoteRequest"));
+    for (item, nome) in body["pagamentos"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .zip(["RequestBoletoLote", "RequestDarfLote"])
+    {
+        assert_eq!(keys(item), property_names(nome), "{nome}");
+        for required in schema(nome)["required"].as_array().unwrap() {
+            assert!(
+                item.get(required.as_str().unwrap()).is_some(),
+                "{nome}.{required}"
+            );
+        }
+    }
+    assert_eq!(
+        schema("RequestBoletoLote")["properties"]["valorPagar"]["type"],
+        json!("number")
+    );
+    assert_eq!(body["pagamentos"][0]["valorPagar"], json!(26.8));
+    assert_eq!(body["pagamentos"][0]["tipoPagamento"], json!("BOLETO"));
+    assert_eq!(body["pagamentos"][1]["tipoPagamento"], json!("DARF"));
+}
+
+#[test]
+fn batch_answers_map_every_documented_field() {
+    let example = example_for_schema("PagarLoteResponse");
+    let resposta: SolicitacaoLote = serde_json::from_value(example).unwrap();
+    assert_same_keys(
+        "PagarLoteResponse",
+        &serde_json::to_value(&resposta).unwrap(),
+    );
+
+    let mut example = example_for_schema("ObterLoteResponse");
+    let mut darf = example_for_schema("ResponseDarfLote");
+    darf["tipoPagamento"] = json!("DARF");
+    example["pagamentos"].as_array_mut().unwrap().push(darf);
+    let lote: Lote = serde_json::from_value(example).unwrap();
+    let back = serde_json::to_value(&lote).unwrap();
+    assert_eq!(keys(&back), property_names("ObterLoteResponse"));
+    let [PagamentoDoLote::Boleto(_), PagamentoDoLote::Darf(_)] = &lote.pagamentos[..] else {
+        panic!("{:?}", lote.pagamentos);
+    };
+    for (item, nome) in back["pagamentos"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .zip(["ResponseBoletoLote", "ResponseDarfLote"])
+    {
+        assert_eq!(keys(item), property_names(nome), "{nome}");
+    }
+
+    let documented = |ours: Vec<&'static str>, name: &str| {
+        assert_eq!(
+            ours.into_iter().collect::<BTreeSet<_>>(),
+            enum_values(name),
+            "{name}"
+        );
+    };
+    documented(
+        StatusLote::DOCUMENTADOS
+            .iter()
+            .map(StatusLote::as_str)
+            .collect(),
+        "StatusLoteEnum",
+    );
+    documented(
+        StatusBoletoDoLote::DOCUMENTADOS
+            .iter()
+            .map(StatusBoletoDoLote::as_str)
+            .collect(),
+        "StatusPagamentoBoleto",
+    );
+    documented(
+        StatusDarfDoLote::DOCUMENTADOS
+            .iter()
+            .map(StatusDarfDoLote::as_str)
+            .collect(),
+        "StatusPagamentoDarf",
+    );
 }
 
 /// The portal's examples carried real-looking CPFs, phone numbers and bank

@@ -39,10 +39,25 @@ let pagamento = PagamentoPix::new(
 let id = IdIdempotente::novo();
 let solicitacao = client.banking().enviar_pix(&pagamento, &id).await?;
 println!("{:?} {:?}", solicitacao.tipo_retorno, solicitacao.codigo_solicitacao);
+
+// Boleto pelo valor e vencimento do próprio código, cujos dígitos
+// verificadores são conferidos antes de qualquer requisição.
+use inter_pj::banking::PagamentoBoleto;
+use inter_pj::boleto::CodigoBarras;
+let codigo: CodigoBarras = "07797777051167847115990071126347192950000003010".parse()?;
+let hoje = chrono::Local::now().date_naive();
+let (Some(valor), Some(vencimento)) = (codigo.valor(), codigo.vencimento(hoje)) else {
+    return Err("o código não traz valor e vencimento".into());
+};
+let boleto = PagamentoBoleto::new(codigo, valor, vencimento);
+let resposta = client.banking().pagar_boleto(&boleto).await?;
+println!("{:?} {:?}", resposta.status_pagamento, resposta.codigo_transacao);
 # Ok(())
 # }
 ```
 
-Consultas são repetidas automaticamente em falhas temporárias (`429`, `5xx`, conexão), conforme a `RetryPolicy` do cliente. O envio de Pix só é repetido quando certamente não foi processado (`429`, conexão recusada), com a mesma chave de idempotência; outras operações com efeitos nunca são repetidas.
+Também há DARF sem código de barras (`pagar_darf`, `darfs`) e lotes de 2 a 150 boletos e DARFs (`enviar_lote`, `consultar_lote`).
+
+Consultas são repetidas automaticamente em falhas temporárias (`429`, `5xx`, conexão), conforme a `RetryPolicy` do cliente. Operações com efeitos só são repetidas quando certamente não foram processadas (`429`, conexão recusada): o Pix com a mesma chave de idempotência; boletos, DARFs e lotes, que não têm essa chave, devem ser consultados antes de uma nova tentativa quando o resultado for incerto.
 
 Sem vínculo com o Banco Inter. Licença MIT OR Apache-2.0.
