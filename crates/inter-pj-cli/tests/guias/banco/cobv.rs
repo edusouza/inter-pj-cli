@@ -12,7 +12,7 @@ use wiremock::matchers::{path, path_regex};
 use wiremock::{MockServer, Request, ResponseTemplate};
 
 use super::cobrancas_pix::{Cobrancas, copia_e_cola, listar, location_invalida};
-use super::{problema, requisicao};
+use super::{parametros, problema, requisicao};
 
 /// The Pix key of the account.
 const CHAVE: &str = "pix@empresa.example";
@@ -125,7 +125,23 @@ pub(super) async fn montar(servidor: &MockServer, cobrancas: &Arc<Mutex<Cobranca
         .await;
     let lista = Arc::clone(cobrancas);
     requisicao("GET", path("/pix/v2/cobv"))
-        .respond_with(move |request: &Request| listar(&lista.lock().unwrap().cobvs, request))
+        .respond_with(move |request: &Request| {
+            let cobrancas = lista.lock().unwrap();
+            // Those of a batch, when it asks for them.
+            let lote = parametros(request)
+                .get("loteCobVId")
+                .map(|lote| cobrancas.do_lote(lote.parse().unwrap_or_default()));
+            let cobvs: Vec<Value> = cobrancas
+                .cobvs
+                .iter()
+                .filter(|cobv| {
+                    lote.as_ref()
+                        .is_none_or(|txids| txids.iter().any(|txid| cobv["txid"] == *txid))
+                })
+                .cloned()
+                .collect();
+            listar(&cobvs, request)
+        })
         .mount(servidor)
         .await;
 }
@@ -159,13 +175,25 @@ fn criar(cobrancas: &mut Cobrancas, request: &Request) -> ResponseTemplate {
     }
     let corpo: Value = serde_json::from_slice(&request.body).unwrap();
     let criacao = cobrancas.agora();
-    let Some(loc) = cobrancas.location("cobv", txid, &criacao, corpo.get("loc")) else {
-        return location_invalida();
-    };
+    match nova(cobrancas, txid, &criacao, &corpo) {
+        Some(criada) => ResponseTemplate::new(201).set_body_json(criada),
+        None => location_invalida(),
+    }
+}
+
+/// The charge `corpo` created at `criacao`, alone or in a batch; `None`
+/// when the location it asks for is not free.
+pub(super) fn nova(
+    cobrancas: &mut Cobrancas,
+    txid: &str,
+    criacao: &str,
+    corpo: &Value,
+) -> Option<Value> {
+    let loc = cobrancas.location("cobv", txid, criacao, corpo.get("loc"))?;
     let mut criada = com_location(
         cobv(
             txid,
-            &criacao,
+            criacao,
             corpo["calendario"]["dataDeVencimento"].as_str().unwrap(),
             &corpo["devedor"],
             "",
@@ -186,38 +214,56 @@ fn criar(cobrancas: &mut Cobrancas, request: &Request) -> ResponseTemplate {
         criada["infoAdicionais"] = infos.clone();
     }
     cobrancas.cobvs.push(criada.clone());
-    ResponseTemplate::new(201).set_body_json(criada)
+    Some(criada)
 }
 
-/// A change of an active charge: what came replaces what it had, each
-/// charge of the amount whole, a new location frees the one it had, and
-/// the revision goes up; a paid or removed charge cannot change.
+/// Why a charge was not changed.
+pub(super) enum Recusa {
+    NaoEncontrada,
+    Encerrada,
+    LocationInvalida,
+}
+
 fn revisar(cobrancas: &mut Cobrancas, request: &Request) -> ResponseTemplate {
-    let txid = txid(request).to_owned();
     let corpo: Value = serde_json::from_slice(&request.body).unwrap();
-    let Some(cobv) = achar(cobrancas, &txid) else {
-        return nao_encontrada();
-    };
-    if cobv["status"] != "ATIVA" {
-        return problema(
+    match alterar(cobrancas, txid(request), &corpo) {
+        Ok(cobv) => ResponseTemplate::new(200).set_body_json(cobv),
+        Err(Recusa::NaoEncontrada) => nao_encontrada(),
+        Err(Recusa::Encerrada) => problema(
             400,
             "Cobrança não pode ser alterada",
             "Só uma cobrança ativa pode ser alterada.",
-        );
+        ),
+        Err(Recusa::LocationInvalida) => location_invalida(),
+    }
+}
+
+/// A change of an active charge, alone or in a batch: what came replaces
+/// what it had, each charge of the amount whole, a new location frees the
+/// one it had, and the revision goes up; a paid or removed charge cannot
+/// change.
+pub(super) fn alterar(
+    cobrancas: &mut Cobrancas,
+    txid: &str,
+    corpo: &Value,
+) -> Result<Value, Recusa> {
+    let cobv = achar(cobrancas, txid).ok_or(Recusa::NaoEncontrada)?;
+    if cobv["status"] != "ATIVA" {
+        return Err(Recusa::Encerrada);
     }
     if corpo.get("loc").is_some() {
         let criacao = cobv["calendario"]["criacao"].as_str().unwrap().to_owned();
-        let Some(loc) = cobrancas.location("cobv", &txid, &criacao, corpo.get("loc")) else {
-            return location_invalida();
-        };
-        let cobv = achar(cobrancas, &txid).unwrap();
+        let loc = cobrancas
+            .location("cobv", txid, &criacao, corpo.get("loc"))
+            .ok_or(Recusa::LocationInvalida)?;
+        let cobv = achar(cobrancas, txid).unwrap();
         let antiga = cobv.as_object_mut().unwrap().remove("loc");
         *cobv = com_location(cobv.take(), loc);
         if let Some(antiga) = antiga {
             cobrancas.liberar(antiga);
         }
     }
-    let cobv = achar(cobrancas, &txid).unwrap();
+    let cobv = achar(cobrancas, txid).unwrap();
     for campo in [
         "devedor",
         "chave",
@@ -240,5 +286,5 @@ fn revisar(cobrancas: &mut Cobrancas, request: &Request) -> ResponseTemplate {
         }
     }
     cobv["revisao"] = json!(cobv["revisao"].as_u64().unwrap_or_default() + 1);
-    ResponseTemplate::new(200).set_body_json(&*cobv)
+    Ok(cobv.clone())
 }
