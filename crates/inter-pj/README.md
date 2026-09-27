@@ -52,6 +52,25 @@ let (Some(valor), Some(vencimento)) = (codigo.valor(), codigo.vencimento(hoje)) 
 let boleto = PagamentoBoleto::new(codigo, valor, vencimento);
 let resposta = client.banking().pagar_boleto(&boleto).await?;
 println!("{:?} {:?}", resposta.status_pagamento, resposta.codigo_transacao);
+
+// Cobrança (boleto com Pix) para um cliente: o tipo de pessoa vem do CPF/CNPJ,
+// e a emissão termina depois; a consulta traz o boleto e o copia e cola.
+use inter_pj::cobranca::{EmissaoCobranca, Pagador, Uf};
+let pagador = Pagador::new(
+    "12.345.678/0001-95".parse()?,
+    "Cliente Exemplo Ltda",
+    "Avenida Brasil",
+    "Belo Horizonte",
+    Uf::Mg,
+    "30110000",
+);
+let vencimento = NaiveDate::from_ymd_opt(2026, 10, 20).unwrap();
+let cobranca = EmissaoCobranca::new("NF-123", Decimal::new(15_000, 2), vencimento, pagador);
+let solicitacao = client.cobranca().emitir(&cobranca).await?;
+if let Some(codigo) = solicitacao.codigo_solicitacao {
+    let emitida = client.cobranca().consultar(&codigo).await?;
+    println!("{:?} {:?}", emitida.cobranca.situacao, emitida.pix.and_then(|p| p.pix_copia_e_cola));
+}
 # Ok(())
 # }
 ```

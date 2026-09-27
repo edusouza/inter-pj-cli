@@ -6,6 +6,10 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+### Adicionado
+
+- Biblioteca: `InterClient::cobranca`, com `Cobranca::emitir` (cobrança com boleto e Pix, conferida localmente: seu número, valor, pagador com CPF/CNPJ, UF e CEP, desconto, multa, mora, mensagem, formas de recebimento e nota fiscal, cuja chave de acesso confere número e série; o tipo de pessoa vem do documento) e `Cobranca::consultar` (situação, valores, encargos, boleto, Pix e nota fiscal) (#28).
+
 ## [0.4.0] - 2026-09-23
 
 Pagamentos: boletos, contas e tributos, DARF e lotes, com os trilhos de segurança do Pix.
