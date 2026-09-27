@@ -1,6 +1,6 @@
 # Segurança
 
-Esta CLI acessa uma conta bancária empresarial. Segurança e privacidade são requisitos, não detalhes.
+Esta CLI acessa uma conta bancária empresarial. Segurança e privacidade são requisitos, não detalhes. O modelo de ameaças, os achados da revisão de segurança da 1.0.0 e os riscos aceitos estão em [`docs/seguranca.md`](docs/seguranca.md).
 
 ## Como as credenciais são tratadas
 
