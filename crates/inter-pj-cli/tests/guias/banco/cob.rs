@@ -97,7 +97,7 @@ fn cob(
 }
 
 /// The dynamic BR Code of a location, with its CRC16.
-fn copia_e_cola(location: &str) -> String {
+pub(super) fn copia_e_cola(location: &str) -> String {
     let campo = |id: &str, valor: &str| format!("{id}{:02}{valor}", valor.len());
     let conta = campo("00", "br.gov.bcb.pix") + &campo("25", location);
     let corpo = [
@@ -157,7 +157,7 @@ pub(super) async fn montar(servidor: &MockServer) {
         .mount(servidor)
         .await;
     requisicao("GET", path("/pix/v2/cob"))
-        .respond_with(move |request: &Request| listar(&estado.lock().unwrap(), request))
+        .respond_with(move |request: &Request| listar(&estado.lock().unwrap().cobs, request))
         .mount(servidor)
         .await;
 }
@@ -247,8 +247,12 @@ fn revisar(estado: &mut Estado, request: &Request) -> ResponseTemplate {
     ResponseTemplate::new(200).set_body_json(&*cob)
 }
 
-/// The charges created in the period, with the filters, in pages from 0.
-fn listar(estado: &Estado, request: &Request) -> ResponseTemplate {
+/// The charges created in the period, with the filters, in pages from 0:
+/// the listing of the immediate charges and of those with a due date.
+pub(super) fn listar<'a>(
+    cobs: impl IntoIterator<Item = &'a Value>,
+    request: &Request,
+) -> ResponseTemplate {
     let parametros = parametros(request);
     let momento = |campo: &str| {
         DateTime::parse_from_rfc3339(parametros.get(campo).map_or("", String::as_str))
@@ -260,9 +264,8 @@ fn listar(estado: &Estado, request: &Request) -> ResponseTemplate {
             "inicio e fim são obrigatórios, em RFC 3339.",
         );
     };
-    let cobs: Vec<&Value> = estado
-        .cobs
-        .iter()
+    let cobs: Vec<&Value> = cobs
+        .into_iter()
         .filter(|cob| {
             let criacao =
                 DateTime::parse_from_rfc3339(cob["calendario"]["criacao"].as_str().unwrap())

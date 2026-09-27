@@ -3,15 +3,16 @@
 //! the balance and the statements from June to September 2026, [`pix`], the
 //! Pix the account sends, [`recebidos`], the Pix it received and their
 //! refunds, [`pagamentos`], the boletos, bills and taxes it pays,
-//! [`cobranca`], the charges it issues to its clients, and [`cob`], the
-//! immediate Pix charges. The data tell one story: the balance follows from
-//! the statement, the Pix received, the bills paid and the charges paid
-//! before are those of the statement, and what is sent, refunded, paid or
-//! issued can be queried. Every name, document, key and amount is
-//! synthetic.
+//! [`cobranca`], the charges it issues to its clients, [`cob`], the
+//! immediate Pix charges, and [`cobv`], those with a due date. The data
+//! tell one story: the balance follows from the statement, the Pix
+//! received, the bills paid and the charges paid before are those of the
+//! statement, and what is sent, refunded, paid or issued can be queried.
+//! Every name, document, key and amount is synthetic.
 
 mod cob;
 mod cobranca;
+mod cobv;
 mod conta;
 mod pagamentos;
 mod pix;
@@ -44,6 +45,7 @@ impl Banco {
         pagamentos::montar(&servidor).await;
         cobranca::montar(&servidor).await;
         cob::montar(&servidor).await;
+        cobv::montar(&servidor).await;
         Self { servidor }
     }
 
