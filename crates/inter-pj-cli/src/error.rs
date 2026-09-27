@@ -59,6 +59,13 @@ pub(crate) enum CliError {
         #[source]
         source: io::Error,
     },
+    /// A configuration file that could not be read as TOML, and the command
+    /// that fixes it, when `config verificar --corrigir` does.
+    #[error("{mensagem}")]
+    ConfigFile {
+        mensagem: String,
+        verificar: Option<String>,
+    },
 }
 
 impl CliError {
@@ -72,7 +79,7 @@ impl CliError {
     pub(crate) fn exit_code(&self) -> u8 {
         match self {
             Self::Usage(_) | Self::Periodo { .. } => exit::USAGE,
-            Self::Config(_) => exit::CONFIG,
+            Self::Config(_) | Self::ConfigFile { .. } => exit::CONFIG,
             Self::Io { .. } => exit::UNEXPECTED,
             Self::Cancelado => exit::CANCELLED,
             Self::PixNaoPago { .. } => exit::REJECTED,
@@ -158,6 +165,15 @@ fn problem_type(api: &ApiError) -> Option<&str> {
 /// Prints the error (and hints) to stderr.
 pub(crate) fn report(err: &CliError) {
     eprintln!("erro: {err}");
+    if let CliError::ConfigFile {
+        verificar: Some(verificar),
+        ..
+    } = err
+    {
+        eprintln!(
+            "dica: `{verificar}` mostra a correção de cada linha; com `--corrigir`, ele a aplica e guarda uma cópia do arquivo original"
+        );
+    }
     for hint in err.hints() {
         eprintln!("dica: {hint}");
     }
