@@ -6,9 +6,9 @@ use std::fmt::Write as _;
 use chrono::{Local, NaiveDate, TimeZone};
 use inter_pj::pix::Devedor;
 use inter_pj::pix_automatico::{
-    AtivacaoSolicitada, CalendarioRec, CalendarioRecGerado, CancelamentoRec, EncerramentoRec,
-    FiltroRecs, PagadorRec, Periodicidade, PoliticaRetentativa, Rec, RecRevisada, RecSolicitada,
-    RecebedorRec, StatusRec, ValorRec, ValorRecGerado, VinculoRec,
+    AtivacaoSolicitada, CalendarioRec, CalendarioRecGerado, FiltroRecs, PagadorRec, Periodicidade,
+    PoliticaRetentativa, Rec, RecRevisada, RecSolicitada, RecebedorRec, StatusRec, ValorRec,
+    ValorRecGerado, VinculoRec,
 };
 use inter_pj::{Environment, Error as InterError, endpoint};
 use serde_json::json;
@@ -16,7 +16,7 @@ use serde_json::json;
 use super::solicitacao::descrever_status_solicitacao;
 use super::{
     descrever_ativacao, descrever_calendario, descrever_politica, descrever_status,
-    descrever_valor, encerrada,
+    descrever_valor, encerrada, encerramento,
 };
 use crate::arquivo;
 use crate::cli::{
@@ -448,41 +448,6 @@ fn pagador(pagador: &PagadorRec) -> Option<String> {
     }
 }
 
-/// Why a recurrence ended, in words.
-fn encerramento(encerramento: &EncerramentoRec) -> Option<String> {
-    let motivo = |codigo: Option<&str>, descricao: Option<&str>| match (codigo, descricao) {
-        (Some(codigo), Some(descricao)) => format!("{codigo}, {descricao}"),
-        (Some(texto), None) | (None, Some(texto)) => texto.to_owned(),
-        (None, None) => String::new(),
-    };
-    if let Some(rejeicao) = &encerramento.rejeicao {
-        let motivo = motivo(rejeicao.codigo.as_deref(), rejeicao.descricao.as_deref());
-        return Some(
-            format!("rejeitada: {motivo}")
-                .trim_end_matches(": ")
-                .to_owned(),
-        );
-    }
-    let cancelamento: &CancelamentoRec = encerramento.cancelamento.as_ref()?;
-    let quem = match cancelamento.solicitante.as_deref() {
-        Some("PSP_PAGADOR") => " pelo banco do pagador".to_owned(),
-        Some("USUARIO_PAGADOR") => " pelo pagador".to_owned(),
-        Some("PSP_RECEBEDOR") => " pelo banco do recebedor".to_owned(),
-        Some("USUARIO_RECEBEDOR") => " pelo recebedor".to_owned(),
-        Some(outro) => format!(" por {outro}"),
-        None => String::new(),
-    };
-    let motivo = motivo(
-        cancelamento.codigo.as_deref(),
-        cancelamento.descricao.as_deref(),
-    );
-    let mut texto = format!("cancelada{quem}");
-    if !motivo.is_empty() {
-        let _ = write!(texto, ": {motivo}");
-    }
-    Some(texto)
-}
-
 /// A status in one word: `aprovada`.
 fn curto(status: &StatusRec) -> &str {
     match status {
@@ -891,6 +856,7 @@ fn resumo_cancelamento(atual: &Rec, ambiente: Option<Environment>) -> String {
 mod tests {
     use chrono::FixedOffset;
     use clap::Parser;
+    use inter_pj::pix_automatico::EncerramentoRec;
     use serde_json::{Value, json};
     use wiremock::matchers::{any, method, path};
     use wiremock::{Mock, ResponseTemplate};

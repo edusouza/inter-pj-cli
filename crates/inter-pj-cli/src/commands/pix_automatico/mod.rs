@@ -1,12 +1,15 @@
 //! `inter-pj pix-automatico`: the recurrences the payer authorizes once and
 //! their recurring charges.
 
+mod cobr;
 mod rec;
 mod solicitacao;
 
+use std::fmt::Write as _;
+
 use inter_pj::pix_automatico::{
-    AtivacaoRec, CalendarioRecGerado, Periodicidade, PoliticaRetentativa, StatusRec, TipoJornada,
-    ValorRecGerado,
+    AtivacaoRec, CalendarioRecGerado, CancelamentoRec, EncerramentoRec, Periodicidade,
+    PoliticaRetentativa, StatusRec, TipoJornada, ValorRecGerado,
 };
 
 use super::Context;
@@ -18,6 +21,7 @@ pub(super) async fn run(context: &Context, command: PixAutomaticoCommand) -> Res
     match command {
         PixAutomaticoCommand::Rec(command) => rec::run(context, command).await,
         PixAutomaticoCommand::Solicitacao(command) => solicitacao::run(context, command).await,
+        PixAutomaticoCommand::Cobr(command) => cobr::run(context, command).await,
     }
 }
 
@@ -122,6 +126,42 @@ fn descrever_ativacao(ativacao: &AtivacaoRec) -> Option<String> {
         (None, Some(txid)) => Some(format!("cobrança {txid}")),
         (None, None) => None,
     }
+}
+
+/// Why a recurrence or a recurring charge ended, in words: `rejeitada:
+/// AP13, ...` or `cancelada pelo recebedor: ...`.
+fn encerramento(encerramento: &EncerramentoRec) -> Option<String> {
+    let motivo = |codigo: Option<&str>, descricao: Option<&str>| match (codigo, descricao) {
+        (Some(codigo), Some(descricao)) => format!("{codigo}, {descricao}"),
+        (Some(texto), None) | (None, Some(texto)) => texto.to_owned(),
+        (None, None) => String::new(),
+    };
+    if let Some(rejeicao) = &encerramento.rejeicao {
+        let motivo = motivo(rejeicao.codigo.as_deref(), rejeicao.descricao.as_deref());
+        return Some(
+            format!("rejeitada: {motivo}")
+                .trim_end_matches(": ")
+                .to_owned(),
+        );
+    }
+    let cancelamento: &CancelamentoRec = encerramento.cancelamento.as_ref()?;
+    let quem = match cancelamento.solicitante.as_deref() {
+        Some("PSP_PAGADOR") => " pelo banco do pagador".to_owned(),
+        Some("USUARIO_PAGADOR") => " pelo pagador".to_owned(),
+        Some("PSP_RECEBEDOR") => " pelo banco do recebedor".to_owned(),
+        Some("USUARIO_RECEBEDOR") => " pelo recebedor".to_owned(),
+        Some(outro) => format!(" por {outro}"),
+        None => String::new(),
+    };
+    let motivo = motivo(
+        cancelamento.codigo.as_deref(),
+        cancelamento.descricao.as_deref(),
+    );
+    let mut texto = format!("cancelada{quem}");
+    if !motivo.is_empty() {
+        let _ = write!(texto, ": {motivo}");
+    }
+    Some(texto)
 }
 
 #[cfg(test)]

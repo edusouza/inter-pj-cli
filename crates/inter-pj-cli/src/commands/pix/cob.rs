@@ -77,7 +77,7 @@ async fn criar(
         .pix()
         .criar_cob(&txid, &cob)
         .await
-        .map_err(|err| incerta(err, "cob", &txid))?;
+        .map_err(|err| incerta(err, "pix cob", &txid))?;
     let texto = format!(
         "Cobrança Pix criada.\n\n{}\n\nAcompanhe com: inter-pj pix cob consultar {txid}",
         render_cob(&criada)

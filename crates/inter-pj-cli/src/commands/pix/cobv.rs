@@ -15,8 +15,8 @@ use serde_json::json;
 
 use super::encargos::{self, Encargos};
 use super::{
-    Filtros, alteravel, antes_e_depois, copia_e_cola_ativa, descrever_status, incerta, paginacao,
-    pessoa, tabela_pix,
+    Filtros, alteravel, antes_e_depois, copia_e_cola_ativa, descrever_status, endereco, incerta,
+    paginacao, pessoa, tabela_pix,
 };
 use crate::arquivo;
 use crate::cli::{
@@ -91,7 +91,7 @@ async fn criar(
         .pix()
         .criar_cobv(&txid, &cobv)
         .await
-        .map_err(|err| incerta(err, "cobv", &txid))?;
+        .map_err(|err| incerta(err, "pix cobv", &txid))?;
     let texto = format!(
         "Cobrança Pix com vencimento criada.\n\n{}\n\nAcompanhe com: inter-pj pix cobv consultar {txid}",
         render_cobv(&criada)
@@ -299,29 +299,6 @@ fn endereco_da_pessoa(pessoa: &PessoaPix) -> Option<String> {
         pessoa.uf.as_deref(),
         pessoa.cep.as_deref(),
     )
-}
-
-/// `Avenida Brasil, 1200 - Belo Horizonte/MG - CEP 30110-000`.
-fn endereco(
-    logradouro: Option<&str>,
-    cidade: Option<&str>,
-    uf: Option<&str>,
-    cep: Option<&str>,
-) -> Option<String> {
-    let mut partes: Vec<String> = logradouro.map(str::to_owned).into_iter().collect();
-    match (cidade, uf) {
-        (Some(cidade), Some(uf)) => partes.push(format!("{cidade}/{uf}")),
-        (Some(parte), None) | (None, Some(parte)) => partes.push(parte.to_owned()),
-        (None, None) => {}
-    }
-    if let Some(cep) = cep {
-        let cep = match (cep.get(..5), cep.get(5..)) {
-            (Some(inicio), Some(fim)) if cep.len() == 8 => format!("{inicio}-{fim}"),
-            _ => cep.to_owned(),
-        };
-        partes.push(format!("CEP {cep}"));
-    }
-    (!partes.is_empty()).then(|| partes.join(" - "))
 }
 
 /// `Pedido: 123 / Loja: Centro`.
