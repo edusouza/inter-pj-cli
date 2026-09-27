@@ -39,6 +39,17 @@ pub(crate) fn parse_valor(raw: &str) -> Result<Decimal, String> {
     Ok(valor)
 }
 
+/// Like [`parse_valor`], but also accepts zero (`0`, `0,00`): fines and
+/// interest may be zero.
+pub(crate) fn parse_valor_ou_zero(raw: &str) -> Result<Decimal, String> {
+    let shown = raw.trim();
+    let text = shown.strip_prefix("R$").map_or(shown, str::trim_start);
+    if text.starts_with('0') && text.bytes().all(|b| matches!(b, b'0' | b'.' | b',')) {
+        return Ok(Decimal::ZERO);
+    }
+    parse_valor(raw)
+}
+
 /// Integer digits (thousands separators removed) and decimal digits.
 fn split(text: &str) -> Result<(String, &str), &'static str> {
     let pontos = text.matches('.').count();
@@ -230,6 +241,18 @@ mod tests {
 
     fn dec(s: &str) -> Decimal {
         s.parse().unwrap()
+    }
+
+    #[test]
+    fn fines_and_interest_may_be_zero() {
+        for zero in ["0", "0,00", "R$ 0.00", " 0,0 "] {
+            assert_eq!(parse_valor_ou_zero(zero), Ok(Decimal::ZERO), "{zero}");
+        }
+        assert_eq!(parse_valor_ou_zero("27,48"), Ok(dec("27.48")));
+        for invalido in ["", ",", "-1", "1.500", "0,001"] {
+            assert!(parse_valor_ou_zero(invalido).is_err(), "{invalido}");
+        }
+        assert!(parse_valor("0").is_err());
     }
 
     #[test]

@@ -69,9 +69,9 @@ impl PagamentoDarf {
             return Err(E::Referencia);
         }
         for (texto, maximo, campo) in [
-            (Some(&self.descricao), 1000, "a descrição"),
-            (Some(&self.nome_empresa), 100, "o nome da empresa"),
-            (self.telefone_empresa.as_ref(), 50, "o telefone"),
+            (Some(&self.descricao), 1000, "descricao"),
+            (Some(&self.nome_empresa), 100, "nomeEmpresa"),
+            (self.telefone_empresa.as_ref(), 50, "telefoneEmpresa"),
         ] {
             if let Some(texto) = texto
                 && (texto.trim().is_empty() || texto.chars().count() > maximo)
@@ -82,9 +82,11 @@ impl PagamentoDarf {
         if self.valor_principal <= Decimal::ZERO || !centavos(self.valor_principal) {
             return Err(E::ValorPrincipal);
         }
-        for valor in [self.valor_multa, self.valor_juros].into_iter().flatten() {
-            if valor.is_sign_negative() || !centavos(valor) {
-                return Err(E::MultaOuJuros);
+        for (valor, erro) in [(self.valor_multa, E::Multa), (self.valor_juros, E::Juros)] {
+            if let Some(valor) = valor
+                && (valor.is_sign_negative() || !centavos(valor))
+            {
+                return Err(erro);
             }
         }
         Ok(())
@@ -101,10 +103,11 @@ pub enum PagamentoDarfError {
     /// The reference is not digits only, up to 30.
     #[error("a referência deve ter só dígitos, até 30")]
     Referencia,
-    /// A text is empty or too long.
-    #[error("{campo} deve ter de 1 a {maximo} caracteres")]
+    /// A text is blank or too long.
+    #[error("{} deve ter de 1 a {maximo} caracteres", rotulo(campo))]
     Texto {
-        /// Which text.
+        /// The field, by its name in the API: `descricao`, `nomeEmpresa`
+        /// or `telefoneEmpresa`.
         campo: &'static str,
         /// Longest accepted.
         maximo: usize,
@@ -112,9 +115,35 @@ pub enum PagamentoDarfError {
     /// The principal amount is not positive or has fractions of a cent.
     #[error("o valor principal deve ser maior que zero, com até 2 casas decimais")]
     ValorPrincipal,
-    /// The fine or the interest is negative or has fractions of a cent.
-    #[error("multa e juros não podem ser negativos, com até 2 casas decimais")]
-    MultaOuJuros,
+    /// The fine is negative or has fractions of a cent.
+    #[error("a multa não pode ser negativa e tem até 2 casas decimais")]
+    Multa,
+    /// The interest is negative or has fractions of a cent.
+    #[error("os juros não podem ser negativos e têm até 2 casas decimais")]
+    Juros,
+}
+
+impl PagamentoDarfError {
+    /// The field with the problem, by its name in the API (`codigoReceita`,
+    /// `valorMulta`...).
+    pub fn campo(&self) -> &'static str {
+        match self {
+            Self::CodigoReceita => "codigoReceita",
+            Self::Referencia => "referencia",
+            Self::Texto { campo, .. } => campo,
+            Self::ValorPrincipal => "valorPrincipal",
+            Self::Multa => "valorMulta",
+            Self::Juros => "valorJuros",
+        }
+    }
+}
+
+fn rotulo(campo: &str) -> &'static str {
+    match campo {
+        "descricao" => "a descrição",
+        "nomeEmpresa" => "o nome da empresa",
+        _ => "o telefone",
+    }
 }
 
 /// Answer to [`Banking::pagar_darf`](super::Banking::pagar_darf) (`DarfResponse`).
@@ -376,7 +405,7 @@ mod tests {
     fn validates_codes_texts_and_amounts() {
         type Alteracao = fn(&mut PagamentoDarf);
         assert!(darf().validar().is_ok());
-        let casos: [(Alteracao, PagamentoDarfError); 10] = [
+        let casos: [(Alteracao, PagamentoDarfError); 11] = [
             (
                 |d| d.codigo_receita = "220".to_owned(),
                 PagamentoDarfError::CodigoReceita,
@@ -396,21 +425,21 @@ mod tests {
             (
                 |d| d.descricao = " ".to_owned(),
                 PagamentoDarfError::Texto {
-                    campo: "a descrição",
+                    campo: "descricao",
                     maximo: 1000,
                 },
             ),
             (
                 |d| d.nome_empresa = "x".repeat(101),
                 PagamentoDarfError::Texto {
-                    campo: "o nome da empresa",
+                    campo: "nomeEmpresa",
                     maximo: 100,
                 },
             ),
             (
                 |d| d.telefone_empresa = Some("9".repeat(51)),
                 PagamentoDarfError::Texto {
-                    campo: "o telefone",
+                    campo: "telefoneEmpresa",
                     maximo: 50,
                 },
             ),
@@ -423,8 +452,12 @@ mod tests {
                 PagamentoDarfError::ValorPrincipal,
             ),
             (
+                |d| d.valor_multa = Some("0.001".parse().unwrap()),
+                PagamentoDarfError::Multa,
+            ),
+            (
                 |d| d.valor_juros = Some("-1".parse().unwrap()),
-                PagamentoDarfError::MultaOuJuros,
+                PagamentoDarfError::Juros,
             ),
         ];
         for (i, (alterar, esperado)) in casos.into_iter().enumerate() {
@@ -432,6 +465,16 @@ mod tests {
             alterar(&mut pagamento);
             assert_eq!(pagamento.validar(), Err(esperado), "caso {i}");
         }
+        let texto = PagamentoDarfError::Texto {
+            campo: "nomeEmpresa",
+            maximo: 100,
+        };
+        assert_eq!(
+            texto.to_string(),
+            "o nome da empresa deve ter de 1 a 100 caracteres"
+        );
+        assert_eq!(texto.campo(), "nomeEmpresa");
+        assert_eq!(PagamentoDarfError::Juros.campo(), "valorJuros");
     }
 
     #[test]

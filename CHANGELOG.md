@@ -8,12 +8,14 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ### Adicionado
 
+- `inter-pj pagamento darf pagar`: DARF sem código de barras pelas opções ou por `--arquivo` (JSON com os campos da API, ou `-` para a entrada padrão), validado localmente com mensagens que apontam o campo; campos desconhecidos no arquivo são recusados. O resumo mostra principal, multa, juros e o total por extenso, e avisa sobre DARF vencido sem acréscimos. Mesmos trilhos dos demais pagamentos (#25).
+- `inter-pj pagamento darf listar`: DARFs pagos em um período, ou incluídos nos últimos 30 dias, por código da receita ou da solicitação, em texto, JSON ou CSV (#25).
 - `inter-pj pagamento boleto pagar <codigo>`: paga ou agenda (`--data`) boletos, contas de consumo e tributos pela linha digitável ou pelo código de barras, conferidos localmente. Valor e vencimento vêm do código quando ele os traz, e o resumo avisa quando `--valor` ou `--vencimento` diferem dele ou quando o pagamento fica para depois do vencimento; `--beneficiario` pede à API que confira o CPF/CNPJ de quem recebe. Mesmos trilhos do Pix: confirmação, `--sim`, `--simular` e `limite_por_operacao`, que passa a valer também para pagamentos. Como a API não tem chave de idempotência, um resultado incerto vem com o comando que confere o pagamento antes de repeti-lo (#23).
 - `inter-pj pagamento boleto listar`: pagamentos por código de barras de um período (até 90 dias; padrão: incluídos nos últimos 30 dias), por data de inclusão, pagamento ou vencimento (`--filtrar-por`), código (`--codigo`) ou transação (`--codigo-transacao`), em texto, JSON ou CSV (#24).
 - `inter-pj pagamento boleto cancelar <codigo-transacao>`: cancela um agendamento depois de mostrá-lo (beneficiário, valor, data e status) e pedir confirmação; sem terminal, exige `--sim` e não faz nenhuma requisição (#24).
 - Biblioteca: `boleto::CodigoBarras` valida e decodifica localmente a linha digitável (47 dígitos para boletos, 48 para contas e tributos) e o código de barras (44 dígitos): dígitos verificadores (módulos 10 e 11), conversão entre linha e código, banco, segmento, valor e vencimento, considerando o reinício do fator de vencimento em 22/02/2025 (#23).
 - Biblioteca: `Banking::pagar_boleto` (boletos, contas e tributos com código de barras, com validação local do valor), `Banking::pagamentos` (filtros por período, tipo de data, código e transação) e `Banking::cancelar_pagamento` (agendamentos) (#23, #24).
-- Biblioteca: `Banking::pagar_darf` (DARF sem código de barras, com validação local do código da receita, da referência, dos textos e dos valores) e `Banking::darfs` (filtros por período, código da receita e solicitação) (#25).
+- Biblioteca: `Banking::pagar_darf` (DARF sem código de barras, com validação local do código da receita, da referência, dos textos e dos valores; `PagamentoDarfError::campo` diz qual campo falhou) e `Banking::darfs` (filtros por período, código da receita e solicitação) (#25).
 - Biblioteca: `Banking::enviar_lote` (lotes de 2 a 150 boletos e DARFs, validados item a item) e `Banking::consultar_lote` (status do lote e de cada pagamento) (#26).
 
 ### Corrigido
