@@ -1,0 +1,249 @@
+[
+  {
+    "idTransacao": "310000101",
+    "dataInclusao": "2026-06-10 10:12:03",
+    "dataTransacao": "2026-06-10",
+    "tipoTransacao": "PIX",
+    "tipoOperacao": "C",
+    "valor": "2800.00",
+    "titulo": "Pix recebido",
+    "descricao": "Cliente Exemplo Ltda",
+    "detalhes": {
+      "tipoDetalhe": "PIX",
+      "nomePagador": "Cliente Exemplo Ltda",
+      "cpfCnpjPagador": "11222333000181",
+      "descricaoPix": "Pedido 1031",
+      "endToEndId": "E12345678202606101312Xk3fP9sQ2aL"
+    }
+  },
+  {
+    "idTransacao": "310000102",
+    "dataInclusao": "2026-06-25 06:00:00",
+    "dataTransacao": "2026-06-25",
+    "tipoTransacao": "TARIFA",
+    "tipoOperacao": "D",
+    "valor": "9.90",
+    "titulo": "Tarifa",
+    "descricao": "Pacote de serviços"
+  },
+  {
+    "idTransacao": "310000103",
+    "dataInclusao": "2026-07-06 09:41:55",
+    "dataTransacao": "2026-07-06",
+    "tipoTransacao": "PIX",
+    "tipoOperacao": "C",
+    "valor": "3200.00",
+    "titulo": "Pix recebido",
+    "descricao": "Cliente Exemplo Ltda",
+    "detalhes": {
+      "tipoDetalhe": "PIX",
+      "nomePagador": "Cliente Exemplo Ltda",
+      "cpfCnpjPagador": "11222333000181",
+      "descricaoPix": "Pedido 1038",
+      "endToEndId": "E12345678202607061241Rt7wB2nV5cH"
+    }
+  },
+  {
+    "idTransacao": "310000104",
+    "dataInclusao": "2026-07-15 11:20:40",
+    "dataTransacao": "2026-07-15",
+    "tipoTransacao": "PAGAMENTO",
+    "tipoOperacao": "D",
+    "valor": "480.00",
+    "titulo": "Pagamento efetuado",
+    "descricao": "Fornecedor Exemplo SA",
+    "detalhes": {
+      "tipoDetalhe": "PAGAMENTO",
+      "nomeDestinatario": "Fornecedor Exemplo SA",
+      "dataVencimento": "2026-07-15"
+    }
+  },
+  {
+    "idTransacao": "310000105",
+    "dataInclusao": "2026-07-27 06:00:00",
+    "dataTransacao": "2026-07-27",
+    "tipoTransacao": "TARIFA",
+    "tipoOperacao": "D",
+    "valor": "9.90",
+    "titulo": "Tarifa",
+    "descricao": "Pacote de serviços"
+  },
+  {
+    "idTransacao": "310000106",
+    "dataInclusao": "2026-08-03 14:05:12",
+    "dataTransacao": "2026-08-03",
+    "tipoTransacao": "PIX",
+    "tipoOperacao": "C",
+    "valor": "1500.00",
+    "titulo": "Pix recebido",
+    "descricao": "Cliente Exemplo Ltda",
+    "detalhes": {
+      "tipoDetalhe": "PIX",
+      "nomePagador": "Cliente Exemplo Ltda",
+      "cpfCnpjPagador": "11222333000181",
+      "descricaoPix": "Pedido 1042",
+      "endToEndId": "E12345678202608031705a1B2c3D4e5F"
+    }
+  },
+  {
+    "idTransacao": "310000107",
+    "dataInclusao": "2026-08-05 08:30:00",
+    "dataTransacao": "2026-08-05",
+    "tipoTransacao": "PAGAMENTO",
+    "tipoOperacao": "D",
+    "valor": "250.10",
+    "titulo": "Pagamento efetuado",
+    "descricao": "Energia Exemplo SA",
+    "detalhes": {
+      "tipoDetalhe": "PAGAMENTO",
+      "empresaEmissora": "Energia Exemplo SA",
+      "dataVencimento": "2026-08-05"
+    }
+  },
+  {
+    "idTransacao": "310000108",
+    "dataInclusao": "2026-08-10 16:22:31",
+    "dataTransacao": "2026-08-10",
+    "tipoTransacao": "BOLETO_COBRANCA",
+    "tipoOperacao": "C",
+    "valor": "890.00",
+    "titulo": "Boleto recebido",
+    "descricao": "Beltrana de Tal",
+    "detalhes": {
+      "tipoDetalhe": "BOLETO_COBRANCA",
+      "nome": "Beltrana de Tal",
+      "cpfCnpj": "01234567890",
+      "seuNumero": "NF-0815",
+      "nossoNumero": "0012345678",
+      "dataEmissao": "2026-07-31",
+      "dataVencimento": "2026-08-10"
+    }
+  },
+  {
+    "idTransacao": "310000109",
+    "dataInclusao": "2026-08-12 10:03:47",
+    "dataTransacao": "2026-08-12",
+    "tipoTransacao": "PIX",
+    "tipoOperacao": "D",
+    "valor": "1200.00",
+    "titulo": "Pix enviado",
+    "descricao": "Fornecedor Exemplo SA",
+    "detalhes": {
+      "tipoDetalhe": "PIX",
+      "nomeRecebedor": "Fornecedor Exemplo SA",
+      "chavePixRecebedor": "financeiro@fornecedor.example",
+      "endToEndId": "E12345678202608121303Qw8eR4tY6uI",
+      "codigoSolicitacao": "5f1c7a2e-8b3d-4e6f-9a0b-1c2d3e4f5a6b"
+    }
+  },
+  {
+    "idTransacao": "310000110",
+    "dataInclusao": "2026-08-14 12:47:09",
+    "dataTransacao": "2026-08-14",
+    "tipoTransacao": "COMPRA_DEBITO",
+    "tipoOperacao": "D",
+    "valor": "86.40",
+    "titulo": "Compra no débito",
+    "descricao": "Papelaria Exemplo",
+    "detalhes": {
+      "tipoDetalhe": "COMPRA_DEBITO",
+      "estabelecimento": "Papelaria Exemplo"
+    }
+  },
+  {
+    "idTransacao": "310000111",
+    "dataInclusao": "2026-08-17 15:10:00",
+    "dataTransacao": "2026-08-17",
+    "tipoTransacao": "TRANSFERENCIA",
+    "tipoOperacao": "D",
+    "valor": "3000.00",
+    "titulo": "Transferência enviada",
+    "descricao": "Fulano de Tal",
+    "detalhes": {
+      "tipoDetalhe": "TRANSFERENCIA",
+      "nomeRecebedor": "Fulano de Tal",
+      "cpfCnpjRecebedor": "12345678909",
+      "bancoRecebedor": "Banco Exemplo",
+      "agenciaRecebedor": "0001",
+      "contaBancariaRecebedor": "7654321",
+      "descricaoTransferencia": "Pró-labore de agosto"
+    }
+  },
+  {
+    "idTransacao": "310000112",
+    "dataInclusao": "2026-08-20 11:31:26",
+    "dataTransacao": "2026-08-20",
+    "tipoTransacao": "PIX",
+    "tipoOperacao": "C",
+    "valor": "2350.00",
+    "titulo": "Pix recebido",
+    "descricao": "Cliente Exemplo Ltda",
+    "detalhes": {
+      "tipoDetalhe": "PIX",
+      "nomePagador": "Cliente Exemplo Ltda",
+      "cpfCnpjPagador": "11222333000181",
+      "descricaoPix": "Pedido 1047",
+      "endToEndId": "E12345678202608201431Zx9cV8bN7mA"
+    }
+  },
+  {
+    "idTransacao": "310000113",
+    "dataInclusao": "2026-08-25 06:00:00",
+    "dataTransacao": "2026-08-25",
+    "tipoTransacao": "TARIFA",
+    "tipoOperacao": "D",
+    "valor": "9.90",
+    "titulo": "Tarifa",
+    "descricao": "Pacote de serviços"
+  },
+  {
+    "idTransacao": "310000114",
+    "dataInclusao": "2026-08-28 19:02:44",
+    "dataTransacao": "2026-08-28",
+    "tipoTransacao": "PIX",
+    "tipoOperacao": "C",
+    "valor": "740.00",
+    "titulo": "Pix recebido",
+    "descricao": "Sicrano de Tal",
+    "detalhes": {
+      "tipoDetalhe": "PIX",
+      "nomePagador": "Sicrano de Tal",
+      "cpfCnpjPagador": "11900000083",
+      "endToEndId": "E12345678202608282202Lk5jH3gF1dS"
+    }
+  },
+  {
+    "idTransacao": "310000115",
+    "dataInclusao": "2026-09-02 09:15:38",
+    "dataTransacao": "2026-09-02",
+    "tipoTransacao": "PIX",
+    "tipoOperacao": "C",
+    "valor": "1500.00",
+    "titulo": "Pix recebido",
+    "descricao": "Cliente Exemplo Ltda",
+    "detalhes": {
+      "tipoDetalhe": "PIX",
+      "nomePagador": "Cliente Exemplo Ltda",
+      "cpfCnpjPagador": "11222333000181",
+      "descricaoPix": "Pedido 1053",
+      "endToEndId": "E12345678202609021215Po0iU9yT8rE"
+    }
+  },
+  {
+    "idTransacao": "310000116",
+    "dataInclusao": "2026-09-08 10:44:02",
+    "dataTransacao": "2026-09-08",
+    "tipoTransacao": "PIX",
+    "tipoOperacao": "D",
+    "valor": "1200.00",
+    "titulo": "Pix enviado",
+    "descricao": "Fornecedor Exemplo SA",
+    "detalhes": {
+      "tipoDetalhe": "PIX",
+      "nomeRecebedor": "Fornecedor Exemplo SA",
+      "chavePixRecebedor": "financeiro@fornecedor.example",
+      "endToEndId": "E12345678202609081344Mn6bV5cX4zQ",
+      "codigoSolicitacao": "0b7e3d9c-2a4f-4c8e-b1d6-7f5a9e3c2b10"
+    }
+  }
+]

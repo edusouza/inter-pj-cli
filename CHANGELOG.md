@@ -16,10 +16,15 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 - Cores nas tabelas do terminal: o cabeçalho, os valores negativos e o status de cada linha, em verde, amarelo ou vermelho pelo seu tom, nas listagens e consultas. Só num terminal: nunca num pipe ou arquivo, nem com `NO_COLOR` ou com a nova opção global `--sem-cor`, que também tira as cores da ajuda; `CLICOLOR_FORCE` as força. Os resumos e os erros, em stderr, continuam sem cores, e só os códigos de cor da própria CLI chegam ao terminal: os textos de terceiros continuam sem nenhum caractere de controle (#54).
 - Biblioteca: `CertificateInfo` (`ClientIdentity::certificate`, `CertificateInfo::from_pem`), com o titular e o emissor (`DistinguishedName`), o número de série e a validade do certificado, lidos do DER sem dependências novas (#53).
 - Binários para Linux ARM64 (`aarch64-unknown-linux-gnu` e `-musl`) nas releases, compilados e testados em runners ARM64 nativos; os testes também passam a rodar no Linux ARM64 a cada push (#59).
+- Guias de uso em `docs/guias`, um assunto por guia, começando pelo de saldo e extrato: o saldo e o de um dia, o extrato de um período e o de mais de 90 dias, o extrato completo com as páginas, os filtros e os detalhes, as planilhas e o PDF. Os testes executam cada exemplo como uma sessão de terminal, contra uma simulação da API com a conta de uma empresa fictícia, e conferem que o comando imprime o que o guia mostra, então um guia desatualizado quebra o CI (#57).
 
 ### Alterado
 
 - Os erros de uso (uma opção desconhecida, um valor inválido, opções que não combinam, um argumento que falta) saem em português, como todas as outras mensagens, com as mesmas dicas (a opção ou o comando parecido com o digitado, os valores possíveis) e a linha de uso; o clap os escrevia em inglês. Os números fora da faixa dizem qual é ela. O código de saída continua 2 (#57).
+
+### Corrigido
+
+- `extrato completo --todas-paginas` mostra o título "Extrato completo de...", como uma página do mesmo comando, e não mais "Extrato de..." (#57).
 
 ### Segurança
 

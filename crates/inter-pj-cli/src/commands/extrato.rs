@@ -53,6 +53,7 @@ async fn simples(context: &Context, periodo: PeriodoArgs, dividir: bool) -> Resu
             context.warn_if_sandbox(&settings);
             let valores = transacoes.iter().map(TransacaoSimples::valor_com_sinal);
             output::print(&render(
+                "Extrato",
                 inicio,
                 fim,
                 &texto_simples(&transacoes),
@@ -165,6 +166,7 @@ async fn completo(context: &Context, args: &ExtratoCompletoArgs) -> Result<(), C
             context.warn_if_sandbox(&settings);
             let valores = transacoes.iter().map(TransacaoCompleta::valor_com_sinal);
             output::print(&render(
+                "Extrato completo",
                 inicio,
                 fim,
                 &texto_completo(&transacoes),
@@ -469,9 +471,16 @@ impl Totais {
     }
 }
 
-fn render(inicio: NaiveDate, fim: NaiveDate, tabela: &Tabela, totais: &Totais) -> String {
+/// `titulo` names the statement: `Extrato` or `Extrato completo`.
+fn render(
+    titulo: &str,
+    inicio: NaiveDate,
+    fim: NaiveDate,
+    tabela: &Tabela,
+    totais: &Totais,
+) -> String {
     let mut texto = format!(
-        "Extrato de {} a {}\n\n",
+        "{titulo} de {} a {}\n\n",
         inicio.format("%d/%m/%Y"),
         fim.format("%d/%m/%Y")
     );

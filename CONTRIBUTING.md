@@ -46,13 +46,15 @@ A garantia do código são os testes automatizados. Toda funcionalidade nova pre
 | mTLS real | `crates/inter-pj/tests/mtls.rs` | handshake com servidor TLS local que exige certificado de cliente |
 | Contrato | `crates/inter-pj/tests/contract.rs` | endpoints, escopos e modelos contra `spec/inter-empresas-openapi.json` |
 | E2E do binário | `crates/inter-pj-cli/tests/cli.rs` | o executável `inter-pj` com ambiente isolado |
+| Guias | `crates/inter-pj-cli/tests/guias/` | cada exemplo de `docs/guias`, executado contra um banco simulado, com a saída conferida |
 
 Ao implementar um endpoint novo:
 
 1. declare-o em `crates/inter-pj/src/endpoint.rs` (método, caminho e escopos) e adicione-o a `ALL` — o teste de contrato confere com a especificação;
 2. modele a resposta seguindo os nomes da API (`#[serde(rename_all = "camelCase")]`), com valores monetários em `rust_decimal::Decimal`;
 3. escreva testes com o servidor mock para sucesso e para os erros relevantes;
-4. adicione o comando na CLI com testes E2E para texto, JSON e códigos de saída.
+4. adicione o comando na CLI com testes E2E para texto, JSON e códigos de saída;
+5. mostre-o no guia do assunto, em `docs/guias`: os exemplos são executados pelos testes, e `ATUALIZAR_GUIAS=1 cargo test -p inter-pj-cli --test guias` grava no guia o que os comandos imprimem (revise o diff). As regras estão na [introdução dos guias](docs/guias/README.md#para-quem-escreve-um-guia).
 
 ### Testar manualmente no sandbox
 
