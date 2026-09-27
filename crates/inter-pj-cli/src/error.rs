@@ -22,13 +22,6 @@ pub(crate) enum CliError {
     /// Missing or invalid configuration.
     #[error("{0}")]
     Config(String),
-    /// A configuration file that could not be read as TOML, and the command
-    /// that fixes it, when `config verificar --corrigir` does.
-    #[error("{mensagem}")]
-    ConfigFile {
-        mensagem: String,
-        verificar: Option<String>,
-    },
     /// Error returned by the Inter client.
     #[error(transparent)]
     Inter(#[from] InterError),
@@ -38,6 +31,13 @@ pub(crate) enum CliError {
         context: String,
         #[source]
         source: io::Error,
+    },
+    /// A configuration file that could not be read as TOML, and the command
+    /// that fixes it, when `config verificar --corrigir` does.
+    #[error("{mensagem}")]
+    ConfigFile {
+        mensagem: String,
+        verificar: Option<String>,
     },
 }
 

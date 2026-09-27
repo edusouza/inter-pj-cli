@@ -314,20 +314,20 @@ pub(crate) enum ConfigCommand {
 
 #[derive(Debug, Args)]
 #[command(next_help_heading = "Opções")]
-pub(crate) struct InitArgs {
-    /// Sobrescreve o arquivo se ele já existir
-    #[arg(long)]
-    pub(crate) forcar: bool,
-}
-
-#[derive(Debug, Args)]
-#[command(next_help_heading = "Opções")]
 pub(crate) struct VerificarArgs {
     /// Troca as aspas duplas dos caminhos do Windows por aspas simples,
     /// guardando uma cópia do arquivo original (config.toml.bak, sem
     /// sobrescrever uma cópia anterior)
     #[arg(long)]
     pub(crate) corrigir: bool,
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct InitArgs {
+    /// Sobrescreve o arquivo se ele já existir
+    #[arg(long)]
+    pub(crate) forcar: bool,
 }
 
 fn parse_data(value: &str) -> Result<NaiveDate, String> {

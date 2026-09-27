@@ -13,7 +13,7 @@ use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 
 use crate::error::CliError;
-use crate::{doctor, paths};
+use crate::paths;
 
 /// Profile used when none is selected.
 pub(crate) const DEFAULT_PROFILE: &str = "padrao";
@@ -122,7 +122,7 @@ pub(crate) fn parse(path: &Path, text: &str) -> Result<ConfigFile, CliError> {
         // A backslash between double quotes, the usual Windows path, gets an
         // explanation instead of the parser's message about escapes.
         let aspas = line.and_then(|n| {
-            doctor::aspas_duplas(text)
+            crate::doctor::aspas_duplas(text)
                 .into_iter()
                 .find(|problema| problema.linha == n && problema.invalida)
         });

@@ -52,18 +52,8 @@ impl TestEnv {
             self.path("certificado.crt").display(),
             self.path("chave.key").display(),
         );
-        self.write_config_text(&content);
-    }
-
-    /// Writes `content` as the configuration file.
-    fn write_config_text(&self, content: &str) {
         fs::create_dir_all(self.config_path().parent().unwrap()).unwrap();
-        write_private(&self.config_path(), content);
-    }
-
-    /// The copy kept by `config verificar --corrigir`.
-    fn config_backup_path(&self) -> PathBuf {
-        self.path("config").join("config.toml.bak")
+        write_private(&self.config_path(), &content);
     }
 
     /// The binary with an isolated environment.
@@ -718,6 +708,19 @@ async fn avisa_quando_arquivos_com_segredos_estao_abertos() {
 }
 
 // --- config verificar ----------------------------------------------------------------
+
+impl TestEnv {
+    /// Writes `content` as the configuration file.
+    fn write_config_text(&self, content: &str) {
+        fs::create_dir_all(self.config_path().parent().unwrap()).unwrap();
+        write_private(&self.config_path(), content);
+    }
+
+    /// The copy kept by `config verificar --corrigir`.
+    fn config_backup_path(&self) -> PathBuf {
+        self.path("config").join("config.toml.bak")
+    }
+}
 
 /// A profile written by hand on Windows, with the paths between double quotes.
 const CONFIG_COM_ASPAS_DUPLAS: &str = r#"perfil_padrao = "padrao"
