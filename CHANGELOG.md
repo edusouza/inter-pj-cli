@@ -13,6 +13,7 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 - `inter-pj completions <bash|zsh|fish|powershell|elvish>`: o script de completion do shell, com os comandos e as opções em todos os níveis e, no bash, no zsh e no fish, os valores das opções (#54).
 - `inter-pj manual <diretório>`: as páginas de manual de todos os comandos, uma por comando (`man inter-pj-pix-enviar`), em português como a ajuda (#54).
 - Os pacotes das releases trazem os scripts de completion (`completions/`) e, fora do Windows, as páginas de manual (`man/man1`) (#54).
+- Cores nas tabelas do terminal: o cabeçalho, os valores negativos e o status de cada linha, em verde, amarelo ou vermelho pelo seu tom, nas listagens e consultas. Só num terminal: nunca num pipe ou arquivo, nem com `NO_COLOR` ou com a nova opção global `--sem-cor`, que também tira as cores da ajuda; `CLICOLOR_FORCE` as força. Os resumos e os erros, em stderr, continuam sem cores, e só os códigos de cor da própria CLI chegam ao terminal: os textos de terceiros continuam sem nenhum caractere de controle (#54).
 - Biblioteca: `CertificateInfo` (`ClientIdentity::certificate`, `CertificateInfo::from_pem`), com o titular e o emissor (`DistinguishedName`), o número de série e a validade do certificado, lidos do DER sem dependências novas (#53).
 
 ## [0.8.0] - 2026-09-24

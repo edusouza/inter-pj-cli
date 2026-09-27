@@ -16,8 +16,10 @@ use inter_pj::documento::Documento;
 use super::Context;
 use crate::cli::CobrancaCommand;
 use crate::confirmacao::Stdio;
+use crate::cores::Tom;
 use crate::error::CliError;
 use crate::output::{self, data_br, percentual};
+use crate::tabela::Celula;
 
 pub(super) async fn run(context: &Context, command: CobrancaCommand) -> Result<(), CliError> {
     match command {
@@ -59,6 +61,22 @@ pub(crate) fn descrever_situacao(situacao: &SituacaoCobranca) -> String {
         outra => outra.as_str(),
     }
     .to_owned()
+}
+
+/// The situation of a charge in a table: to receive, received, or ended
+/// without the payment.
+pub(crate) fn celula_situacao(situacao: Option<&SituacaoCobranca>) -> Celula {
+    let tom = situacao.and_then(|situacao| match situacao {
+        SituacaoCobranca::Recebido | SituacaoCobranca::MarcadoRecebido => Some(Tom::Positivo),
+        SituacaoCobranca::AReceber | SituacaoCobranca::EmProcessamento => Some(Tom::Pendente),
+        SituacaoCobranca::Atrasado
+        | SituacaoCobranca::Cancelado
+        | SituacaoCobranca::Expirado
+        | SituacaoCobranca::FalhaEmissao
+        | SituacaoCobranca::Protesto => Some(Tom::Negativo),
+        _ => None,
+    });
+    Celula::situacao(situacao.map(descrever_situacao).as_deref(), tom)
 }
 
 fn descrever_tipo(tipo: &TipoCobranca) -> &str {
@@ -257,6 +275,28 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn every_documented_situation_has_a_tone() {
+        for situacao in SituacaoCobranca::DOCUMENTADOS {
+            assert!(
+                matches!(celula_situacao(Some(situacao)), Celula::Situacao(..)),
+                "{situacao:?}"
+            );
+        }
+        assert_eq!(
+            celula_situacao(Some(&SituacaoCobranca::Recebido)),
+            Celula::Situacao("recebida".into(), Tom::Positivo)
+        );
+        assert_eq!(
+            celula_situacao(Some(&SituacaoCobranca::Atrasado)),
+            Celula::Situacao("atrasada".into(), Tom::Negativo)
+        );
+        assert_eq!(
+            celula_situacao(Some(&SituacaoCobranca::Outro("NOVA".into()))),
+            Celula::Texto("NOVA".into())
+        );
+    }
 
     fn detalhe(json: serde_json::Value) -> CobrancaDetalhada {
         serde_json::from_value(json).unwrap()

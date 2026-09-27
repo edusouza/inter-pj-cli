@@ -15,8 +15,8 @@ use serde_json::json;
 
 use super::encargos::{self, Encargos};
 use super::{
-    Filtros, alteravel, antes_e_depois, copia_e_cola_ativa, descrever_status, endereco, incerta,
-    paginacao, pessoa, tabela_pix,
+    Filtros, alteravel, antes_e_depois, celula_status, copia_e_cola_ativa, descrever_status,
+    endereco, incerta, paginacao, pessoa, tabela_pix,
 };
 use crate::arquivo;
 use crate::cli::{
@@ -701,7 +701,7 @@ where
         let _ = write!(
             texto,
             "\n\nPix recebidos\n{}",
-            tabela_pix(&cobv.pix, fuso).texto()
+            tabela_pix(&cobv.pix, fuso).texto_colorido()
         );
     }
     if let Some(copia_e_cola) = cobv
@@ -754,7 +754,7 @@ async fn listar(context: &Context, args: &PixCobvListarArgs) -> Result<(), CliEr
             if cobs.is_empty() {
                 texto.push_str("Nenhuma cobrança encontrada.");
             } else {
-                texto.push_str(&tabela(&cobs).texto());
+                texto.push_str(&tabela(&cobs).texto_colorido());
                 let _ = write!(texto, "\n\n{}", totais(&cobs));
             }
             if let Some((numero, pagina)) = pagina {
@@ -786,7 +786,7 @@ fn tabela(cobs: &[Cobv]) -> Tabela {
             .map(data_br);
         tabela.linha(vec![
             Celula::texto(vencimento.as_deref()),
-            Celula::texto(cobv.status.as_ref().map(descrever_status)),
+            celula_status(cobv.status.as_ref()),
             Celula::dinheiro(cobv.valor.as_ref().and_then(|valor| valor.original)),
             Celula::texto(
                 cobv.devedor

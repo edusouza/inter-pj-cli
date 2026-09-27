@@ -10,7 +10,7 @@ use inter_pj::cobranca::{
 use rust_decimal::Decimal;
 use serde_json::json;
 
-use super::descrever_situacao;
+use super::{celula_situacao, descrever_situacao};
 use crate::cli::{
     CobrancaListarArgs, CobrancaSumarioArgs, FiltrarDataPorArg, FiltroCobrancaArgs, Formato,
     OrdenarPorArg, SituacaoArg, TipoCobrancaArg,
@@ -52,7 +52,7 @@ pub(super) async fn listar(context: &Context, args: &CobrancaListarArgs) -> Resu
             if cobrancas.is_empty() {
                 texto.push_str("Nenhuma cobrança encontrada.");
             } else {
-                texto.push_str(&tabela(&cobrancas).texto());
+                texto.push_str(&tabela(&cobrancas).texto_colorido());
                 let _ = write!(texto, "\n\n{}", totais(&cobrancas));
             }
             if let Some((numero, pagina)) = pagina {
@@ -173,7 +173,7 @@ fn tabela(cobrancas: &[CobrancaDetalhada]) -> Tabela {
             data(c.data_vencimento.as_deref()),
             Celula::texto(c.seu_numero.as_deref()),
             Celula::texto(c.pagador.as_ref().and_then(|p| p.nome.as_deref())),
-            Celula::texto(c.situacao.as_ref().map(descrever_situacao).as_deref()),
+            celula_situacao(c.situacao.as_ref()),
             Celula::dinheiro(c.valor_nominal),
             Celula::texto(c.codigo_solicitacao.as_deref()),
         ]);
@@ -286,7 +286,7 @@ fn render_sumario(filtro: &FiltroCobrancas, itens: &[ItemSumario]) -> String {
         quantidade += item.quantidade.unwrap_or_default();
         valor += item.valor.unwrap_or_default();
         tabela.linha(vec![
-            Celula::texto(item.situacao.as_ref().map(descrever_situacao).as_deref()),
+            celula_situacao(item.situacao.as_ref()),
             Celula::texto(item.quantidade.map(|n| n.to_string()).as_deref()),
             Celula::dinheiro(item.valor),
         ]);
@@ -296,7 +296,7 @@ fn render_sumario(filtro: &FiltroCobrancas, itens: &[ItemSumario]) -> String {
         Celula::texto(Some(&quantidade.to_string())),
         Celula::dinheiro(Some(valor)),
     ]);
-    texto.push_str(&tabela.texto());
+    texto.push_str(&tabela.texto_colorido());
     texto
 }
 

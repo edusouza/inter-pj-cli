@@ -27,6 +27,7 @@ pub(super) use self::sandbox::{mostrar as mostrar_pagamento, pagar_qrcode};
 use super::Context;
 use crate::cli::{Momento, PeriodoPixArgs, PixCobListarArgs, PixCommand, StatusCobArg};
 use crate::confirmacao::Stdio;
+use crate::cores::Tom;
 use crate::error::{CliError, resultado_incerto};
 use crate::output::{self, horario_em};
 use crate::tabela::{Celula, Coluna, Tabela};
@@ -95,6 +96,18 @@ fn descrever_status(status: &StatusCob) -> &str {
         StatusCob::RemovidaPeloPsp => "removida pelo banco",
         outro => outro.as_str(),
     }
+}
+
+/// The status of a charge in a table: waiting for the payment, paid or
+/// removed.
+fn celula_status(status: Option<&StatusCob>) -> Celula {
+    let tom = status.and_then(|status| match status {
+        StatusCob::Ativa => Some(Tom::Pendente),
+        StatusCob::Concluida => Some(Tom::Positivo),
+        StatusCob::RemovidaPeloUsuarioRecebedor | StatusCob::RemovidaPeloPsp => Some(Tom::Negativo),
+        _ => None,
+    });
+    Celula::situacao(status.map(descrever_status), tom)
 }
 
 /// A CPF or CNPJ with punctuation, or as received.
@@ -203,6 +216,16 @@ fn descrever_status_devolucao(status: &StatusDevolucao) -> &str {
         StatusDevolucao::NaoRealizado => "não realizada",
         outro => outro.as_str(),
     }
+}
+
+fn celula_status_devolucao(status: Option<&StatusDevolucao>) -> Celula {
+    let tom = status.and_then(|status| match status {
+        StatusDevolucao::EmProcessamento => Some(Tom::Pendente),
+        StatusDevolucao::Devolvido => Some(Tom::Positivo),
+        StatusDevolucao::NaoRealizado => Some(Tom::Negativo),
+        _ => None,
+    });
+    Celula::situacao(status.map(descrever_status_devolucao), tom)
 }
 
 /// The error of the creation of a charge with a txid: with an unknown
@@ -370,6 +393,40 @@ pub(super) fn pagina(numero: u32, paginacao: Paginacao, itens: usize, nome: &str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_documented_status_has_a_tone() {
+        for status in StatusCob::DOCUMENTADOS {
+            assert!(
+                matches!(celula_status(Some(status)), Celula::Situacao(..)),
+                "{status:?}"
+            );
+        }
+        for status in StatusDevolucao::DOCUMENTADOS {
+            assert!(
+                matches!(celula_status_devolucao(Some(status)), Celula::Situacao(..)),
+                "{status:?}"
+            );
+        }
+        assert_eq!(
+            celula_status(Some(&StatusCob::Concluida)),
+            Celula::Situacao("concluída (paga)".into(), Tom::Positivo)
+        );
+        assert_eq!(
+            celula_status(Some(&StatusCob::Ativa)),
+            Celula::Situacao("ativa".into(), Tom::Pendente)
+        );
+        assert_eq!(
+            celula_status_devolucao(Some(&StatusDevolucao::NaoRealizado)),
+            Celula::Situacao("não realizada".into(), Tom::Negativo)
+        );
+        // What the API does not document goes as received, without a tone.
+        assert_eq!(
+            celula_status(Some(&StatusCob::Outro("NOVO".into()))),
+            Celula::Texto("NOVO".into())
+        );
+        assert_eq!(celula_status(None), Celula::Vazia);
+    }
 
     fn momento(texto: &str) -> DateTime<FixedOffset> {
         DateTime::parse_from_rfc3339(texto).unwrap()

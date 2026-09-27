@@ -11,8 +11,8 @@ use inter_pj::pix::{
 use serde_json::json;
 
 use super::{
-    Filtros, alteravel, antes_e_depois, copia_e_cola_ativa, descrever_status, incerta, paginacao,
-    pessoa, tabela_pix,
+    Filtros, alteravel, antes_e_depois, celula_status, copia_e_cola_ativa, descrever_status,
+    incerta, paginacao, pessoa, tabela_pix,
 };
 use crate::cli::{
     Formato, PixCobCommand, PixCobConsultarArgs, PixCobCriarArgs, PixCobListarArgs,
@@ -411,7 +411,7 @@ where
         let _ = write!(
             texto,
             "\n\nPix recebidos\n{}",
-            tabela_pix(&cob.pix, fuso).texto()
+            tabela_pix(&cob.pix, fuso).texto_colorido()
         );
     }
     if let Some(copia_e_cola) = cob
@@ -472,7 +472,7 @@ async fn listar(context: &Context, args: &PixCobListarArgs) -> Result<(), CliErr
             if cobs.is_empty() {
                 texto.push_str("Nenhuma cobrança encontrada.");
             } else {
-                texto.push_str(&tabela(&cobs).texto());
+                texto.push_str(&tabela(&cobs).texto_colorido());
                 let _ = write!(texto, "\n\n{}", totais(&cobs));
             }
             if let Some((numero, pagina)) = pagina {
@@ -504,7 +504,7 @@ fn tabela(cobs: &[Cob]) -> Tabela {
             .map(horario_local);
         tabela.linha(vec![
             Celula::texto(criacao.as_deref()),
-            Celula::texto(cob.status.as_ref().map(descrever_status)),
+            celula_status(cob.status.as_ref()),
             Celula::dinheiro(cob.valor.as_ref().and_then(|valor| valor.original)),
             Celula::texto(
                 cob.devedor

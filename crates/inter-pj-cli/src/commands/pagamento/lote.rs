@@ -18,6 +18,7 @@ use crate::cli::{
 };
 use crate::commands::{Context, hoje, simulacao};
 use crate::confirmacao::{Terminal, confirmar, descrever_ambiente, verificar_limite};
+use crate::cores::Tom;
 use crate::error::{CliError, resultado_incerto};
 use crate::output::{self, data_hora_br};
 use crate::tabela::{Celula, Coluna, Tabela};
@@ -434,18 +435,18 @@ fn render_lote(lote: &Lote) -> String {
     for pagamento in &lote.pagamentos {
         let (status, valor, codigo, detalhe) = match pagamento {
             PagamentoDoLote::Boleto(boleto) => (
-                boleto.status.as_ref().map(descrever_status_boleto),
+                celula_status_boleto(boleto.status.as_ref()),
                 boleto.valor_pagar,
                 boleto.codigo_transacao.as_deref(),
                 boleto.detalhe.as_deref(),
             ),
             PagamentoDoLote::Darf(darf) => (
-                darf.status.as_ref().map(descrever_status_darf),
+                celula_status_darf(darf.status.as_ref()),
                 darf.valor_total.or(darf.valor),
                 darf.codigo_solicitacao.as_deref(),
                 darf.detalhe.as_deref(),
             ),
-            _ => (None, None, None, None),
+            _ => (Celula::Vazia, None, None, None),
         };
         let tipo = match pagamento {
             PagamentoDoLote::Boleto(_) => "boleto",
@@ -454,13 +455,13 @@ fn render_lote(lote: &Lote) -> String {
         };
         tabela.linha(vec![
             Celula::texto(Some(tipo)),
-            Celula::texto(status),
+            status,
             Celula::dinheiro(valor),
             Celula::texto(codigo),
             Celula::texto(detalhe),
         ]);
     }
-    let _ = write!(texto, "\n\n{}", tabela.texto());
+    let _ = write!(texto, "\n\n{}", tabela.texto_colorido());
     texto
 }
 
@@ -495,6 +496,48 @@ fn descrever_status_boleto(status: &StatusBoletoDoLote) -> &str {
         StatusBoletoDoLote::PagamentoCobrancaAgendado => "cobrança agendada",
         other => other.as_str(),
     }
+}
+
+fn celula_status_boleto(status: Option<&StatusBoletoDoLote>) -> Celula {
+    let tom = status.and_then(|status| match status {
+        StatusBoletoDoLote::EmProcessamento
+        | StatusBoletoDoLote::Agendado
+        | StatusBoletoDoLote::PagamentoAgendado
+        | StatusBoletoDoLote::AguardandoAprovacao
+        | StatusBoletoDoLote::Aprovado
+        | StatusBoletoDoLote::AprovadoNovoPagamento
+        | StatusBoletoDoLote::AprovadoAguardoRetentativa
+        | StatusBoletoDoLote::PagamentoCobrancaAgendado => Some(Tom::Pendente),
+        StatusBoletoDoLote::Realizado
+        | StatusBoletoDoLote::Pago
+        | StatusBoletoDoLote::AgendadoRealizado => Some(Tom::Positivo),
+        StatusBoletoDoLote::Cancelado
+        | StatusBoletoDoLote::Reprovado
+        | StatusBoletoDoLote::Erro
+        | StatusBoletoDoLote::NaoCompensado
+        | StatusBoletoDoLote::AgendadoNaoRealizado
+        | StatusBoletoDoLote::AgendadoCancelado
+        | StatusBoletoDoLote::AprovacaoExpirada
+        | StatusBoletoDoLote::ErroPagamento => Some(Tom::Negativo),
+        _ => None,
+    });
+    Celula::situacao(status.map(descrever_status_boleto), tom)
+}
+
+fn celula_status_darf(status: Option<&StatusDarfDoLote>) -> Celula {
+    let tom = status.and_then(|status| match status {
+        StatusDarfDoLote::EmProcessamento
+        | StatusDarfDoLote::PagamentoAgendado
+        | StatusDarfDoLote::AguardandoAprovacao
+        | StatusDarfDoLote::Aprovado => Some(Tom::Pendente),
+        StatusDarfDoLote::Pago => Some(Tom::Positivo),
+        StatusDarfDoLote::AgendamentoCancelado
+        | StatusDarfDoLote::NaoCompensado
+        | StatusDarfDoLote::ErroPagamento
+        | StatusDarfDoLote::Cancelado => Some(Tom::Negativo),
+        _ => None,
+    });
+    Celula::situacao(status.map(descrever_status_darf), tom)
 }
 
 fn descrever_status_darf(status: &StatusDarfDoLote) -> &str {
@@ -533,6 +576,30 @@ mod tests {
 
     use super::*;
     use crate::cli::{Cli, Command, PagamentoCommand};
+
+    #[test]
+    fn every_documented_status_of_the_items_has_a_tone() {
+        for status in StatusBoletoDoLote::DOCUMENTADOS {
+            assert!(
+                matches!(celula_status_boleto(Some(status)), Celula::Situacao(..)),
+                "{status:?}"
+            );
+        }
+        for status in StatusDarfDoLote::DOCUMENTADOS {
+            assert!(
+                matches!(celula_status_darf(Some(status)), Celula::Situacao(..)),
+                "{status:?}"
+            );
+        }
+        assert_eq!(
+            celula_status_boleto(Some(&StatusBoletoDoLote::AgendadoNaoRealizado)),
+            Celula::Situacao("agendado e não pago".into(), Tom::Negativo)
+        );
+        assert_eq!(
+            celula_status_darf(Some(&StatusDarfDoLote::Pago)),
+            Celula::Situacao("pago".into(), Tom::Positivo)
+        );
+    }
     use crate::commands::Env;
     use crate::confirmacao::testes::TerminalFalso;
 

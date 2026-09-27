@@ -6,6 +6,7 @@ use std::fmt::Write as _;
 use chrono::NaiveDate;
 use rust_decimal::Decimal;
 
+use crate::cores::{self, Tom};
 use crate::output::{brl, limpo};
 
 /// Field separator of the CSV output.
@@ -68,7 +69,10 @@ impl Coluna {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Celula {
     Texto(String),
-    /// `R$ 1.234,56` in text, `1234.56` in CSV.
+    /// A status, colored by its tone in the terminal.
+    Situacao(String, Tom),
+    /// `R$ 1.234,56` in text, `1234.56` in CSV; red in the terminal when
+    /// negative.
     Dinheiro(Decimal),
     /// `DD/MM/AAAA` in text, `AAAA-MM-DD` in CSV.
     Data(NaiveDate),
@@ -83,6 +87,14 @@ impl Celula {
         }
     }
 
+    /// A status in words, with its tone when it has one.
+    pub(crate) fn situacao(texto: Option<&str>, tom: Option<Tom>) -> Self {
+        match (Self::texto(texto), tom) {
+            (Self::Texto(texto), Some(tom)) => Self::Situacao(texto, tom),
+            (celula, _) => celula,
+        }
+    }
+
     pub(crate) fn dinheiro(value: Option<Decimal>) -> Self {
         value.map_or(Self::Vazia, Self::Dinheiro)
     }
@@ -94,16 +106,28 @@ impl Celula {
 
     fn para_texto(&self) -> String {
         match self {
-            Self::Texto(text) => limpo(text).into_owned(),
+            Self::Texto(text) | Self::Situacao(text, _) => limpo(text).into_owned(),
             Self::Dinheiro(value) => brl(*value),
             Self::Data(date) => date.format("%d/%m/%Y").to_string(),
             Self::Vazia => String::new(),
         }
     }
 
+    /// The color in the terminal: the tone of a status, red for an amount
+    /// that shows as negative.
+    fn cor(&self) -> Option<&'static str> {
+        match self {
+            Self::Situacao(_, tom) => Some(tom.codigo()),
+            Self::Dinheiro(value) if brl(*value).starts_with('-') => Some(cores::VERMELHO),
+            _ => None,
+        }
+    }
+
     fn para_csv(&self, separador: Separador) -> String {
         match self {
-            Self::Texto(text) => escape_csv(&neutralize_formula(text), separador.campo()),
+            Self::Texto(text) | Self::Situacao(text, _) => {
+                escape_csv(&neutralize_formula(text), separador.campo())
+            }
             Self::Dinheiro(value) => match separador {
                 Separador::Virgula => value.to_string(),
                 Separador::PontoEVirgula => value.to_string().replace('.', ","),
@@ -142,16 +166,34 @@ impl Tabela {
         self.linhas.is_empty()
     }
 
-    /// Aligned columns separated by two spaces, with a header line.
+    /// Aligned columns separated by two spaces, with a header line. Plain:
+    /// what goes to stderr (summaries, errors) or into another text.
     pub(crate) fn texto(&self) -> String {
-        let linhas: Vec<Vec<String>> = self
+        self.renderizar(false)
+    }
+
+    /// [`Tabela::texto`] for the standard output: with the colors of
+    /// [`cores`] when they are on.
+    pub(crate) fn texto_colorido(&self) -> String {
+        self.renderizar(cores::ativas())
+    }
+
+    /// The columns are measured without the colors, which go around each
+    /// value, not its padding.
+    fn renderizar(&self, com_cores: bool) -> String {
+        let linhas: Vec<Vec<(String, Option<&str>)>> = self
             .linhas
             .iter()
             .map(|linha| {
                 linha
                     .iter()
                     .zip(&self.colunas)
-                    .map(|(celula, coluna)| truncate(&celula.para_texto(), coluna.largura_maxima))
+                    .map(|(celula, coluna)| {
+                        (
+                            truncate(&celula.para_texto(), coluna.largura_maxima),
+                            celula.cor(),
+                        )
+                    })
                     .collect()
             })
             .collect();
@@ -162,28 +204,38 @@ impl Tabela {
             .map(|(i, coluna)| {
                 linhas
                     .iter()
-                    .map(|linha| width(&linha[i]))
+                    .map(|linha| width(&linha[i].0))
                     .chain([width(coluna.titulo)])
                     .max()
                     .unwrap_or(0)
             })
             .collect();
 
-        let cabecalho: Vec<String> = self.colunas.iter().map(|c| c.titulo.to_owned()).collect();
+        let cabecalho: Vec<(String, Option<&str>)> = self
+            .colunas
+            .iter()
+            .map(|c| (c.titulo.to_owned(), Some(cores::NEGRITO)))
+            .collect();
         std::iter::once(&cabecalho)
             .chain(&linhas)
             .map(|linha| {
                 let mut out = String::new();
-                for (i, (valor, coluna)) in linha.iter().zip(&self.colunas).enumerate() {
+                for (i, ((valor, cor), coluna)) in linha.iter().zip(&self.colunas).enumerate() {
                     if i > 0 {
                         out.push_str("  ");
                     }
                     let pad = " ".repeat(larguras[i].saturating_sub(width(valor)));
+                    let valor = match cor {
+                        Some(cor) if com_cores && !valor.is_empty() => {
+                            format!("{cor}{valor}{}", cores::FIM)
+                        }
+                        _ => valor.clone(),
+                    };
                     if coluna.direita {
                         out.push_str(&pad);
-                        out.push_str(valor);
+                        out.push_str(&valor);
                     } else {
-                        out.push_str(valor);
+                        out.push_str(&valor);
                         out.push_str(&pad);
                     }
                 }
@@ -306,6 +358,49 @@ Data        Descrição                  Valor
 03/08/2026  Pix recebido · João  R$ 1.500,00
 05/08/2026  Tarifa                  -R$ 2,50"
         );
+    }
+
+    #[test]
+    fn colors_go_around_the_values_and_keep_the_alignment() {
+        let mut tabela = exemplo();
+        tabela.colunas.push(Coluna::texto("Status", ""));
+        for (linha, tom) in tabela.linhas.iter_mut().zip([Tom::Positivo, Tom::Negativo]) {
+            linha.push(Celula::situacao(Some("status"), Some(tom)));
+        }
+        let colorido = tabela.renderizar(true);
+        assert_eq!(
+            colorido,
+            "\
+\u{1b}[1mData\u{1b}[0m        \u{1b}[1mDescrição\u{1b}[0m                  \u{1b}[1mValor\u{1b}[0m  \u{1b}[1mStatus\u{1b}[0m
+03/08/2026  Pix recebido · João  R$ 1.500,00  \u{1b}[32mstatus\u{1b}[0m
+05/08/2026  Tarifa                  \u{1b}[31m-R$ 2,50\u{1b}[0m  \u{1b}[31mstatus\u{1b}[0m"
+        );
+        // Without the codes, the same text as without colors.
+        let mut sem_codigos = colorido;
+        for codigo in cores::CODIGOS {
+            sem_codigos = sem_codigos.replace(codigo, "");
+        }
+        assert_eq!(sem_codigos, tabela.texto());
+        // Off (as in the tests), the colored text is the plain one; the CSV
+        // never has colors.
+        assert_eq!(tabela.texto_colorido(), tabela.texto());
+        assert!(!tabela.csv(Separador::Virgula).contains('\u{1b}'));
+    }
+
+    #[test]
+    fn statuses_without_text_or_tone_are_plain() {
+        assert_eq!(Celula::situacao(None, Some(Tom::Positivo)), Celula::Vazia);
+        assert_eq!(
+            Celula::situacao(Some("  "), Some(Tom::Negativo)),
+            Celula::Vazia
+        );
+        assert_eq!(
+            Celula::situacao(Some("outro"), None),
+            Celula::Texto("outro".into())
+        );
+        // An amount that rounds to zero is not negative.
+        assert_eq!(Celula::Dinheiro(dec("-0.004")).cor(), None);
+        assert_eq!(Celula::Dinheiro(dec("-0.005")).cor(), Some(cores::VERMELHO));
     }
 
     #[test]

@@ -14,6 +14,9 @@ publish = false
 [workspace.dependencies]
 inter-pj = { path = "crates/inter-pj", version = "0.8.0" }
 
+# Already in the tree through clap: whether the terminal takes colors
+# (NO_COLOR, CLICOLOR_FORCE, TERM) and the ANSI mode of Windows consoles.
+anstream = "1.0"
 # Already in the tree through reqwest: decodes the PDF statement.
 base64 = "0.23"
 # SHA-256 of the token cache key. Already compiled as the TLS crypto provider.

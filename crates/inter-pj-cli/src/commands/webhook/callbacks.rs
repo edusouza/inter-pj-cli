@@ -17,6 +17,7 @@ use super::super::cobranca::argumento;
 use crate::cli::{CallbacksArgs, Formato};
 use crate::commands::Context;
 use crate::commands::pix::periodo;
+use crate::cores::Tom;
 use crate::error::CliError;
 use crate::output::{self, horario_local};
 use crate::tabela::{Celula, Coluna, Tabela};
@@ -194,7 +195,7 @@ pub(super) async fn listar(
             if mostrados.is_empty() {
                 texto.push_str("Nenhum callback encontrado.");
             } else {
-                texto.push_str(&tabela(api, &mostrados).texto());
+                texto.push_str(&tabela(api, &mostrados).texto_colorido());
                 let _ = write!(texto, "\n\n{}", totais(&mostrados));
             }
             match pagina {
@@ -258,11 +259,11 @@ fn tabela(api: Api, callbacks: &[Callback]) -> Tabela {
         let mut linha = vec![
             Celula::texto(callback.disparo().map(horario_local).as_deref()),
             Celula::texto(callback.numero_tentativa.map(|n| n.to_string()).as_deref()),
-            Celula::texto(
-                callback
-                    .sucesso
-                    .map(|sucesso| if sucesso { "sim" } else { "não" }),
-            ),
+            match callback.sucesso {
+                Some(true) => Celula::situacao(Some("sim"), Some(Tom::Positivo)),
+                Some(false) => Celula::situacao(Some("não"), Some(Tom::Negativo)),
+                None => Celula::Vazia,
+            },
             Celula::texto(
                 callback
                     .http_status

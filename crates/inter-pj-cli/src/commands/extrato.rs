@@ -202,7 +202,7 @@ fn mostrar_pagina(
             if tabela.is_empty() {
                 texto.push_str("Nenhuma transação nesta página.");
             } else {
-                texto.push_str(&tabela.texto());
+                texto.push_str(&tabela.texto_colorido());
             }
             texto.push_str("\n\n");
             texto.push_str(&resumo_pagina(numero, pagina));
@@ -479,7 +479,7 @@ fn render(inicio: NaiveDate, fim: NaiveDate, tabela: &Tabela, totais: &Totais) -
         texto.push_str("Nenhuma transação no período.");
         return texto;
     }
-    texto.push_str(&tabela.texto());
+    texto.push_str(&tabela.texto_colorido());
     texto.push_str("\n\n");
     texto.push_str(&output::key_values(&[
         ("Entradas", output::brl(totais.entradas)),

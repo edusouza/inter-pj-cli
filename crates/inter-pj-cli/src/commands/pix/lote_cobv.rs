@@ -23,6 +23,7 @@ use crate::cli::{
 use crate::commands::{Context, hoje, simulacao};
 use crate::config::Settings;
 use crate::confirmacao::{Stdio, Terminal, confirmar, descrever_ambiente};
+use crate::cores::Tom;
 use crate::error::{CliError, resultado_incerto};
 use crate::output::{self, horario_em, horario_local, secao};
 use crate::tabela::{Celula, Coluna, Tabela};
@@ -465,6 +466,16 @@ fn descrever_situacao(status: &StatusCobvLote) -> &str {
     }
 }
 
+fn celula_situacao(status: Option<&StatusCobvLote>) -> Celula {
+    let tom = status.and_then(|status| match status {
+        StatusCobvLote::EmProcessamento => Some(Tom::Pendente),
+        StatusCobvLote::Criada => Some(Tom::Positivo),
+        StatusCobvLote::Negada => Some(Tom::Negativo),
+        _ => None,
+    });
+    Celula::situacao(status.map(descrever_situacao), tom)
+}
+
 /// `Cobrança inválida. cobv.valor.desconto.data: não respeita o schema`.
 fn problema(problema: &Problem) -> String {
     let mut texto = problema
@@ -524,7 +535,7 @@ where
     for cobv in &lote.cobsv {
         tabela.linha(vec![
             Celula::texto(cobv.txid.as_deref()),
-            Celula::texto(cobv.status.as_ref().map(descrever_situacao)),
+            celula_situacao(cobv.status.as_ref()),
             Celula::texto(
                 cobv.criacao
                     .as_deref()
@@ -533,7 +544,7 @@ where
             ),
         ]);
     }
-    let _ = write!(texto, "\n\n{}", tabela.texto());
+    let _ = write!(texto, "\n\n{}", tabela.texto_colorido());
     let negadas: Vec<&CobvNoLote> = lote
         .cobsv
         .iter()
@@ -586,7 +597,7 @@ async fn listar(context: &Context, args: &PixLoteCobvListarArgs) -> Result<(), C
             if lotes.is_empty() {
                 texto.push_str("Nenhum lote encontrado.");
             } else {
-                texto.push_str(&tabela(&lotes).texto());
+                texto.push_str(&tabela(&lotes).texto_colorido());
                 let cobrancas: usize = lotes.iter().map(|lote| lote.cobsv.len()).sum();
                 let quantos = match lotes.len() {
                     1 => "1 lote".to_owned(),
@@ -730,6 +741,20 @@ mod tests {
     use serde_json::Value;
 
     use super::*;
+
+    #[test]
+    fn every_documented_situation_has_a_tone() {
+        for status in StatusCobvLote::DOCUMENTADOS {
+            assert!(
+                matches!(celula_situacao(Some(status)), Celula::Situacao(..)),
+                "{status:?}"
+            );
+        }
+        assert_eq!(
+            celula_situacao(Some(&StatusCobvLote::Negada)),
+            Celula::Situacao("negada".into(), Tom::Negativo)
+        );
+    }
 
     fn lote(cobsv: &Value) -> LoteCobv {
         serde_json::from_value(json!({

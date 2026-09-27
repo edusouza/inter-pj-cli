@@ -928,6 +928,7 @@ dependencies = [
 name = "inter-pj-cli"
 version = "0.8.0"
 dependencies = [
+ "anstream",
  "assert_cmd",
  "base64 0.23.1",
  "chrono",

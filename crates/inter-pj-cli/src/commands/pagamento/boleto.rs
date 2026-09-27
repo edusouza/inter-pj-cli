@@ -10,7 +10,7 @@ use inter_pj::banking::{
 use inter_pj::documento::Documento;
 use serde_json::json;
 
-use super::{data, descrever_status};
+use super::{celula_status, data, descrever_status};
 use crate::cli::{BoletoCancelarArgs, BoletoCommand, BoletoListarArgs, Formato};
 use crate::commands::{Context, hoje, intervalo};
 use crate::confirmacao::{Terminal, confirmar, descrever_ambiente, pode_confirmar};
@@ -90,7 +90,7 @@ fn render(filtro: &FiltroPagamentos, pagamentos: &[Pagamento]) -> String {
         texto.push_str("Nenhum pagamento encontrado.");
         return texto;
     }
-    texto.push_str(&tabela(pagamentos).texto());
+    texto.push_str(&tabela(pagamentos).texto_colorido());
     let plural = if pagamentos.len() == 1 {
         "pagamento"
     } else {
@@ -118,7 +118,7 @@ fn tabela(pagamentos: &[Pagamento]) -> Tabela {
             ),
             data(p.data_pagamento.as_deref()),
             Celula::texto(p.nome_beneficiario.as_deref()),
-            Celula::texto(p.status_pagamento.as_ref().map(descrever_status)),
+            celula_status(p.status_pagamento.as_ref()),
             Celula::dinheiro(p.valor_pago.or(p.valor_nominal)),
             Celula::texto(p.codigo_transacao.as_deref()),
         ]);
