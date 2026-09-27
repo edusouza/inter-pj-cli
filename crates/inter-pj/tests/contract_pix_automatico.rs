@@ -9,13 +9,14 @@ mod spec;
 
 use std::collections::BTreeSet;
 
-use chrono::NaiveDate;
+use chrono::{DateTime, NaiveDate};
 use inter_pj::endpoint;
 use inter_pj::pix::{Devedor, ITENS_POR_PAGINA_MAXIMO_PIX, TXID_MAXIMO, TXID_MINIMO};
 use inter_pj::pix_automatico::{
-    AtivacaoSolicitada, CalendarioRec, ID_REC_TAMANHO, MAX_CONTRATO, MAX_CONVENIO,
-    MAX_NOME_DEVEDOR, MAX_OBJETO, PaginaRecs, Periodicidade, PoliticaRetentativa, Rec, RecRevisada,
-    RecSolicitada, StatusRec, TipoJornada, ValorRec, VinculoRec,
+    AtivacaoSolicitada, CalendarioRec, DestinatarioSolicRec, ID_TAMANHO, LocationRec, MAX_AGENCIA,
+    MAX_CONTA, MAX_CONTRATO, MAX_CONVENIO, MAX_NOME_DEVEDOR, MAX_OBJETO, PaginaLocsRec, PaginaRecs,
+    Periodicidade, PoliticaRetentativa, Rec, RecRevisada, RecSolicitada, SolicRec,
+    SolicRecSolicitada, StatusRec, StatusSolicRec, TipoJornada, ValorRec, VinculoRec,
 };
 use serde_json::{Value, json};
 use spec::{
@@ -211,8 +212,6 @@ fn assert_lidos(nome: &str, lido: &Value, alternativas: &[&str]) {
     let faltando: Vec<&String> = esperados
         .difference(&lidos)
         .filter(|caminho| !alternativas.contains(&caminho.as_str()))
-        // The confirmation requests are kept as received.
-        .filter(|caminho| !caminho.contains("solicitacao."))
         .collect();
     assert!(
         faltando.is_empty(),
@@ -222,29 +221,67 @@ fn assert_lidos(nome: &str, lido: &Value, alternativas: &[&str]) {
     assert!(fora.is_empty(), "campos fora de {nome}: {fora:?}");
 }
 
+/// The generated example of a recurrence: the documentation's "example" of
+/// the object is a list of examples.
+fn rec_gerada(nome: &str) -> Value {
+    let mut rec = example_for_schema(nome);
+    rec["vinculo"]["objeto"] = json!("Mensalidade");
+    rec
+}
+
+/// The generated example of a confirmation request, with its recurrence
+/// generated apart: nested inside a recurrence, the example stops before.
+fn solicitacao_gerada() -> Value {
+    let mut solicitacao = example_for_schema("SolicRecCompleta");
+    solicitacao["recPayload"] = rec_gerada("RecPayload");
+    solicitacao
+}
+
 #[test]
 fn answers_keep_every_documented_field() {
-    let mut completa = example_for_schema("RecCompleta");
-    // The specification's "example" of the object is a list of examples.
-    completa["vinculo"]["objeto"] = json!("Mensalidade");
-    let rec: Rec = serde_json::from_value(completa.clone()).unwrap();
-    let de_volta = serde_json::to_value(&rec).unwrap();
+    let mut completa = rec_gerada("RecCompleta");
+    completa["solicitacao"] = json!([solicitacao_gerada()]);
+    let rec: Rec = serde_json::from_value(completa).unwrap();
     assert_lidos(
         "RecCompleta",
-        &de_volta,
-        &["vinculo.devedor.cnpj", "pagador.cnpj"],
+        &serde_json::to_value(&rec).unwrap(),
+        &[
+            "vinculo.devedor.cnpj",
+            "pagador.cnpj",
+            "solicitacao.destinatario.cnpj",
+            "solicitacao.recPayload.vinculo.devedor.cnpj",
+        ],
     );
-    assert_eq!(de_volta["solicitacao"], completa["solicitacao"]);
 
-    let mut listada = example_for_schema("RecCompletaPesquisada");
-    listada["vinculo"]["objeto"] = json!("Mensalidade");
+    let mut listada = rec_gerada("RecCompletaPesquisada");
+    listada["solicitacao"] = json!([solicitacao_gerada()]);
     let mut pagina = example_for_schema("RecsConsultadas");
     pagina["recs"] = json!([listada]);
     let pagina: PaginaRecs = serde_json::from_value(pagina).unwrap();
     assert_lidos(
         "RecsConsultadas",
         &serde_json::to_value(&pagina).unwrap(),
-        &["recs.vinculo.devedor.cnpj", "recs.pagador.cnpj"],
+        &[
+            "recs.vinculo.devedor.cnpj",
+            "recs.pagador.cnpj",
+            "recs.solicitacao.destinatario.cnpj",
+            "recs.solicitacao.recPayload.vinculo.devedor.cnpj",
+        ],
+    );
+
+    let solicitacao: SolicRec = serde_json::from_value(solicitacao_gerada()).unwrap();
+    assert_lidos(
+        "SolicRecCompleta",
+        &serde_json::to_value(&solicitacao).unwrap(),
+        &["destinatario.cnpj", "recPayload.vinculo.devedor.cnpj"],
+    );
+
+    let pagina: PaginaLocsRec =
+        serde_json::from_value(example_for_schema("PayloadLocationRecConsultadas")).unwrap();
+    assert_lidos(
+        "PayloadLocationRecConsultadas",
+        &serde_json::to_value(&pagina).unwrap(),
+        &[],
     );
 }
 
@@ -288,9 +325,9 @@ fn codes_are_the_documented_ones() {
 #[test]
 fn limits_are_the_documented_ones() {
     let id = schema("RecId");
-    assert_eq!(id["pattern"], format!("[a-zA-Z0-9]{{{ID_REC_TAMANHO}}}"));
-    assert_eq!(id["minLength"], ID_REC_TAMANHO);
-    assert_eq!(id["maxLength"], ID_REC_TAMANHO);
+    assert_eq!(id["pattern"], format!("[a-zA-Z0-9]{{{ID_TAMANHO}}}"));
+    assert_eq!(id["minLength"], ID_TAMANHO);
+    assert_eq!(id["maxLength"], ID_TAMANHO);
     let vinculo = propriedade(schema("RecSolicitada"), "vinculo").unwrap();
     assert_eq!(
         propriedade(vinculo, "objeto").unwrap()["maxLength"],
@@ -352,4 +389,146 @@ fn the_parameters_sent_are_documented() {
         assert!(parameter_names(&endpoint).contains("idRec"), "{endpoint}");
     }
     assert!(parameter_names(&endpoint::pix_automatico::CONSULTAR_REC).contains("txid"));
+}
+
+// --- solicrec ---------------------------------------------------------------------
+
+/// The confirmation request of a documented body, built with the public API.
+fn solicitacao_do_exemplo(exemplo: &Value) -> SolicRecSolicitada {
+    let destinatario = &exemplo["destinatario"];
+    let mut conta = DestinatarioSolicRec::new(
+        CPF.parse().unwrap(),
+        texto(&destinatario["conta"]),
+        texto(&destinatario["ispbParticipante"]),
+    );
+    conta.agencia = destinatario["agencia"].as_str().map(str::to_owned);
+    SolicRecSolicitada::new(
+        texto(&exemplo["idRec"]).parse().unwrap(),
+        DateTime::parse_from_rfc3339(texto(&exemplo["calendario"]["dataExpiracaoSolicitacao"]))
+            .unwrap(),
+        conta,
+    )
+}
+
+#[test]
+fn confirmation_requests_are_the_documentation_examples() {
+    let exemplo = example("solicRecBody1");
+    let solicitacao = solicitacao_do_exemplo(&exemplo);
+    solicitacao.validar().unwrap();
+    assert_eq!(serde_json::to_value(&solicitacao).unwrap(), exemplo);
+    assert_documentado(
+        "SolicRecSolicitada",
+        &serde_json::to_value(&solicitacao).unwrap(),
+    );
+
+    let mut empresa = solicitacao;
+    empresa.destinatario.documento = CNPJ.parse().unwrap();
+    empresa.destinatario.agencia = None;
+    empresa.validar().unwrap();
+    assert_documentado(
+        "SolicRecSolicitada",
+        &serde_json::to_value(&empresa).unwrap(),
+    );
+
+    // The only revision is the cancellation, which `cancelar_solicitacao`
+    // sends as documented.
+    assert_eq!(example("solicRecBody2"), json!({"status": "CANCELADA"}));
+    assert_eq!(
+        enum_de(propriedade(schema("SolicRecRevisada"), "status").unwrap()),
+        strings(&[StatusSolicRec::Cancelada.as_str()])
+    );
+}
+
+#[test]
+fn confirmation_request_answers_survive_a_round_trip() {
+    for nome in [
+        "solicRecResponse1",
+        "solicRecResponse2",
+        "solicRecResponse3",
+    ] {
+        let exemplo = example(nome);
+        let solicitacao: SolicRec = serde_json::from_value(exemplo.clone()).unwrap();
+        assert_eq!(
+            serde_json::to_value(&solicitacao).unwrap(),
+            como_escrita(&exemplo),
+            "{nome}"
+        );
+    }
+}
+
+#[test]
+fn confirmation_request_codes_and_limits_are_the_documented_ones() {
+    let completa = schema("SolicRecCompleta");
+    let status = codigos(StatusSolicRec::DOCUMENTADOS, StatusSolicRec::as_str);
+    assert_eq!(status, enum_de(propriedade(completa, "status").unwrap()));
+    let atualizacao = propriedade(completa, "atualizacao").unwrap();
+    assert_eq!(
+        status,
+        enum_de(propriedade(&atualizacao["items"], "status").unwrap())
+    );
+    let id = propriedade(completa, "idSolicRec").unwrap();
+    assert_eq!(id["pattern"], format!("[a-zA-Z0-9]{{{ID_TAMANHO}}}"));
+    assert_eq!(id["maxLength"], ID_TAMANHO);
+    let destinatario = propriedade(schema("SolicRecSolicitada"), "destinatario").unwrap();
+    assert_eq!(
+        propriedade(destinatario, "conta").unwrap()["maxLength"],
+        MAX_CONTA
+    );
+    assert_eq!(
+        propriedade(destinatario, "agencia").unwrap()["maxLength"],
+        MAX_AGENCIA
+    );
+    assert_eq!(
+        propriedade(destinatario, "ispbParticipante").unwrap()["pattern"],
+        r"\d{8}"
+    );
+    for endpoint in [
+        endpoint::pix_automatico::CONSULTAR_SOLICITACAO,
+        endpoint::pix_automatico::REVISAR_SOLICITACAO,
+    ] {
+        assert!(
+            parameter_names(&endpoint).contains("idSolicRec"),
+            "{endpoint}"
+        );
+    }
+}
+
+// --- locrec -----------------------------------------------------------------------
+
+#[test]
+fn locations_survive_a_round_trip() {
+    for nome in ["payloadLocationRecResponse1", "payloadLocationRecResponse2"] {
+        let exemplo = example(nome);
+        let loc: LocationRec = serde_json::from_value(exemplo.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&loc).unwrap(), exemplo, "{nome}");
+    }
+}
+
+#[test]
+fn location_parameters_are_documented() {
+    let documentados = parameter_names(&endpoint::pix_automatico::LISTAR_LOCRECS);
+    for nome in [
+        "inicio",
+        "fim",
+        "idRecPresente",
+        "convenio",
+        "paginacao.paginaAtual",
+        "paginacao.itensPorPagina",
+    ] {
+        assert!(documentados.contains(nome), "{nome}");
+    }
+    let listagem = parameters(&endpoint::pix_automatico::LISTAR_LOCRECS);
+    assert_eq!(listagem["convenio"]["schema"]["maxLength"], MAX_CONVENIO);
+    assert_eq!(
+        listagem["paginacao.itensPorPagina"]["schema"]["maximum"],
+        ITENS_POR_PAGINA_MAXIMO_PIX
+    );
+    for endpoint in [
+        endpoint::pix_automatico::CONSULTAR_LOCREC,
+        endpoint::pix_automatico::DESVINCULAR_LOCREC,
+    ] {
+        assert!(parameter_names(&endpoint).contains("id"), "{endpoint}");
+    }
+    // A location is created without a body.
+    assert!(spec::operation(&endpoint::pix_automatico::CRIAR_LOCREC)["requestBody"].is_null());
 }

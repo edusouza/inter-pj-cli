@@ -9,6 +9,7 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 ### Adicionado
 
 - Biblioteca: Pix Automático (`InterClient::pix_automatico`), cobranças recorrentes que o pagador autoriza uma vez no seu banco. As recorrências (`RecSolicitada`) têm o contrato e o devedor, a data do primeiro pagamento e a do último, a periodicidade, o valor (fixo, mínimo ou livre) e a política de retentativas, conferidos antes do envio com o campo como a API o nomeia; são criadas (`criar_rec`), listadas por período com filtros de devedor, status, location e convênio (`listar_recs`, `listar_todas_recs`), consultadas pelo `IdRec`, com o QR Code composto de uma cobrança imediata ou com vencimento quando se informa o seu txid (`consultar_rec`), e alteradas ou canceladas (`revisar_rec`). As respostas são lidas como os exemplos da documentação as mostram, com o status das atualizações em `nome` e CPF e CNPJ como números (#46).
+- Biblioteca: solicitações de confirmação de recorrência, enviadas ao banco do pagador para que ele aprove a recorrência (`criar_solicitacao`, com a conta do pagador conferida antes do envio; `consultar_solicitacao`; `cancelar_solicitacao`), e locations de recorrências, os endereços dos QR Codes criados antes da recorrência (`criar_locrec`, `listar_locrecs`, `listar_todas_locrecs`, `consultar_locrec`, `desvincular_locrec`). As recorrências trazem as suas solicitações (#47, #49).
 
 ## [0.7.0] - 2026-09-24
 
