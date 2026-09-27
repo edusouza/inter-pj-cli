@@ -301,7 +301,7 @@ async fn resultado_incerto_orienta_a_conferir() {
         ])
         .write_stdin(CSV)
         .assert()
-        .code(6);
+        .code(9);
     let stderr = stderr_of(&assert);
     assert!(
         stderr.contains(

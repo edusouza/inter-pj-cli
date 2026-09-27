@@ -377,7 +377,7 @@ async fn resultado_incerto_orienta_a_repetir_com_o_mesmo_txid() {
         .args(criar())
         .args(["--txid", TXID, "--sim"])
         .assert()
-        .code(6);
+        .code(9);
     let stderr = stderr_of(&assert);
     for dica in [
         format!("dica: confira com: inter-pj pix cobv consultar {TXID}"),

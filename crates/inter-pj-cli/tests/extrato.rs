@@ -7,7 +7,7 @@ use std::fs;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
-use chrono::{Local, NaiveDate};
+use chrono::NaiveDate;
 use common::{TestEnv, stderr_of, stdout_of};
 use predicates::prelude::*;
 use serde_json::{Value, json};
@@ -188,7 +188,7 @@ async fn extrato_sem_datas_consulta_os_ultimos_30_dias() {
                 return false;
             };
             // Tolerates the test running across midnight.
-            let hoje = Local::now().date_naive();
+            let hoje = common::hoje();
             (fim - inicio).num_days() == 29 && (hoje - fim).num_days().abs() <= 1
         }
     }

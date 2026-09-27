@@ -263,7 +263,7 @@ async fn resultado_incerto_orienta_a_repetir_com_o_mesmo_txid() {
         .expect(1)
         .mount(&env.server)
         .await;
-    let assert = env.cmd().args(criar()).arg("--sim").assert().code(6);
+    let assert = env.cmd().args(criar()).arg("--sim").assert().code(9);
     let stderr = stderr_of(&assert);
     for dica in [
         "dica: a cobrança pode ter sido criada; com o mesmo txid, a API não cria outra".to_owned(),

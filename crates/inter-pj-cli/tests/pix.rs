@@ -325,11 +325,38 @@ async fn uncertain_outcome_shows_how_to_repeat_safely() {
         .args(ENVIAR)
         .args(["--sim", "--id-idempotente", ID])
         .assert()
-        .code(6)
+        .code(9)
         .stderr(
             predicate::str::contains("o pagamento pode ter sido feito")
                 .and(predicate::str::contains(format!("--id-idempotente {ID}"))),
         );
+}
+
+/// A `429` was certainly not processed: exit 6, which a script may repeat,
+/// unlike 9.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_request_not_processed_exits_6_not_9() {
+    let env = TestEnv::new().await;
+    env.write_config("");
+    env.mount_token("pagamento-pix.write", None).await;
+    Mock::given(method("POST"))
+        .and(path(PIX))
+        .respond_with(ResponseTemplate::new(429))
+        .expect(1)
+        .mount(&env.server)
+        .await;
+
+    let assert = env
+        .cmd()
+        .args(ENVIAR)
+        .args(["--sim", "--tentativas", "1"])
+        .assert()
+        .code(6);
+    assert!(
+        !stderr_of(&assert).contains("pode ter sido feito"),
+        "{}",
+        stderr_of(&assert)
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

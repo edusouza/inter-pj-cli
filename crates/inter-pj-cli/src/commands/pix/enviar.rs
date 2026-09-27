@@ -2,7 +2,7 @@
 
 use std::fmt::Write as _;
 
-use chrono::{Local, NaiveDate};
+use chrono::NaiveDate;
 use inter_pj::banking::{
     DadosBancarios, Destinatario, IdIdempotente, InstituicaoFinanceira, PagamentoPix,
     SolicitacaoPix, TipoConta, TipoRetornoPix,
@@ -14,7 +14,7 @@ use rust_decimal::Decimal;
 use serde_json::json;
 
 use crate::cli::{Formato, PixEnviarArgs};
-use crate::commands::{Context, simulacao};
+use crate::commands::{Context, hoje, simulacao};
 use crate::config::Settings;
 use crate::confirmacao::{Terminal, confirmar, descrever_ambiente, verificar_limite};
 use crate::error::{CliError, resultado_incerto};
@@ -26,7 +26,7 @@ pub(super) async fn run(
     args: &PixEnviarArgs,
     terminal: &mut dyn Terminal,
 ) -> Result<(), CliError> {
-    let pagamento = pagamento(args, Local::now().date_naive())?;
+    let pagamento = pagamento(args, hoje())?;
     let settings = context.settings()?;
     verificar_limite(pagamento.valor, &settings)?;
     // Configuration problems show up before the confirmation, not after it.
@@ -218,6 +218,11 @@ fn resumo(
         && do_codigo != pagamento.valor
     {
         linhas.push(("Valor no código", output::brl(do_codigo)));
+        // Only a dynamic code gets here: its charge may have changed
+        // (interest, a discount), or the amount was mistyped.
+        avisos.push(
+            "o valor informado é diferente do valor do código: confira-o com a cobrança antes de confirmar",
+        );
     }
     linhas.push((
         "Quando",
@@ -662,6 +667,7 @@ Pix a enviar
             "Cobrança               qr.exemplo.invalid/cobv/1",
             "Valor                  R$ 151,20 (cento e cinquenta e um reais e vinte centavos)",
             "Valor no código        R$ 150,00",
+            "\naviso: o valor informado é diferente do valor do código: confira-o com a cobrança antes de confirmar",
         ] {
             assert!(texto.contains(linha), "{linha}\n{texto}");
         }

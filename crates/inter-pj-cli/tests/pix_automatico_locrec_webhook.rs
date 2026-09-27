@@ -284,7 +284,7 @@ async fn um_cadastro_incerto_orienta_a_conferir() {
             "--sim",
         ])
         .assert()
-        .code(6);
+        .code(9);
     assert!(
         stderr_of(&assert).contains(
             "dica: o webhook pode ter sido cadastrado: confira com inter-pj webhook cobranca-recorrente consultar"

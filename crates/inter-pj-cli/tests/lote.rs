@@ -253,6 +253,48 @@ async fn le_o_lote_da_entrada_padrao() {
     );
 }
 
+/// The same boleto twice: refused, even with --sim, unless the user says
+/// they are distinct payments.
+#[tokio::test(flavor = "multi_thread")]
+async fn pagamentos_repetidos_sao_recusados() {
+    let env = env().await;
+    nothing_is_sent(&env).await;
+    let repetido = format!("{CSV}BOLETO;07791159500000030107777011678471159007112634;;;;;;;;;\r\n");
+    let assert = env
+        .cmd()
+        .args(["pagamento", "lote", "enviar", "--arquivo", "-", "--sim"])
+        .write_stdin(repetido.clone())
+        .assert()
+        .code(2);
+    let stderr = stderr_of(&assert);
+    assert!(
+        stderr.contains("pagamentos repetidos em entrada padrão:\n  linha 2 e linha 5: o mesmo pagamento aparece mais de uma vez"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("use --permitir-repetidos"), "{stderr}");
+
+    let assert = env
+        .cmd()
+        .args([
+            "pagamento",
+            "lote",
+            "enviar",
+            "--arquivo",
+            "-",
+            "--simular",
+            "--permitir-repetidos",
+        ])
+        .write_stdin(repetido)
+        .assert()
+        .success();
+    assert!(
+        stderr_of(&assert)
+            .contains("aviso: linha 2 e linha 5: o mesmo pagamento aparece mais de uma vez"),
+        "{}",
+        stderr_of(&assert)
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn o_limite_vale_para_cada_pagamento() {
     let env = TestEnv::new().await;

@@ -383,7 +383,7 @@ async fn resultado_incerto_orienta_a_repetir_com_o_mesmo_id() {
             "--sim",
         ])
         .assert()
-        .code(6);
+        .code(9);
     let stderr = stderr_of(&assert);
     for dica in [
         "dica: a devolução pode ter sido feita; com o mesmo id, a API não devolve de novo"

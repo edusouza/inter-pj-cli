@@ -5,7 +5,8 @@
 //! Exit codes: 0 success, 1 unexpected error, 2 invalid usage, 3 invalid or
 //! missing configuration, 4 authentication/authorization failure, 5 request
 //! rejected by the API, 6 service unavailable, rate limited or network
-//! failure, 7 operation cancelled at the confirmation.
+//! failure, 7 operation cancelled at the confirmation, 8 wait timed out, 9
+//! operation that may have been processed (check before repeating it).
 
 mod arquivo;
 mod cli;
