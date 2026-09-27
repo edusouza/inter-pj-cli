@@ -18,7 +18,7 @@ use inter_pj::{Environment, Error as InterError, InterClient};
 use serde_json::{Map, Value, json};
 
 use self::callbacks::Api;
-use super::cobranca::argumento;
+use crate::chamada::{argumento, chamada};
 use crate::cli::{
     Formato, WebhookBankingCommand, WebhookCadastroArgs, WebhookCobrancaCommand, WebhookCommand,
     WebhookExclusaoArgs, WebhookPixAutomaticoCommand, WebhookPixCommand,
@@ -222,15 +222,21 @@ impl Alvo {
     /// `inter-pj webhook ... <acao> ...`, ready to paste in a shell.
     fn comando(&self, acao: &str) -> String {
         match self {
-            Self::Banking(tipo) => format!("inter-pj webhook banking {acao} {tipo}"),
-            Self::Cobranca => format!("inter-pj webhook cobranca {acao}"),
+            Self::Banking(tipo) => format!("{} webhook banking {acao} {tipo}", chamada()),
+            Self::Cobranca => format!("{} webhook cobranca {acao}", chamada()),
             Self::Pix(chave) => {
-                format!("inter-pj webhook pix {acao} {}", argumento(chave.as_str()))
+                format!(
+                    "{} webhook pix {acao} {}",
+                    chamada(),
+                    argumento(chave.as_str())
+                )
             }
             Self::PixAutomatico(TipoWebhookPixAutomatico::Recorrencia) => {
-                format!("inter-pj webhook recorrencia {acao}")
+                format!("{} webhook recorrencia {acao}", chamada())
             }
-            Self::PixAutomatico(_) => format!("inter-pj webhook cobranca-recorrente {acao}"),
+            Self::PixAutomatico(_) => {
+                format!("{} webhook cobranca-recorrente {acao}", chamada())
+            }
         }
     }
 

@@ -16,6 +16,7 @@ use serde::de::{self, Deserializer};
 use serde::{Deserialize, Serialize};
 use url::{Host, Url};
 
+use crate::chamada::chamada;
 use crate::error::CliError;
 use crate::paths;
 use crate::valor::parse_valor;
@@ -196,7 +197,7 @@ pub(crate) fn parse(path: &Path, text: &str) -> Result<ConfigFile, CliError> {
             ),
             verificar: aspas
                 .filter(|problema| problema.correcao.is_some())
-                .map(|_| "inter-pj config verificar".to_owned()),
+                .map(|_| format!("{} config verificar", chamada())),
         }
     })
 }
@@ -483,7 +484,7 @@ impl Settings {
         let status = if self.config_exists {
             String::new()
         } else {
-            " — não encontrado; crie um com `inter-pj config init`".to_owned()
+            format!(" — não encontrado; crie um com `{} config init`", chamada())
         };
         let _ = write!(
             message,

@@ -8,6 +8,7 @@ use secrecy::ExposeSecret;
 use serde_json::json;
 
 use super::Context;
+use crate::chamada::chamada;
 use crate::cli::{AuthCommand, CertificadoArgs, Formato, LimparArgs, TokenArgs};
 use crate::error::CliError;
 use crate::output::{self, limpo, secao};
@@ -107,8 +108,9 @@ fn limpar(context: &Context, args: &LimparArgs) -> Result<(), CliError> {
     let (Some(base_url), Some(client_id)) = (settings.effective_base_url(), &settings.client_id)
     else {
         return Err(CliError::Config(format!(
-            "o perfil \"{}\" não tem ambiente e client_id definidos; use `inter-pj auth limpar --todos`",
-            settings.perfil.value
+            "o perfil \"{}\" não tem ambiente e client_id definidos; use `{} auth limpar --todos`",
+            settings.perfil.value,
+            chamada()
         )));
     };
     let key = inter_pj::auth::cache_key(&base_url, &client_id.value);

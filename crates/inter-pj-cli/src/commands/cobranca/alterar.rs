@@ -9,7 +9,8 @@ use inter_pj::cobranca::{
 use inter_pj::{Environment, Error as InterError, InterClient};
 use serde_json::json;
 
-use super::{argumento, data, descrever_situacao, documento};
+use super::{data, descrever_situacao, documento};
+use crate::chamada::{argumento, chamada};
 use crate::cli::{
     CobrancaCancelarArgs, CobrancaEdicaoArgs, CobrancaEditarArgs, CobrancaPagarArgs, FormaArg,
     Formato,
@@ -56,7 +57,8 @@ pub(super) async fn cancelar(
         })),
         // `commands::run` refuses csv for this command.
         Formato::Texto | Formato::Csv => output::print(&format!(
-            "Cancelamento solicitado.\n\nConfira com: inter-pj cobranca consultar {codigo}"
+            "Cancelamento solicitado.\n\nConfira com: {} cobranca consultar {codigo}",
+            chamada()
         )),
     }
 }
@@ -192,7 +194,8 @@ pub(super) async fn pagar(context: &Context, args: &CobrancaPagarArgs) -> Result
         })),
         // `commands::run` refuses csv for this command.
         Formato::Texto | Formato::Csv => output::print(&format!(
-            "Cobrança paga no sandbox, com {forma}.\n\nConfira com: inter-pj cobranca consultar {codigo}"
+            "Cobrança paga no sandbox, com {forma}.\n\nConfira com: {} cobranca consultar {codigo}",
+            chamada()
         )),
     }
 }
@@ -378,7 +381,8 @@ fn render_edicao(
     {
         let _ = write!(
             texto,
-            "\n\nAcompanhe com: inter-pj cobranca edicao {} --aguardar",
+            "\n\nAcompanhe com: {} cobranca edicao {} --aguardar",
+            chamada(),
             argumento(codigo)
         );
     }

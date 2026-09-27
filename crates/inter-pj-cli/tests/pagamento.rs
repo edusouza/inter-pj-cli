@@ -514,3 +514,51 @@ async fn resultado_incerto_orienta_a_conferir_antes_de_repetir() {
         "{stderr}"
     );
 }
+
+/// The check runs on the account of the payment: the profile or the file
+/// chosen on the command line goes into the command it suggests, or it
+/// would look at the default profile, find nothing and invite a second
+/// payment. One chosen in the environment stays in the shell by itself.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_conferencia_sugerida_e_na_mesma_conta() {
+    let env = TestEnv::new().await;
+    env.write_config(&format!(
+        "\n[perfis.filial]\nambiente = \"sandbox\"\nclient_id = \"id-da-filial\"\ncertificado = '{}'\nchave_privada = '{}'",
+        env.path("certificado.crt").display(),
+        env.path("chave.key").display()
+    ));
+    env.mount_token("pagamento-boleto.write", None).await;
+    Mock::given(method("POST"))
+        .and(path(PAGAMENTO))
+        .respond_with(ResponseTemplate::new(503))
+        .expect(3)
+        .mount(&env.server)
+        .await;
+    let config = env.config_path().display().to_string();
+    for (opcoes, no_ambiente, chamada) in [
+        (vec!["-p", "filial"], None, "inter-pj -p filial".to_owned()),
+        (vec![], Some("filial"), "inter-pj".to_owned()),
+        (
+            vec!["--config", config.as_str(), "--perfil", "filial"],
+            None,
+            format!("inter-pj --config {config} -p filial"),
+        ),
+    ] {
+        let mut cmd = env.cmd();
+        if let Some(perfil) = no_ambiente {
+            cmd.env("INTER_PERFIL", perfil);
+        }
+        let assert = cmd
+            .args(&opcoes)
+            .args(["pagamento", "boleto", "pagar", BOLETO, "--sim"])
+            .assert()
+            .code(9);
+        let stderr = stderr_of(&assert);
+        assert!(
+            stderr.contains(&format!(
+                "dica: confira antes de tentar de novo: {chamada} pagamento boleto listar --codigo {BARRAS}"
+            )),
+            "{opcoes:?}: {stderr}"
+        );
+    }
+}

@@ -13,7 +13,7 @@ use inter_pj::webhook::{
 use inter_pj::{Error as InterError, InterClient};
 use serde_json::json;
 
-use super::super::cobranca::argumento;
+use crate::chamada::{argumento, chamada};
 use crate::cli::{CallbacksArgs, Formato};
 use crate::commands::Context;
 use crate::commands::pix::periodo;
@@ -75,10 +75,11 @@ impl Api {
     /// The retry command, up to the identifiers; `chave` for Pix.
     fn reenviar(self, chave: Option<&str>) -> String {
         match self {
-            Self::Banking(tipo) => format!("inter-pj webhook banking reenviar {tipo}"),
-            Self::Cobranca => "inter-pj webhook cobranca reenviar".to_owned(),
+            Self::Banking(tipo) => format!("{} webhook banking reenviar {tipo}", chamada()),
+            Self::Cobranca => format!("{} webhook cobranca reenviar", chamada()),
             Self::Pix => format!(
-                "inter-pj webhook pix reenviar {}",
+                "{} webhook pix reenviar {}",
+                chamada(),
                 chave.map_or_else(|| "CHAVE".to_owned(), argumento)
             ),
         }

@@ -19,6 +19,7 @@ use super::{
     endereco, incerta, paginacao, pessoa, tabela_pix,
 };
 use crate::arquivo;
+use crate::chamada::chamada;
 use crate::cli::{
     DevedorCobvArgs, Formato, PixCobvCommand, PixCobvConsultarArgs, PixCobvCriarArgs,
     PixCobvListarArgs, PixCobvRevisarArgs,
@@ -93,8 +94,9 @@ async fn criar(
         .await
         .map_err(|err| incerta(err, "pix cobv", &txid))?;
     let texto = format!(
-        "Cobrança Pix com vencimento criada.\n\n{}\n\nAcompanhe com: inter-pj pix cobv consultar {txid}",
-        render_cobv(&criada)
+        "Cobrança Pix com vencimento criada.\n\n{}\n\nAcompanhe com: {} pix cobv consultar {txid}",
+        render_cobv(&criada),
+        chamada()
     );
     opcoes.mostrar(context, &settings, &texto, &criada, &copia_e_cola(&criada))
 }

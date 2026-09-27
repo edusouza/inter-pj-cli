@@ -9,6 +9,7 @@ use inter_pj::Environment;
 use inter_pj::pix_automatico::{FiltroLocsRec, LocationRec};
 use serde_json::json;
 
+use crate::chamada::chamada;
 use crate::cli::{
     Formato, LocrecCommand, LocrecConsultarArgs, LocrecDesvincularArgs, LocrecListarArgs,
 };
@@ -40,7 +41,8 @@ async fn criar(context: &Context) -> Result<(), CliError> {
             if let Some(id) = loc.id {
                 let _ = write!(
                     texto,
-                    "\n\nUse com: inter-pj pix-automatico rec criar ... --loc {id}"
+                    "\n\nUse com: {} pix-automatico rec criar ... --loc {id}",
+                    chamada()
                 );
             }
             output::print(&texto)

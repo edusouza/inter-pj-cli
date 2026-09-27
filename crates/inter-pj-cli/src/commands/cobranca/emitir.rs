@@ -11,8 +11,9 @@ use inter_pj::cobranca::{
 use inter_pj::{Environment, Error as InterError, InterClient, endpoint};
 
 use super::consultar::mostrar;
-use super::{argumento, descrever_situacao};
+use super::descrever_situacao;
 use crate::arquivo;
+use crate::chamada::{argumento, chamada};
 use crate::cli::{CobrancaEmitirArgs, FormaArg, Formato, TaxaOuValor};
 use crate::commands::qrcode::OpcoesQr;
 use crate::commands::{Context, hoje, simulacao};
@@ -128,7 +129,8 @@ async fn emitir_com(
 /// The command that finds the charge by its seu número.
 fn procurar(cobranca: &EmissaoCobranca) -> String {
     format!(
-        "inter-pj cobranca listar --filtrar-por emissao --seu-numero {}",
+        "{} cobranca listar --filtrar-por emissao --seu-numero {}",
+        chamada(),
         argumento(&cobranca.seu_numero)
     )
 }
@@ -406,7 +408,8 @@ fn formas(formas: &[FormaRecebimento]) -> String {
 fn render_solicitacao(codigo: Option<&str>, cobranca: &EmissaoCobranca) -> String {
     match codigo {
         Some(codigo) => format!(
-            "Cobrança solicitada: a emissão termina em instantes.\nCódigo  {codigo}\n\nAcompanhe com: inter-pj cobranca consultar {}",
+            "Cobrança solicitada: a emissão termina em instantes.\nCódigo  {codigo}\n\nAcompanhe com: {} cobranca consultar {}",
+            chamada(),
             argumento(codigo)
         ),
         // The API documents the code as always present.

@@ -10,6 +10,7 @@ use inter_pj::pix_automatico::{
 };
 use serde_json::{Map, Value, json};
 
+use crate::chamada::chamada;
 use crate::cli::{
     Formato, SandboxPagarCobrArgs, SandboxPixAutomaticoCommand, SandboxStatusCobrArgs,
     SandboxStatusRecArgs, SandboxStatusSolicitacaoArgs, StatusRecSandboxArg,
@@ -136,7 +137,7 @@ async fn status_cobr(context: &Context, args: &SandboxStatusCobrArgs) -> Result<
             "Cobrança recorrente {} cancelada pelo banco do pagador no sandbox (motivo {razao}).",
             args.txid
         ),
-        &format!("inter-pj pix-automatico cobr consultar {}", args.txid),
+        &format!("{} pix-automatico cobr consultar {}", chamada(), args.txid),
     )
 }
 
@@ -188,7 +189,7 @@ async fn pagar_cobr(context: &Context, args: &SandboxPagarCobrArgs) -> Result<()
         context,
         &pagamento,
         valor,
-        &format!("inter-pj pix-automatico cobr consultar {}", args.txid),
+        &format!("{} pix-automatico cobr consultar {}", chamada(), args.txid),
     )
 }
 
@@ -201,7 +202,7 @@ fn sem_pagador() -> CliError {
 
 /// `inter-pj pix-automatico rec consultar ...`.
 fn consultar_rec(id_rec: &IdRec) -> String {
-    format!("inter-pj pix-automatico rec consultar {id_rec}")
+    format!("{} pix-automatico rec consultar {id_rec}", chamada())
 }
 
 /// What the sandbox did: the fields sent, in JSON, or `texto` and the

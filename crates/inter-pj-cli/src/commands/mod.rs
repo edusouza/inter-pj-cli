@@ -25,6 +25,7 @@ use clap::parser::ValueSource;
 use inter_pj::{ClientIdentity, Credentials, InterClient};
 use secrecy::{ExposeSecret, SecretString};
 
+use crate::chamada::chamada;
 use crate::cli::{Cli, Command, Formato, GlobalArgs, PeriodoArgs};
 use crate::config::{self as settings, Given, Inputs, Settings, Source};
 use crate::doctor;
@@ -98,7 +99,6 @@ pub(crate) struct Context {
 /// Origin (flag or environment) of each flag-backed setting.
 #[derive(Debug, Default)]
 struct Sources {
-    config: Option<Source>,
     perfil: Option<Source>,
     ambiente: Option<Source>,
     client_id: Option<Source>,
@@ -110,7 +110,6 @@ struct Sources {
 impl Context {
     fn new(global: GlobalArgs, matches: &ArgMatches, env: &dyn Env) -> Result<Self, CliError> {
         let sources = Sources {
-            config: source_of(matches, "config", "INTER_CONFIG"),
             perfil: source_of(matches, "perfil", "INTER_PERFIL"),
             ambiente: source_of(matches, "ambiente", "INTER_AMBIENTE"),
             client_id: source_of(matches, "client_id", "INTER_CLIENT_ID"),
@@ -149,39 +148,18 @@ impl Context {
         &self.cache_dir
     }
 
-    /// A command for the user to run next, with the configuration file
-    /// when it was given by `--config`.
-    pub(crate) fn sugestao(&self, comando: &str) -> String {
-        match self.sources.config {
-            Some(Source::Flag) => format!(
-                "inter-pj --config \"{}\" {comando}",
-                self.config_path.display()
-            ),
-            _ => format!("inter-pj {comando}"),
-        }
-    }
-
     /// Loads the configuration file and resolves the selected profile.
     pub(crate) fn settings(&self) -> Result<Settings, CliError> {
-        let loaded = settings::load(&self.config_path).map_err(|err| match err {
-            CliError::ConfigFile {
-                mensagem,
-                verificar,
-            } => CliError::ConfigFile {
-                mensagem,
-                verificar: verificar.map(|_| self.sugestao("config verificar")),
-            },
-            err => err,
-        })?;
+        let loaded = settings::load(&self.config_path)?;
         let resolved = Settings::resolve(&loaded, self.inputs())?;
         for warning in &resolved.warnings {
             output::eprint_linha(&format!("aviso: {warning}"));
         }
         for (chave, caminho) in resolved.paths_with_control_chars() {
             output::eprint_linha(&format!(
-                "aviso: o caminho de {chave} tem um caractere de controle (\"{}\"): entre aspas duplas, a barra invertida começa um escape; use aspas simples ou execute `{}`",
+                "aviso: o caminho de {chave} tem um caractere de controle (\"{}\"): entre aspas duplas, a barra invertida começa um escape; use aspas simples ou execute `{} config verificar --corrigir`",
                 doctor::escapar_controles(&caminho.display().to_string()),
-                self.sugestao("config verificar --corrigir")
+                chamada()
             ));
         }
         Ok(resolved)

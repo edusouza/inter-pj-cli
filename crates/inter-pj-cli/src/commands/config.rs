@@ -11,6 +11,7 @@ use serde::Serialize;
 use serde_json::{Value, json};
 
 use super::Context;
+use crate::chamada::chamada;
 use crate::cli::{ConfigCommand, Formato, InitArgs, VerificarArgs};
 use crate::config::{ConfigFile, LoadedConfig, Setting, Settings, TEMPLATE};
 use crate::confirmacao::Stdio;
@@ -304,7 +305,10 @@ fn verificar(context: &Context, args: &VerificarArgs) -> Result<(), CliError> {
             achados.push(Achado::novo(
                 Nivel::Aviso,
                 "arquivo",
-                "não existe: crie com `inter-pj config init`, ou informe tudo por flags e variáveis de ambiente",
+                format!(
+                    "não existe: crie com `{} config init`, ou informe tudo por flags e variáveis de ambiente",
+                    chamada()
+                ),
             ));
             Some(LoadedConfig {
                 path: path.clone(),
@@ -596,8 +600,8 @@ fn relatorio(
             if achados.iter().any(|achado| achado.corrigivel) {
                 let _ = write!(
                     texto,
-                    "\nPara trocar as aspas: {}",
-                    context.sugestao("config verificar --corrigir")
+                    "\nPara trocar as aspas: {} config verificar --corrigir",
+                    chamada()
                 );
             }
             output::print(&texto)?;

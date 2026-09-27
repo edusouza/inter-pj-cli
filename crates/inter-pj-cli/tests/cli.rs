@@ -724,9 +724,17 @@ async fn caminho_do_windows_entre_aspas_duplas_e_explicado() {
         .assert()
         .code(3)
         .stderr(predicate::str::contains(format!(
-            "dica: `inter-pj --config \"{}\" config verificar`",
+            "dica: `inter-pj --config {} config verificar`",
             config.display()
         )));
+    // And so does a profile given by -p, as in the other suggested commands.
+    env.cmd()
+        .args(["-p", "filial", "saldo"])
+        .assert()
+        .code(3)
+        .stderr(predicate::str::contains(
+            "dica: `inter-pj -p filial config verificar`",
+        ));
 
     // Another error of the file has nothing for `--corrigir` to fix.
     env.write_config_text("[perfis.padrao]\nclientid = \"x\"\n");

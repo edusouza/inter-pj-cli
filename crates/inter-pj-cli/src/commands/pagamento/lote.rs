@@ -14,6 +14,7 @@ use inter_pj::{Environment, InterClient, endpoint};
 
 use super::{darf, pagar};
 use crate::arquivo::{self, ArquivoLote, MODELO_CSV, MODELO_JSON};
+use crate::chamada::chamada;
 use crate::cli::{
     Formato, LoteCommand, LoteConsultarArgs, LoteEnviarArgs, LoteModeloArgs, TipoArquivo,
 };
@@ -109,8 +110,10 @@ async fn enviar(
                 situacao: "o lote pode ter sido recebido e pago",
                 // No endpoint lists batches: their payments show up in the
                 // listings of each kind.
-                consulta: "inter-pj pagamento boleto listar e inter-pj pagamento darf listar"
-                    .to_owned(),
+                consulta: format!(
+                    "{0} pagamento boleto listar e {0} pagamento darf listar",
+                    chamada()
+                ),
             }
         } else {
             err.into()
@@ -297,7 +300,8 @@ fn render_envio(solicitacao: &SolicitacaoLote) -> String {
     if let Some(id) = &solicitacao.id_lote {
         let _ = write!(
             texto,
-            "\n\nAcompanhe com: inter-pj pagamento lote consultar {id} --aguardar"
+            "\n\nAcompanhe com: {} pagamento lote consultar {id} --aguardar",
+            chamada()
         );
     }
     texto
