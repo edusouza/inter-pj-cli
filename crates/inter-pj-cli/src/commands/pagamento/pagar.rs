@@ -51,6 +51,7 @@ pub(super) async fn run(
             if resultado_incerto(&err) {
                 CliError::PagamentoIncerto {
                     source: err,
+                    situacao: "o pagamento pode ter sido feito",
                     consulta: format!(
                         "inter-pj pagamento boleto listar --codigo {}",
                         pagamento.codigo.codigo_barras()
@@ -120,8 +121,6 @@ fn resumo(pagamento: &PagamentoBoleto, hoje: NaiveDate, ambiente: Option<Environ
         ("Tipo", descrever_tipo(codigo)),
         ("Linha digitável", codigo.linha_formatada()),
     ];
-    let mut avisos = Vec::new();
-
     let extenso = por_extenso(pagamento.valor_pagar)
         .map(|extenso| format!(" ({extenso})"))
         .unwrap_or_default();
@@ -132,11 +131,6 @@ fn resumo(pagamento: &PagamentoBoleto, hoje: NaiveDate, ambiente: Option<Environ
     match codigo.valor() {
         Some(do_codigo) if do_codigo != pagamento.valor_pagar => {
             linhas.push(("Valor no código", output::brl(do_codigo)));
-            avisos.push(if pagamento.valor_pagar > do_codigo {
-                "o valor a pagar é maior que o do código: confira juros e multa".to_owned()
-            } else {
-                "o valor a pagar é menor que o do código: confira o desconto".to_owned()
-            });
         }
         Some(_) => {}
         None => linhas.push(("Valor no código", "não informado".to_owned())),
@@ -147,7 +141,6 @@ fn resumo(pagamento: &PagamentoBoleto, hoje: NaiveDate, ambiente: Option<Environ
         && do_codigo != pagamento.data_vencimento
     {
         linhas.push(("Vencimento no código", dia(do_codigo)));
-        avisos.push("o vencimento informado difere do vencimento do código".to_owned());
     }
     linhas.push((
         "Quando",
@@ -156,12 +149,6 @@ fn resumo(pagamento: &PagamentoBoleto, hoje: NaiveDate, ambiente: Option<Environ
             |data| format!("agendado para {}", dia(data)),
         ),
     ));
-    if pagamento.data_pagamento.unwrap_or(hoje) > pagamento.data_vencimento {
-        avisos.push(format!(
-            "o pagamento fica para depois do vencimento ({}): pode haver juros e multa, ou recusa",
-            dia(pagamento.data_vencimento)
-        ));
-    }
     if let Some(documento) = &pagamento.cpf_cnpj_beneficiario {
         linhas.push((
             "Beneficiário",
@@ -177,10 +164,48 @@ fn resumo(pagamento: &PagamentoBoleto, hoje: NaiveDate, ambiente: Option<Environ
     for linha in output::key_values_left(&linhas).lines() {
         let _ = write!(texto, "\n  {linha}");
     }
-    for aviso in avisos {
+    for aviso in avisos(pagamento, hoje) {
         let _ = write!(texto, "\naviso: {aviso}");
     }
     texto
+}
+
+/// What deserves a second look before paying: an amount or a due date
+/// other than the code's, and a payment after the due date.
+pub(super) fn avisos(pagamento: &PagamentoBoleto, hoje: NaiveDate) -> Vec<String> {
+    let codigo = &pagamento.codigo;
+    let dia = |data: NaiveDate| data.format("%d/%m/%Y").to_string();
+    let mut avisos = Vec::new();
+    if let Some(do_codigo) = codigo.valor()
+        && do_codigo != pagamento.valor_pagar
+    {
+        let (comparacao, confira) = if pagamento.valor_pagar > do_codigo {
+            ("maior", "juros e multa")
+        } else {
+            ("menor", "o desconto")
+        };
+        avisos.push(format!(
+            "o valor a pagar ({}) é {comparacao} que o do código ({}): confira {confira}",
+            output::brl(pagamento.valor_pagar),
+            output::brl(do_codigo)
+        ));
+    }
+    if let Some(do_codigo) = codigo.vencimento(hoje)
+        && do_codigo != pagamento.data_vencimento
+    {
+        avisos.push(format!(
+            "o vencimento informado ({}) difere do vencimento do código ({})",
+            dia(pagamento.data_vencimento),
+            dia(do_codigo)
+        ));
+    }
+    if pagamento.data_pagamento.unwrap_or(hoje) > pagamento.data_vencimento {
+        avisos.push(format!(
+            "o pagamento fica para depois do vencimento ({}): pode haver juros e multa, ou recusa",
+            dia(pagamento.data_vencimento)
+        ));
+    }
+    avisos
 }
 
 /// `boleto do banco 077`, `conta ou tributo: água e esgoto`.
@@ -412,8 +437,8 @@ Pagamento a enviar
             "Vencimento no código  10/10/2026",
             "Quando                agendado para 05/10/2026",
             "Beneficiário          12.345.678/0001-95 (a API confere)",
-            "aviso: o valor a pagar é maior que o do código: confira juros e multa",
-            "aviso: o vencimento informado difere do vencimento do código",
+            "aviso: o valor a pagar (R$ 32,00) é maior que o do código (R$ 30,10): confira juros e multa",
+            "aviso: o vencimento informado (01/10/2026) difere do vencimento do código (10/10/2026)",
             "aviso: o pagamento fica para depois do vencimento (01/10/2026): pode haver juros e multa, ou recusa",
         ] {
             assert!(texto.contains(linha), "{linha}\n{texto}");
@@ -422,7 +447,9 @@ Pagamento a enviar
         let desconto = pagamento(&args(&[BOLETO, "--valor", "29"]), hoje()).unwrap();
         let texto = resumo(&desconto, hoje(), None);
         assert!(
-            texto.contains("é menor que o do código: confira o desconto"),
+            texto.contains(
+                "o valor a pagar (R$ 29,00) é menor que o do código (R$ 30,10): confira o desconto"
+            ),
             "{texto}"
         );
 

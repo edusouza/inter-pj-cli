@@ -3,6 +3,7 @@
 use std::borrow::Cow;
 use std::io::{self, Write};
 
+use chrono::{DateTime, NaiveDateTime};
 use rust_decimal::{Decimal, RoundingStrategy};
 use serde::Serialize;
 
@@ -136,6 +137,19 @@ pub(crate) fn print_json<T: Serialize>(value: &T) -> Result<(), CliError> {
     let json = serde_json::to_string_pretty(value)
         .map_err(|err| CliError::io("falha ao gerar JSON", io::Error::other(err)))?;
     print(&json)
+}
+
+/// `2026-09-23T12:00:00(.fff)(±hh:mm)` -> `23/09/2026 12:00:00`; other
+/// formats as received.
+pub(crate) fn data_hora_br(raw: &str) -> String {
+    const FORMATO: &str = "%d/%m/%Y %H:%M:%S";
+    if let Ok(data) = DateTime::parse_from_rfc3339(raw) {
+        return data.format(FORMATO).to_string();
+    }
+    ["%Y-%m-%dT%H:%M:%S%.f", "%Y-%m-%d %H:%M:%S%.f"]
+        .iter()
+        .find_map(|formato| NaiveDateTime::parse_from_str(raw, formato).ok())
+        .map_or_else(|| raw.to_owned(), |data| data.format(FORMATO).to_string())
 }
 
 /// Masks all but the last `visible` characters: `*****67`.

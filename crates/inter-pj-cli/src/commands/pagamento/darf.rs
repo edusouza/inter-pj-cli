@@ -63,6 +63,7 @@ async fn pagar(
         if resultado_incerto(&err) {
             CliError::PagamentoIncerto {
                 source: err,
+                situacao: "o pagamento pode ter sido feito",
                 consulta: format!(
                     "inter-pj pagamento darf listar --codigo-receita {}",
                     darf.codigo_receita
@@ -83,7 +84,7 @@ async fn pagar(
 fn darf(args: &DarfPagarArgs) -> Result<PagamentoDarf, CliError> {
     if let Some(caminho) = &args.arquivo {
         let valor = arquivo::ler_json(caminho)?;
-        let onde = caminho.display().to_string();
+        let onde = arquivo::nome(caminho);
         return arquivo::darf(&Campos::de(&valor, &onde, &CAMPOS_DARF)?);
     }
     // clap requires every mandatory option along with --codigo-receita.
@@ -155,16 +156,6 @@ fn resumo(darf: &PagamentoDarf, hoje: NaiveDate, ambiente: Option<Environment>) 
     linhas.push(("Total", format!("{}{extenso}", output::brl(total))));
     linhas.push(("Quando", "agora".to_owned()));
 
-    let mut avisos = Vec::new();
-    let sem_acrescimos = darf.valor_multa.is_none_or(|multa| multa.is_zero())
-        && darf.valor_juros.is_none_or(|juros| juros.is_zero());
-    if darf.data_vencimento < hoje && sem_acrescimos {
-        avisos.push(format!(
-            "o DARF venceu em {} e não tem multa nem juros: pago depois do vencimento, ele precisa dos acréscimos calculados",
-            dia(darf.data_vencimento)
-        ));
-    }
-
     let mut texto = String::new();
     if ambiente.is_some_and(Environment::is_production) {
         texto.push_str("*** PRODUÇÃO: este pagamento movimenta dinheiro da conta real ***\n");
@@ -173,10 +164,25 @@ fn resumo(darf: &PagamentoDarf, hoje: NaiveDate, ambiente: Option<Environment>) 
     for linha in output::key_values_left(&linhas).lines() {
         let _ = write!(texto, "\n  {linha}");
     }
-    for aviso in avisos {
+    for aviso in avisos(darf, hoje) {
         let _ = write!(texto, "\naviso: {aviso}");
     }
     texto
+}
+
+/// What deserves a second look before paying: a DARF past its due date
+/// without the additions, which the API does not compute.
+pub(super) fn avisos(darf: &PagamentoDarf, hoje: NaiveDate) -> Vec<String> {
+    let sem_acrescimos = darf.valor_multa.is_none_or(|multa| multa.is_zero())
+        && darf.valor_juros.is_none_or(|juros| juros.is_zero());
+    if darf.data_vencimento < hoje && sem_acrescimos {
+        vec![format!(
+            "o DARF venceu em {} e não tem multa nem juros: pago depois do vencimento, ele precisa dos acréscimos calculados",
+            darf.data_vencimento.format("%d/%m/%Y")
+        )]
+    } else {
+        Vec::new()
+    }
 }
 
 fn render(solicitacao: &SolicitacaoDarf) -> String {
