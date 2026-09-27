@@ -163,7 +163,8 @@ async fn o_parser_nao_repete_sequencias_de_um_codigo_colado() {
     assert!(!perigoso(&stderr), "{stderr:?}");
     assert!(stderr.contains("--copia-e-cola"), "{stderr}");
 
-    // An error without them keeps the colors of clap.
+    // Like every other error, those of the parser have no colors, even
+    // when colors are forced.
     let assert = env
         .cmd()
         .env_remove("NO_COLOR")
@@ -172,8 +173,8 @@ async fn o_parser_nao_repete_sequencias_de_um_codigo_colado() {
         .assert()
         .code(2);
     assert!(
-        stderr_of(&assert).contains('\u{1b}'),
-        "{}",
+        !stderr_of(&assert).contains('\u{1b}'),
+        "{:?}",
         stderr_of(&assert)
     );
 }

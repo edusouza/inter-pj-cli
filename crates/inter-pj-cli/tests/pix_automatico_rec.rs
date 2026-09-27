@@ -208,7 +208,7 @@ async fn simulacao_e_erros_nao_chamam_a_api() {
         .assert()
         .code(2);
     assert!(
-        stderr_of(&assert).contains("cannot be used with"),
+        stderr_of(&assert).contains("não é possível usar"),
         "{}",
         stderr_of(&assert)
     );

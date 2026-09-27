@@ -23,10 +23,12 @@ use rust_decimal::Decimal;
 use crate::tabela::Separador;
 use crate::valor::{parse_valor, parse_valor_ou_zero};
 
+mod erro;
 mod pix;
 mod pix_automatico;
 mod webhook;
 
+pub(crate) use erro::Portugues;
 pub(crate) use pix::{
     DescontoAte, DevedorCobvArgs, EncargosCobvArgs, Momento, PeriodoJuros, PeriodoPixArgs,
     PixCobCommand, PixCobConsultarArgs, PixCobCriarArgs, PixCobListarArgs, PixCobRevisarArgs,
