@@ -8,7 +8,7 @@ use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::json;
 
-use super::{IdRec, PixAutomatico, Rec};
+use super::{IdRec, PixAutomatico, Rec, agencia, conta, digitos};
 use crate::client::ApiRequest;
 use crate::documento::Documento;
 use crate::endpoint;
@@ -144,29 +144,15 @@ impl DestinatarioSolicRec {
     }
 
     fn validar(&self) -> Result<(), CobrancaPixError> {
-        let digitos = |texto: &str| !texto.is_empty() && texto.bytes().all(|b| b.is_ascii_digit());
-        let sem_dv = self.conta.strip_suffix(['X', 'x']).unwrap_or(&self.conta);
-        if !digitos(sem_dv) || self.conta.len() > MAX_CONTA {
-            return Err(CobrancaPixError::new(
-                "destinatario.conta",
-                format!(
-                    "até {MAX_CONTA} dígitos, com o dígito verificador (que pode ser X), sem pontos nem traços"
-                ),
-            ));
-        }
+        conta(&self.conta, "destinatario.conta", MAX_CONTA)?;
         if self.ispb_participante.len() != 8 || !digitos(&self.ispb_participante) {
             return Err(CobrancaPixError::new(
                 "destinatario.ispbParticipante",
                 "o ISPB do banco tem 8 dígitos",
             ));
         }
-        if let Some(agencia) = &self.agencia
-            && (!digitos(agencia) || agencia.len() > MAX_AGENCIA)
-        {
-            return Err(CobrancaPixError::new(
-                "destinatario.agencia",
-                format!("até {MAX_AGENCIA} dígitos, sem o dígito verificador"),
-            ));
+        if let Some(numero) = &self.agencia {
+            agencia(numero, "destinatario.agencia", MAX_AGENCIA)?;
         }
         Ok(())
     }

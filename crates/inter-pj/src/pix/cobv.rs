@@ -161,29 +161,45 @@ impl DevedorCobv {
 
     pub(crate) fn validar(&self) -> Result<(), CobrancaPixError> {
         texto(&self.nome, "devedor.nome", 200)?;
-        if let Some(email) = &self.email {
-            texto(email, "devedor.email", 200)?;
-            let (local, dominio) = email.split_once('@').unwrap_or_default();
-            if local.is_empty() || !dominio.contains('.') || email.contains(char::is_whitespace) {
-                return Err(CobrancaPixError::new("devedor.email", "e-mail inválido"));
-            }
-        }
-        if let Some(logradouro) = &self.logradouro {
-            texto(logradouro, "devedor.logradouro", 200)?;
-        }
-        if let Some(cidade) = &self.cidade {
-            texto(cidade, "devedor.cidade", 200)?;
-        }
-        if let Some(cep) = &self.cep
-            && (cep.len() != 8 || !cep.bytes().all(|b| b.is_ascii_digit()))
-        {
-            return Err(CobrancaPixError::new(
-                "devedor.cep",
-                "o CEP tem 8 dígitos, sem pontuação",
-            ));
-        }
-        Ok(())
+        contato(
+            self.email.as_deref(),
+            self.logradouro.as_deref(),
+            self.cidade.as_deref(),
+            self.cep.as_deref(),
+        )
     }
+}
+
+/// The e-mail and address of a payer (`devedor`), as the API limits them:
+/// 200 characters each, and a CEP of 8 digits.
+pub(crate) fn contato(
+    email: Option<&str>,
+    logradouro: Option<&str>,
+    cidade: Option<&str>,
+    cep: Option<&str>,
+) -> Result<(), CobrancaPixError> {
+    if let Some(email) = email {
+        texto(email, "devedor.email", 200)?;
+        let (local, dominio) = email.split_once('@').unwrap_or_default();
+        if local.is_empty() || !dominio.contains('.') || email.contains(char::is_whitespace) {
+            return Err(CobrancaPixError::new("devedor.email", "e-mail inválido"));
+        }
+    }
+    if let Some(logradouro) = logradouro {
+        texto(logradouro, "devedor.logradouro", 200)?;
+    }
+    if let Some(cidade) = cidade {
+        texto(cidade, "devedor.cidade", 200)?;
+    }
+    if let Some(cep) = cep
+        && (cep.len() != 8 || !cep.bytes().all(|b| b.is_ascii_digit()))
+    {
+        return Err(CobrancaPixError::new(
+            "devedor.cep",
+            "o CEP tem 8 dígitos, sem pontuação",
+        ));
+    }
+    Ok(())
 }
 
 impl Serialize for DevedorCobv {

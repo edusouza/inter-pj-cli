@@ -632,6 +632,48 @@ pub mod pix_automatico {
         path: "/pix/v2/locrec/{id}/idRec",
         scopes: &[Scope::PayloadLocationRecWrite],
     };
+
+    /// `PUT /pix/v2/cobr/{txid}` — creates a recurring charge with your txid.
+    pub const CRIAR_COBR: Endpoint = Endpoint {
+        method: Method::Put,
+        path: "/pix/v2/cobr/{txid}",
+        scopes: &[Scope::CobrWrite],
+    };
+
+    /// `POST /pix/v2/cobr` — creates a recurring charge; Inter chooses the txid.
+    pub const CRIAR_COBR_SEM_TXID: Endpoint = Endpoint {
+        method: Method::Post,
+        path: "/pix/v2/cobr",
+        scopes: &[Scope::CobrWrite],
+    };
+
+    /// `GET /pix/v2/cobr/{txid}` — a recurring charge.
+    pub const CONSULTAR_COBR: Endpoint = Endpoint {
+        method: Method::Get,
+        path: "/pix/v2/cobr/{txid}",
+        scopes: &[Scope::CobrRead],
+    };
+
+    /// `GET /pix/v2/cobr` — recurring charges of a period, paginated.
+    pub const LISTAR_COBRS: Endpoint = Endpoint {
+        method: Method::Get,
+        path: "/pix/v2/cobr",
+        scopes: &[Scope::CobrRead],
+    };
+
+    /// `PATCH /pix/v2/cobr/{txid}` — cancels a recurring charge.
+    pub const REVISAR_COBR: Endpoint = Endpoint {
+        method: Method::Patch,
+        path: "/pix/v2/cobr/{txid}",
+        scopes: &[Scope::CobrWrite],
+    };
+
+    /// `POST /pix/v2/cobr/{txid}/retentativa/{data}` — asks for a new attempt to settle a recurring charge.
+    pub const RETENTATIVA_COBR: Endpoint = Endpoint {
+        method: Method::Post,
+        path: "/pix/v2/cobr/{txid}/retentativa/{data}",
+        scopes: &[Scope::CobrWrite],
+    };
 }
 
 /// Every operation implemented by this crate.
@@ -711,4 +753,10 @@ pub const ALL: &[Endpoint] = &[
     pix_automatico::LISTAR_LOCRECS,
     pix_automatico::CONSULTAR_LOCREC,
     pix_automatico::DESVINCULAR_LOCREC,
+    pix_automatico::CRIAR_COBR,
+    pix_automatico::CRIAR_COBR_SEM_TXID,
+    pix_automatico::CONSULTAR_COBR,
+    pix_automatico::LISTAR_COBRS,
+    pix_automatico::REVISAR_COBR,
+    pix_automatico::RETENTATIVA_COBR,
 ];
