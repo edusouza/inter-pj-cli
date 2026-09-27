@@ -5,13 +5,13 @@ mod darf;
 mod lote;
 mod pagar;
 
-use chrono::NaiveDate;
 use inter_pj::banking::StatusPagamento;
 
 use super::Context;
 use crate::cli::PagamentoCommand;
 use crate::confirmacao::Stdio;
 use crate::error::CliError;
+use crate::output::{data_br, parse_data};
 use crate::tabela::Celula;
 
 pub(super) async fn run(context: &Context, command: PagamentoCommand) -> Result<(), CliError> {
@@ -46,20 +46,10 @@ fn data(raw: Option<&str>) -> Celula {
     Celula::data(raw.and_then(parse_data), raw)
 }
 
-/// [`data`] as text: `09/10/2026`, or the raw text.
-fn data_br(raw: &str) -> String {
-    parse_data(raw).map_or_else(|| raw.to_owned(), |dia| dia.format("%d/%m/%Y").to_string())
-}
-
-fn parse_data(raw: &str) -> Option<NaiveDate> {
-    let raw = raw.trim();
-    NaiveDate::parse_from_str(raw.get(..10).unwrap_or(raw), "%Y-%m-%d")
-        .or_else(|_| NaiveDate::parse_from_str(raw, "%d/%m/%Y"))
-        .ok()
-}
-
 #[cfg(test)]
 mod tests {
+    use chrono::NaiveDate;
+
     use super::*;
 
     #[test]

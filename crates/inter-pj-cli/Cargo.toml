@@ -29,6 +29,7 @@ etcetera.workspace = true
 # names. The CLI only talks to Inter's ASCII hosts (and to localhost in
 # tests), so non-ASCII hosts in INTER_BASE_URL are simply rejected.
 idna_adapter.workspace = true
+qrcode.workspace = true
 rust_decimal.workspace = true
 secrecy.workspace = true
 serde.workspace = true
@@ -44,6 +45,7 @@ assert_cmd.workspace = true
 base64.workspace = true
 predicates.workspace = true
 rcgen.workspace = true
+rqrr.workspace = true
 serde_urlencoded.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

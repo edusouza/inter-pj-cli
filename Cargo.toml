@@ -23,6 +23,9 @@ clap = { version = "4.5", features = ["derive", "env", "wrap_help"] }
 etcetera = "0.11"
 # ASCII-only IDNA back end for `url` (see crates/inter-pj-cli/Cargo.toml).
 idna_adapter = "=1.0.0"
+# QR Code of the Pix copia e cola; without default features it has no dependencies
+# (the image feature would bring the `image` crate: the CLI writes its own PNG).
+qrcode = { version = "0.14", default-features = false }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "form", "query"] }
 rust_decimal = { version = "1.37", features = ["serde"] }
 rustls-pki-types = { version = "1.12", features = ["std"] }
@@ -40,6 +43,8 @@ url = "2.5"
 assert_cmd = "2.0"
 predicates = "3.1"
 rcgen = { version = "0.14", default-features = false, features = ["aws_lc_rs", "pem"] }
+# Reads back the QR Codes the CLI draws.
+rqrr = { version = "0.11", default-features = false }
 rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std", "tls12"] }
 serde_urlencoded = "0.7"
 tempfile = "3.20"

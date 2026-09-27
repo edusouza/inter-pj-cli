@@ -18,7 +18,7 @@ use crate::commands::{Context, simulacao};
 use crate::config::Settings;
 use crate::confirmacao::{Terminal, confirmar, descrever_ambiente, verificar_limite};
 use crate::error::{CliError, resultado_incerto};
-use crate::output;
+use crate::output::{self, data_br};
 use crate::valor::por_extenso;
 
 pub(super) async fn run(
@@ -376,16 +376,6 @@ fn render(solicitacao: &SolicitacaoPix, id: &IdIdempotente) -> String {
         );
     }
     texto
-}
-
-/// `2026-09-23` -> `23/09/2026`; other formats as received.
-fn data_br(raw: &str) -> String {
-    raw.get(..10)
-        .and_then(|iso| NaiveDate::parse_from_str(iso, "%Y-%m-%d").ok())
-        .map_or_else(
-            || raw.to_owned(),
-            |data| data.format("%d/%m/%Y").to_string(),
-        )
 }
 
 #[cfg(test)]
