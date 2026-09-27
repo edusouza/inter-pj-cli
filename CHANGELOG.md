@@ -8,12 +8,18 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ### Adicionado
 
+- `inter-pj cobranca emitir`: emite uma cobrança com boleto e Pix pelas opções (casos simples) ou por `--arquivo` (JSON com os campos da API, inclusive beneficiário final e nota fiscal, ou `-` para a entrada padrão), conferida localmente com mensagens que apontam a opção ou o campo; campos desconhecidos no arquivo são recusados. O resumo mostra o valor por extenso, até quando vale o desconto e quando a cobrança não paga é cancelada, e avisa sobre multa e juros que não chegam a valer (`--dias-agenda` 0 cancela a cobrança no vencimento), prazo de desconto já passado e vencimento no mesmo dia (só até as 19h59). Confirmação, `--sim` e `--simular`; sem chave de idempotência, um resultado incerto vem com o comando que procura a cobrança antes de emiti-la de novo. Com `--aguardar [--timeout 60s]`, espera a emissão e mostra o boleto e o Pix, com `--qrcode` e `--qrcode-png` (#28).
+- `inter-pj cobranca modelo`: imprime um arquivo de exemplo para `cobranca emitir --arquivo`, com dados fictícios e vencimento em 30 dias (#28).
 - `inter-pj cobranca listar`: cobranças de um período por vencimento (padrão), emissão ou pagamento, com filtros de situação, pagador, CPF/CNPJ, seu número e tipo, ordem e todas as páginas (ou `--pagina`), em texto com totais, JSON ou CSV com os nomes da API (#29).
 - `inter-pj cobranca sumario`: quantidade e valor das cobranças do período por situação, com total, em texto, JSON ou CSV (#29).
-- `inter-pj cobranca consultar <codigo>`: situação, valores, encargos, pagador, boleto (linha digitável formatada) e Pix de uma cobrança, em texto ou JSON; `--qrcode` desenha o QR Code do Pix no terminal (preto no branco em qualquer tema; sem cores com `NO_COLOR` ou saída redirecionada) e `--qrcode-png` o grava em PNG, depois de conferir o CRC do copia e cola (#29, #31).
+- `inter-pj cobranca consultar <codigo>`: situação, valores, encargos, pagador, boleto (linha digitável formatada e código de barras) e Pix de uma cobrança, em texto ou JSON; `--qrcode` desenha o QR Code do Pix no terminal (preto no branco em qualquer tema; sem cores com `NO_COLOR` ou saída redirecionada) e `--qrcode-png` o grava em PNG, depois de conferir o CRC do copia e cola (#29, #31).
 - `inter-pj cobranca pdf <codigo> [--saida ARQUIVO|-] [--sobrescrever]`: PDF da cobrança com o boleto e o QR Code, gravado com permissão 600 (#29).
 - Biblioteca: `InterClient::cobranca`, com `Cobranca::emitir` (cobrança com boleto e Pix, conferida localmente: seu número, valor, pagador com CPF/CNPJ, UF e CEP, desconto, multa, mora, mensagem, formas de recebimento e nota fiscal, cuja chave de acesso confere número e série; o tipo de pessoa vem do documento) e `Cobranca::consultar` (situação, valores, encargos, boleto, Pix e nota fiscal) (#28).
 - Biblioteca: `Cobranca::listar` e `listar_todas` (período por vencimento, emissão ou pagamento, situação, pagador, seu número, tipo e ordenação, com páginas de até 1.000), `sumario` (quantidade e valor por situação), `pdf`, `cancelar` (com motivo), `editar` (vencimento e valor) com `consultar_edicao`, e `pagar_no_sandbox`, recusado fora do sandbox sem nenhuma requisição (#29, #30, #32).
+
+### Alterado
+
+- Os códigos de saída 5 e 8 valem também para `cobranca emitir --aguardar` (cobrança não emitida; tempo esgotado).
 
 ## [0.4.0] - 2026-09-23
 

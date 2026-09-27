@@ -1,6 +1,7 @@
 //! `inter-pj cobranca ...`: charges (boleto with Pix) of the Cobrança API.
 
 mod consultar;
+mod emitir;
 mod listar;
 
 use std::fmt::Write as _;
@@ -14,11 +15,14 @@ use rust_decimal::Decimal;
 
 use super::Context;
 use crate::cli::CobrancaCommand;
+use crate::confirmacao::Stdio;
 use crate::error::CliError;
 use crate::output::{self, data_br};
 
 pub(super) async fn run(context: &Context, command: CobrancaCommand) -> Result<(), CliError> {
     match command {
+        CobrancaCommand::Emitir(args) => emitir::emitir(context, &args, &mut Stdio).await,
+        CobrancaCommand::Modelo(_) => emitir::modelo(),
         CobrancaCommand::Listar(args) => listar::listar(context, &args).await,
         CobrancaCommand::Sumario(args) => listar::sumario(context, &args).await,
         CobrancaCommand::Consultar(args) => consultar::consultar(context, &args).await,
@@ -178,14 +182,22 @@ fn boleto_e_pix(detalhe: &CobrancaDetalhada) -> String {
         if let Some(numero) = &boleto.nosso_numero {
             linhas.push(("Nosso número", numero.clone()));
         }
-        let linha = boleto
+        let codigo = boleto
             .linha_digitavel
             .as_deref()
-            .or(boleto.codigo_barras.as_deref());
-        if let Some(linha) = linha {
-            let formatada = CodigoBarras::parse(linha)
-                .map_or_else(|_| linha.to_owned(), |codigo| codigo.linha_formatada());
-            linhas.push(("Linha digitável", formatada));
+            .or(boleto.codigo_barras.as_deref())
+            .and_then(|texto| CodigoBarras::parse(texto).ok());
+        if let Some(codigo) = codigo {
+            linhas.push(("Linha digitável", codigo.linha_formatada()));
+            linhas.push(("Código de barras", codigo.codigo_barras().to_owned()));
+        } else {
+            // Not a valid code: as the API sent it.
+            if let Some(linha) = &boleto.linha_digitavel {
+                linhas.push(("Linha digitável", linha.clone()));
+            }
+            if let Some(barras) = &boleto.codigo_barras {
+                linhas.push(("Código de barras", barras.clone()));
+            }
         }
         let _ = write!(texto, "\n\n{}", secao("Boleto", &linhas));
     }
@@ -263,14 +275,23 @@ mod tests {
   Código       0b7e4c1a-5d3f-4a2b-9c8d-7e6f5a4b3c2d
 
 Boleto
-  Nosso número     12345678
-  Linha digitável  {}
+  Nosso número      12345678
+  Linha digitável   {}
+  Código de barras  07791160500000150000001112345678001234567890
 
 Pix
   Copia e cola  {COPIA_E_COLA}
   txid          COBRANCAEXEMPLO00000000001",
                 CodigoBarras::parse(LINHA).unwrap().linha_formatada()
             )
+        );
+        // What is not a valid code is shown as the API sent it.
+        let texto = render_cobranca(&detalhe(json!({
+            "boleto": {"linhaDigitavel": "123", "codigoBarras": "456"}
+        })));
+        assert!(
+            texto.ends_with("Boleto\n  Linha digitável   123\n  Código de barras  456"),
+            "{texto}"
         );
     }
 

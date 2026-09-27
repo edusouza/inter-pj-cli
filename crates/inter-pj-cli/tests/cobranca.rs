@@ -8,9 +8,12 @@ use std::fs;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
+use chrono::{Days, Local};
 use common::{TestEnv, stderr_of, stdout_of};
 use serde_json::{Value, json};
-use wiremock::matchers::{any, method, path, query_param, query_param_is_missing};
+use wiremock::matchers::{
+    any, body_json, body_partial_json, method, path, query_param, query_param_is_missing,
+};
 use wiremock::{Mock, ResponseTemplate};
 
 const CODIGO: &str = "0b7e4c1a-5d3f-4a2b-9c8d-7e6f5a4b3c2d";
@@ -76,7 +79,8 @@ async fn consulta_uma_cobranca() {
     for linha in [
         "Cobrança NF-123\n  Situação    a receber\n  Valor       R$ 150,00\n  Vencimento  20/10/2026",
         "Pagador     Cliente Exemplo Ltda (12.345.678/0001-95)",
-        "Linha digitável  07790.00116 12345.678002 12345.678903 1 16050000015000",
+        "Linha digitável   07790.00116 12345.678002 12345.678903 1 16050000015000",
+        "Código de barras  07791160500000150000001112345678001234567890",
         &format!("Copia e cola  {COPIA_E_COLA}"),
     ] {
         assert!(texto.contains(linha), "{linha}\n{texto}");
@@ -484,4 +488,321 @@ async fn filtros_invalidos_nao_chamam_a_api() {
     ] {
         env.cmd().args(args).assert().code(2);
     }
+}
+
+// --- emitir -------------------------------------------------------------------------
+
+fn daqui_a(dias: u64) -> String {
+    Local::now()
+        .date_naive()
+        .checked_add_days(Days::new(dias))
+        .unwrap()
+        .format("%Y-%m-%d")
+        .to_string()
+}
+
+/// A charge given in options, due in 30 days.
+fn opcoes(vencimento: &str) -> Vec<String> {
+    [
+        "cobranca",
+        "emitir",
+        "--seu-numero",
+        "NF-123",
+        "--valor",
+        "150,00",
+        "--vencimento",
+        vencimento,
+        "--pagador-documento",
+        "12.345.678/0001-95",
+        "--pagador-nome",
+        "Cliente Exemplo Ltda",
+        "--pagador-endereco",
+        "Avenida Brasil",
+        "--pagador-numero",
+        "1200",
+        "--pagador-cidade",
+        "Belo Horizonte",
+        "--pagador-uf",
+        "MG",
+        "--pagador-cep",
+        "30110-000",
+        "--pagador-email",
+        "financeiro@exemplo.com.br",
+        "--multa",
+        "2%",
+        "--juros",
+        "1%",
+        "--dias-agenda",
+        "30",
+        "--mensagem",
+        "Referente à NF 123",
+    ]
+    .map(str::to_owned)
+    .to_vec()
+}
+
+/// The body the options above become, as the API documents it.
+fn corpo(vencimento: &str) -> Value {
+    json!({
+        "seuNumero": "NF-123",
+        "valorNominal": 150,
+        "dataVencimento": vencimento,
+        "numDiasAgenda": 30,
+        "pagador": {
+            "cpfCnpj": "12345678000195",
+            "tipoPessoa": "JURIDICA",
+            "nome": "Cliente Exemplo Ltda",
+            "endereco": "Avenida Brasil",
+            "numero": "1200",
+            "cidade": "Belo Horizonte",
+            "uf": "MG",
+            "cep": "30110000",
+            "email": "financeiro@exemplo.com.br"
+        },
+        "multa": {"codigo": "PERCENTUAL", "taxa": 2},
+        "mora": {"codigo": "TAXAMENSAL", "taxa": 1},
+        "mensagem": {"linha1": "Referente à NF 123"}
+    })
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn emite_pelas_opcoes_e_mostra_como_acompanhar() {
+    let env = env().await;
+    let vencimento = daqui_a(30);
+    env.mount_token("boleto-cobranca.write", Some(1)).await;
+    Mock::given(method("POST"))
+        .and(path("/cobranca/v3/cobrancas"))
+        .and(body_json(corpo(&vencimento)))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"codigoSolicitacao": CODIGO})),
+        )
+        .expect(1)
+        .mount(&env.server)
+        .await;
+
+    let assert = env
+        .cmd()
+        .args(opcoes(&vencimento))
+        .arg("--sim")
+        .assert()
+        .success();
+    assert_eq!(
+        stdout_of(&assert),
+        format!(
+            "Cobrança solicitada: a emissão termina em instantes.\nCódigo  {CODIGO}\n\nAcompanhe com: inter-pj cobranca consultar {CODIGO}\n"
+        )
+    );
+    let stderr = stderr_of(&assert);
+    for linha in [
+        "Cobrança a emitir",
+        "sandbox (dados fictícios)",
+        "R$ 150,00 (cento e cinquenta reais)",
+        "Cliente Exemplo Ltda (12.345.678/0001-95)",
+        "Avenida Brasil, 1200 - Belo Horizonte/MG - CEP 30110-000",
+        "1% ao mês",
+        "30 dias após o vencimento, se não for paga",
+        "boleto e Pix (se a conta tiver chave Pix)",
+    ] {
+        assert!(stderr.contains(linha), "{linha}\n{stderr}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn emite_o_modelo_e_aguarda_o_boleto_e_o_pix() {
+    let env = env().await;
+    let modelo = stdout_of(&env.cmd().args(["cobranca", "modelo"]).assert().success());
+    let json: Value = serde_json::from_str(&modelo).unwrap();
+    assert_eq!(json["dataVencimento"], daqui_a(30).as_str());
+    let arquivo = env.path("cobranca.json");
+    fs::write(&arquivo, &modelo).unwrap();
+
+    // One token for both: the charge is issued, then queried.
+    env.mount_token("boleto-cobranca.write boleto-cobranca.read", None)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/cobranca/v3/cobrancas"))
+        .and(body_partial_json(json!({
+            "seuNumero": "NF-123",
+            "dataVencimento": daqui_a(30),
+            "pagador": {"cpfCnpj": "12345678000195", "tipoPessoa": "JURIDICA", "cep": "30110000"},
+            "mensagem": {"linha1": "Referente à NF 123", "linha2": "Obrigado pela preferência"},
+            "formasRecebimento": ["BOLETO", "PIX"]
+        })))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"codigoSolicitacao": CODIGO})),
+        )
+        .expect(1)
+        .mount(&env.server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/cobranca/v3/cobrancas/{CODIGO}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(cobranca(true)))
+        .expect(1)
+        .mount(&env.server)
+        .await;
+
+    let png = env.path("pix.png");
+    let assert = env
+        .cmd()
+        .args(["cobranca", "emitir", "--arquivo"])
+        .arg(&arquivo)
+        .args(["--sim", "--aguardar", "--qrcode-png"])
+        .arg(&png)
+        .assert()
+        .success();
+    let stdout = stdout_of(&assert);
+    assert!(stdout.starts_with("Cobrança NF-123"), "{stdout}");
+    assert!(
+        stdout.contains(&format!("Copia e cola  {COPIA_E_COLA}")),
+        "{stdout}"
+    );
+    assert!(
+        stderr_of(&assert).contains("QR Code salvo em"),
+        "{}",
+        stderr_of(&assert)
+    );
+    assert!(fs::read(&png).unwrap().starts_with(b"\x89PNG\r\n\x1a\n"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn simulacao_da_emissao_nao_envia_nada() {
+    let env = env().await;
+    nothing_is_sent(&env).await;
+    let vencimento = daqui_a(30);
+
+    let assert = env
+        .cmd()
+        .args(opcoes(&vencimento))
+        .arg("--simular")
+        .assert()
+        .success();
+    let stdout = stdout_of(&assert);
+    assert!(
+        stdout.starts_with(&format!(
+            "Simulação: nada foi enviado.\n\nPOST {}/cobranca/v3/cobrancas\n",
+            env.server.uri()
+        )),
+        "{stdout}"
+    );
+
+    let assert = env
+        .cmd()
+        .args(opcoes(&vencimento))
+        .args(["--simular", "--json"])
+        .assert()
+        .success();
+    let json: Value = serde_json::from_str(&stdout_of(&assert)).unwrap();
+    assert_eq!(json["corpo"], corpo(&vencimento));
+
+    // The template, from the standard input.
+    let modelo = stdout_of(&env.cmd().args(["cobranca", "modelo"]).assert().success());
+    let assert = env
+        .cmd()
+        .args([
+            "cobranca",
+            "emitir",
+            "--arquivo",
+            "-",
+            "--simular",
+            "--json",
+        ])
+        .write_stdin(modelo)
+        .assert()
+        .success();
+    let json: Value = serde_json::from_str(&stdout_of(&assert)).unwrap();
+    assert_eq!(json["corpo"]["valorNominal"], 150);
+    assert_eq!(json["corpo"]["desconto"]["quantidadeDias"], 5);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn emissao_invalida_ou_sem_confirmacao_nao_chama_a_api() {
+    let env = env().await;
+    nothing_is_sent(&env).await;
+    let vencimento = daqui_a(30);
+
+    // No terminal and no --sim: the summary, then the refusal.
+    let assert = env
+        .cmd()
+        .args(opcoes(&vencimento))
+        .write_stdin("s\n")
+        .assert()
+        .code(2);
+    let stderr = stderr_of(&assert);
+    assert!(stderr.contains("Cobrança a emitir"), "{stderr}");
+    assert!(stderr.contains("use --sim"), "{stderr}");
+
+    let mut passado = opcoes("2020-01-10");
+    passado.push("--sim".to_owned());
+    let assert = env.cmd().args(passado).assert().code(2);
+    assert!(
+        stderr_of(&assert).contains("o vencimento (10/01/2020) já passou"),
+        "{}",
+        stderr_of(&assert)
+    );
+
+    let mut barata = opcoes(&vencimento);
+    let i = barata.iter().position(|opcao| opcao == "--valor").unwrap();
+    barata[i + 1] = "2,00".to_owned();
+    let assert = env.cmd().args(barata).arg("--sim").assert().code(2);
+    assert!(
+        stderr_of(&assert).contains("--valor: "),
+        "{}",
+        stderr_of(&assert)
+    );
+
+    let arquivo = env.path("cobranca.json");
+    let modelo = stdout_of(&env.cmd().args(["cobranca", "modelo"]).assert().success());
+    fs::write(&arquivo, modelo.replace("30110-000", "3011")).unwrap();
+    let assert = env
+        .cmd()
+        .args(["cobranca", "emitir", "--sim", "--arquivo"])
+        .arg(&arquivo)
+        .assert()
+        .code(2);
+    assert!(
+        stderr_of(&assert).contains("cobranca.json, campo \"pagador.cep\""),
+        "{}",
+        stderr_of(&assert)
+    );
+
+    // clap: what only makes sense after waiting, and waiting in a simulation.
+    for extra in [&["--sim", "--qrcode"][..], &["--simular", "--aguardar"][..]] {
+        env.cmd()
+            .args(opcoes(&vencimento))
+            .args(extra)
+            .assert()
+            .code(2);
+    }
+}
+
+/// The API refuses a repeated charge for 30 minutes, but a charge that may
+/// have been issued is not repeated: the error says how to find it first.
+#[tokio::test(flavor = "multi_thread")]
+async fn resultado_incerto_orienta_a_conferir_antes_de_emitir_de_novo() {
+    let env = env().await;
+    env.mount_token("boleto-cobranca.write", Some(1)).await;
+    Mock::given(method("POST"))
+        .and(path("/cobranca/v3/cobrancas"))
+        .respond_with(ResponseTemplate::new(503))
+        .expect(1)
+        .mount(&env.server)
+        .await;
+
+    let assert = env
+        .cmd()
+        .args(opcoes(&daqui_a(30)))
+        .arg("--sim")
+        .assert()
+        .code(6);
+    let stderr = stderr_of(&assert);
+    assert!(
+        stderr.contains("dica: a cobrança pode ter sido emitida"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains(
+            "dica: confira antes de tentar de novo: inter-pj cobranca listar --filtrar-por emissao --seu-numero NF-123"
+        ),
+        "{stderr}"
+    );
 }
