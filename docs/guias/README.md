@@ -5,7 +5,7 @@ Como usar a `inter-pj` no dia a dia, um assunto por guia, com exemplos de termin
 | Guia | O que tem |
 | --- | --- |
 | [Saldo e extrato](saldo-e-extrato.md) | o saldo, o extrato de um período, o extrato completo com os detalhes de cada transação, planilhas e PDF |
-| [Pix](pix.md) | enviar um Pix por chave, copia e cola ou dados bancários, agendar, os trilhos de segurança (resumo, confirmação, limite, idempotência) e acompanhar o Pix enviado |
+| [Pix](pix.md) | enviar um Pix por chave, copia e cola ou dados bancários, agendar, os trilhos de segurança (resumo, confirmação, limite, idempotência), acompanhar o Pix enviado, os Pix recebidos e as devoluções |
 
 A instalação e a configuração estão no [README](../../README.md#instalação).
 

@@ -1,6 +1,6 @@
 # Pix
 
-Enviar um Pix tira dinheiro da conta. A CLI confere antes tudo o que pode, mostra um resumo e só envia depois de uma confirmação; depois, o Pix é acompanhado pelo código da solicitação. Enviar precisa do escopo `pagamento-pix.write`, e consultar, do `pagamento-pix.read`.
+Enviar um Pix tira dinheiro da conta. A CLI confere antes tudo o que pode, mostra um resumo e só envia depois de uma confirmação; depois, o Pix é acompanhado pelo código da solicitação. Enviar precisa do escopo `pagamento-pix.write`, e consultar, do `pagamento-pix.read`. Os Pix que a conta recebeu, e as devoluções deles, estão no fim do guia.
 
 Os exemplos são da Empresa Exemplo Ltda, uma empresa fictícia, no perfil de produção. Nessa conta, um Pix acima de R$ 10.000,00 espera a aprovação de outra pessoa no Internet Banking, e o perfil tem um limite de R$ 20.000,00 por operação. A [introdução dos guias](README.md) explica como os exemplos são conferidos.
 
@@ -13,6 +13,8 @@ Os exemplos são da Empresa Exemplo Ltda, uma empresa fictícia, no perfil de pr
 - [Os limites](#os-limites)
 - [Quando a resposta se perde](#quando-a-resposta-se-perde)
 - [Acompanhar um Pix enviado](#acompanhar-um-pix-enviado)
+- [Pix recebidos](#pix-recebidos)
+- [Devolver um Pix recebido](#devolver-um-pix-recebido)
 
 ## Enviar por chave
 
@@ -333,3 +335,142 @@ Histórico
   24/09/2026 10:30:01  enviado ao banco do recebedor
   24/09/2026 10:30:02  pago
 ```
+
+## Pix recebidos
+
+Os Pix que a conta recebeu, com ou sem cobrança, ficam na API Pix, com as suas devoluções. Consultá-los precisa do escopo `pix.read`:
+
+```console
+$ inter-pj pix recebidos listar --inicio 2026-08-01 --fim 2026-09-30
+Pix recebidos de 01/08/2026 00:00 a 30/09/2026 23:59
+
+Horário                    Valor  Devolvido  endToEndId                        txid
+03/08/2026 14:05:12  R$ 1.500,00             E12345678202608031705a1B2c3D4e5F
+20/08/2026 11:31:26  R$ 2.350,00             E12345678202608201431Zx9cV8bN7mA
+28/08/2026 19:02:44    R$ 740,00             E12345678202608282202Lk5jH3gF1dS
+02/09/2026 09:15:38  R$ 1.500,00             E12345678202609021215Po0iU9yT8rE  pedido1053empresaexemplo2026
+
+4 Pix · R$ 6.090,00
+```
+
+Os filtros são `--txid` (os Pix de uma cobrança), `--com-cobranca` ou `--sem-cobranca`, `--com-devolucao` ou `--sem-devolucao` e `--documento`, o CPF ou o CNPJ de quem pagou:
+
+```console
+$ inter-pj pix recebidos listar --inicio 2026-08-01 --fim 2026-09-30 --documento 11.222.333/0001-81
+Pix recebidos de 01/08/2026 00:00 a 30/09/2026 23:59 (pagador 11.222.333/0001-81)
+
+Horário                    Valor  Devolvido  endToEndId                        txid
+03/08/2026 14:05:12  R$ 1.500,00             E12345678202608031705a1B2c3D4e5F
+20/08/2026 11:31:26  R$ 2.350,00             E12345678202608201431Zx9cV8bN7mA
+02/09/2026 09:15:38  R$ 1.500,00             E12345678202609021215Po0iU9yT8rE  pedido1053empresaexemplo2026
+
+3 Pix · R$ 5.350,00
+```
+
+`--inicio` e `--fim` aceitam uma data, o dia inteiro no fuso local, ou uma data e hora com fuso (`2026-09-01T08:00:00-03:00`). Sem eles, a listagem é dos últimos 30 dias. Todas as páginas são lidas, ou só uma, com `--pagina`. A consulta de um Pix mostra também a mensagem de quem pagou:
+
+```console
+$ inter-pj pix recebidos consultar E12345678202608282202Lk5jH3gF1dS
+Pix recebido E12345678202608282202Lk5jH3gF1dS
+  Valor        R$ 740,00
+  Recebido em  28/08/2026 19:02:44
+  Chave        pix@empresa.example
+  Mensagem     Pedido 1049
+
+Para devolver: inter-pj pix devolucao solicitar E12345678202608282202Lk5jH3gF1dS --valor VALOR (ou --tudo)
+```
+
+## Devolver um Pix recebido
+
+Uma devolução tira dinheiro da conta, e os trilhos são os do envio: a CLI consulta o Pix antes, recusa sem enviar nada uma devolução maior que o que resta dele, mostra um resumo e pede a confirmação (ou `--sim`). O limite por operação do perfil vale também aqui, e `--simular` mostra a requisição, sem consultar nem enviar nada. Devolver precisa do escopo `pix.write`:
+
+```console
+$ inter-pj pix devolucao solicitar E12345678202608282202Lk5jH3gF1dS --valor 240,00 --descricao "Troca de produto" --id troca0928
+*** PRODUÇÃO: esta devolução tira dinheiro da conta real ***
+Devolução a solicitar
+  Ambiente      PRODUÇÃO (conta real)
+  Pix           E12345678202608282202Lk5jH3gF1dS
+  Recebido em   28/08/2026 19:02:44
+  Valor do Pix  R$ 740,00
+  Devolução     R$ 240,00 (duzentos e quarenta reais)
+  Descrição     Troca de produto
+  id            troca0928
+Devolver o Pix? [s/N] s
+Devolução solicitada.
+
+Devolução troca0928
+  Status         em processamento
+  Valor          R$ 240,00
+  Pix            E12345678202608282202Lk5jH3gF1dS
+  Solicitada em  24/09/2026 14:20:00
+  rtrId          D12345678202609241720h4Jk6Lm8NpQ
+
+Acompanhe com: inter-pj pix devolucao consultar E12345678202608282202Lk5jH3gF1dS troca0928 --aguardar
+```
+
+Cada devolução tem um id, de 1 a 35 letras e dígitos, gerado pela CLI ou dado com `--id`: com o mesmo id, a API não devolve de novo, e um id seu, como o do pedido, acha a devolução depois. Ela é processada depois do pedido; `pix devolucao consultar` mostra em que pé está e, com `--aguardar` (aceito também por `solicitar`), consulta a cada 6 segundos até o fim, saindo com o código 0 (devolvida), 5 (não realizada, com o motivo) ou 8 (o tempo acabou):
+
+```console
+$ inter-pj pix devolucao consultar E12345678202608282202Lk5jH3gF1dS troca0928 --aguardar
+Devolução troca0928
+  Status         devolvida
+  Valor          R$ 240,00
+  Pix            E12345678202608282202Lk5jH3gF1dS
+  Solicitada em  24/09/2026 14:20:00
+  Liquidada em   24/09/2026 14:20:03
+  rtrId          D12345678202609241720h4Jk6Lm8NpQ
+```
+
+O Pix mostra então o que foi devolvido e o que ainda pode ser:
+
+```console
+$ inter-pj pix recebidos consultar E12345678202608282202Lk5jH3gF1dS
+Pix recebido E12345678202608282202Lk5jH3gF1dS
+  Valor          R$ 740,00
+  Recebido em    28/08/2026 19:02:44
+  Devolvido      R$ 240,00
+  Pode devolver  R$ 500,00
+  Chave          pix@empresa.example
+  Mensagem       Pedido 1049
+
+Devoluções
+id         Status         Valor  Solicitada em
+troca0928  devolvida  R$ 240,00  24/09/2026 14:20:00
+
+Para devolver: inter-pj pix devolucao solicitar E12345678202608282202Lk5jH3gF1dS --valor VALOR (ou --tudo)
+
+$ inter-pj pix devolucao solicitar E12345678202608282202Lk5jH3gF1dS --valor 600,00 --sim
+erro: a devolução de R$ 600,00 passa do que resta do Pix: R$ 500,00 de R$ 740,00, R$ 240,00 já devolvidos ou em devolução
+```
+
+`--tudo` devolve exatamente o que resta:
+
+```console
+$ inter-pj pix devolucao solicitar E12345678202608282202Lk5jH3gF1dS --tudo --id troca0928b --sim --aguardar
+*** PRODUÇÃO: esta devolução tira dinheiro da conta real ***
+Devolução a solicitar
+  Ambiente      PRODUÇÃO (conta real)
+  Pix           E12345678202608282202Lk5jH3gF1dS
+  Recebido em   28/08/2026 19:02:44
+  Valor do Pix  R$ 740,00
+  Já devolvido  R$ 240,00
+  Devolução     R$ 500,00 (quinhentos reais)
+  id            troca0928b
+Devolução troca0928b
+  Status         devolvida
+  Valor          R$ 500,00
+  Pix            E12345678202608282202Lk5jH3gF1dS
+  Solicitada em  24/09/2026 14:25:00
+  Liquidada em   24/09/2026 14:25:03
+  rtrId          D12345678202609241725r2St4Uv6WxY
+
+$ inter-pj pix recebidos listar --inicio 2026-08-01 --fim 2026-09-30 --com-devolucao
+Pix recebidos de 01/08/2026 00:00 a 30/09/2026 23:59 (com devolução)
+
+Horário                  Valor  Devolvido  endToEndId                        txid
+28/08/2026 19:02:44  R$ 740,00  R$ 740,00  E12345678202608282202Lk5jH3gF1dS
+
+1 Pix · R$ 740,00 · devolvidos R$ 740,00
+```
+
+`--natureza retirada` devolve o dinheiro de um Pix Saque ou o troco de um Pix Troco; o padrão, `original`, é o do Pix comum. A descrição, de até 140 caracteres, vai para quem pagou.

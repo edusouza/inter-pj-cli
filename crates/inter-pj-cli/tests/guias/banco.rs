@@ -1,12 +1,15 @@
 //! The bank of the guides: a mock of the Inter API with the account of a
 //! fictitious company, Empresa Exemplo Ltda, one module per API: [`conta`],
-//! the balance and the statements from June to September 2026, and [`pix`],
-//! the Pix the account sends. The data tell one story: the balance follows
-//! from the statement, and a Pix sent can be queried. Every name, document,
-//! key and amount is synthetic.
+//! the balance and the statements from June to September 2026, [`pix`], the
+//! Pix the account sends, and [`recebidos`], the Pix it received and their
+//! refunds. The data tell one story: the balance follows from the
+//! statement, the Pix received are those of the statement, and what is
+//! sent or refunded can be queried. Every name, document, key and amount is
+//! synthetic.
 
 mod conta;
 mod pix;
+mod recebidos;
 
 use std::collections::HashMap;
 
@@ -31,6 +34,7 @@ impl Banco {
             .await;
         conta::montar(&servidor).await;
         pix::montar(&servidor).await;
+        recebidos::montar(&servidor).await;
         Self { servidor }
     }
 

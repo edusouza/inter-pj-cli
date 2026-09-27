@@ -159,7 +159,7 @@ fn pdf(titulo: &str) -> Vec<u8> {
 }
 
 /// The statement of the account, as the enriched statement sends it.
-fn transacoes() -> Vec<Value> {
+pub(super) fn transacoes() -> Vec<Value> {
     serde_json::from_str(include_str!("extrato.json")).unwrap()
 }
 
