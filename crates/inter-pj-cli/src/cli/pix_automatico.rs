@@ -9,10 +9,10 @@ use chrono::NaiveDate;
 use clap::{ArgGroup, Args, Subcommand, ValueEnum};
 use inter_pj::documento::Documento;
 use inter_pj::pix::Txid;
-use inter_pj::pix_automatico::{IdRec, Periodicidade, StatusRec};
+use inter_pj::pix_automatico::{IdRec, IdSolicRec, Periodicidade, StatusRec};
 use rust_decimal::Decimal;
 
-use super::pix::{PeriodoPixArgs, QrCodeArgs, parse_txid};
+use super::pix::{Momento, PeriodoPixArgs, QrCodeArgs, parse_expiracao, parse_momento, parse_txid};
 use super::{parse_data, parse_documento};
 use crate::valor::parse_valor;
 
@@ -25,6 +25,13 @@ pub(crate) enum PixAutomaticoCommand {
         subcommand_value_name = "COMANDO"
     )]
     Rec(RecCommand),
+    /// Solicitações de confirmação: o pedido ao banco do pagador para que ele aprove uma recorrência
+    #[command(
+        subcommand,
+        subcommand_help_heading = "Comandos",
+        subcommand_value_name = "COMANDO"
+    )]
+    Solicitacao(SolicitacaoCommand),
 }
 
 #[derive(Debug, Subcommand)]
@@ -308,4 +315,92 @@ pub(crate) struct RecCancelarArgs {
 
 fn parse_id_rec(value: &str) -> Result<IdRec, String> {
     IdRec::parse(value).map_err(|err| err.to_string())
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum SolicitacaoCommand {
+    /// Pede ao banco do pagador que ele aprove uma recorrência, após mostrá-la e pedir confirmação
+    Criar(SolicitacaoCriarArgs),
+    /// Mostra uma solicitação de confirmação, em que pé ela está e a recorrência
+    Consultar(SolicitacaoConsultarArgs),
+    /// Cancela uma solicitação ainda não respondida, após mostrá-la e pedir confirmação
+    Cancelar(SolicitacaoCancelarArgs),
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Solicitação")]
+pub(crate) struct SolicitacaoCriarArgs {
+    /// idRec da recorrência que o pagador vai aprovar
+    #[arg(long, value_name = "ID_REC", value_parser = parse_id_rec)]
+    pub(crate) rec: IdRec,
+
+    /// CPF ou CNPJ do titular da conta do pagador
+    #[arg(long, value_name = "CPF/CNPJ", value_parser = parse_documento, help_heading = "Conta do pagador")]
+    pub(crate) documento: Documento,
+
+    /// ISPB do banco do pagador: 8 dígitos (o do Inter é 00416968)
+    #[arg(long, value_name = "ISPB", help_heading = "Conta do pagador")]
+    pub(crate) ispb: String,
+
+    /// Agência, sem o dígito verificador
+    #[arg(long, value_name = "AGENCIA", help_heading = "Conta do pagador")]
+    pub(crate) agencia: Option<String>,
+
+    /// Conta, com o dígito verificador (que pode ser X), sem pontos nem traços
+    #[arg(long, value_name = "CONTA", help_heading = "Conta do pagador")]
+    pub(crate) conta: String,
+
+    /// Prazo para o pagador responder: 2h, 7d, uma data AAAA-MM-DD (até o fim do dia) ou data e hora com fuso [padrão: 7d]
+    #[arg(long, value_name = "PRAZO", value_parser = parse_prazo)]
+    pub(crate) expiracao: Option<Prazo>,
+
+    /// Confirma sem perguntar (para scripts)
+    #[arg(long, conflicts_with = "simular", help_heading = "Segurança")]
+    pub(crate) sim: bool,
+
+    /// Mostra a requisição que seria enviada, sem consultar nem enviar nada
+    #[arg(long, help_heading = "Segurança")]
+    pub(crate) simular: bool,
+}
+
+/// Until when the payer may answer: a time from now, or a moment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Prazo {
+    /// Seconds from now.
+    Duracao(u32),
+    /// A day (until its end, in the local time zone) or a moment.
+    Momento(Momento),
+}
+
+/// `7d` or `2026-10-01` (or a moment with offset).
+fn parse_prazo(value: &str) -> Result<Prazo, String> {
+    if value.contains('-') {
+        parse_momento(value).map(Prazo::Momento)
+    } else {
+        parse_expiracao(value).map(Prazo::Duracao)
+    }
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct SolicitacaoConsultarArgs {
+    /// idSolicRec da solicitação, mostrado por `pix-automatico solicitacao criar`
+    #[arg(value_name = "ID_SOLIC_REC", value_parser = parse_id_solic_rec)]
+    pub(crate) id: IdSolicRec,
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct SolicitacaoCancelarArgs {
+    /// idSolicRec da solicitação
+    #[arg(value_name = "ID_SOLIC_REC", value_parser = parse_id_solic_rec)]
+    pub(crate) id: IdSolicRec,
+
+    /// Confirma sem perguntar (para scripts)
+    #[arg(long, help_heading = "Segurança")]
+    pub(crate) sim: bool,
+}
+
+fn parse_id_solic_rec(value: &str) -> Result<IdSolicRec, String> {
+    IdSolicRec::parse(value).map_err(|err| err.to_string())
 }

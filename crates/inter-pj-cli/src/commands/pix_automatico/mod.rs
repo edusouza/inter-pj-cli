@@ -2,6 +2,7 @@
 //! their recurring charges.
 
 mod rec;
+mod solicitacao;
 
 use inter_pj::pix_automatico::{
     AtivacaoRec, CalendarioRecGerado, Periodicidade, PoliticaRetentativa, StatusRec, TipoJornada,
@@ -16,6 +17,7 @@ use crate::output::{self, data_br};
 pub(super) async fn run(context: &Context, command: PixAutomaticoCommand) -> Result<(), CliError> {
     match command {
         PixAutomaticoCommand::Rec(command) => rec::run(context, command).await,
+        PixAutomaticoCommand::Solicitacao(command) => solicitacao::run(context, command).await,
     }
 }
 

@@ -1046,7 +1046,7 @@ fn parse_info(value: &str) -> Result<InfoAdicional, String> {
 }
 
 /// `3600s`, `30m`, `2h` or `7d` (a number alone is seconds).
-fn parse_expiracao(value: &str) -> Result<u32, String> {
+pub(super) fn parse_expiracao(value: &str) -> Result<u32, String> {
     let texto = value.trim();
     let (numero, unidade) = texto
         .find(|c: char| !c.is_ascii_digit())
@@ -1064,7 +1064,7 @@ fn parse_expiracao(value: &str) -> Result<u32, String> {
 }
 
 /// `2026-09-01` or `2026-09-01T08:00:00-03:00`.
-fn parse_momento(value: &str) -> Result<Momento, String> {
+pub(super) fn parse_momento(value: &str) -> Result<Momento, String> {
     let texto = value.trim();
     if let Ok(instante) = DateTime::parse_from_rfc3339(texto) {
         return Ok(Momento::Instante(instante));

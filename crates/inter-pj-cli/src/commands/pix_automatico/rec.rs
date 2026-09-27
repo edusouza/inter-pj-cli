@@ -13,6 +13,7 @@ use inter_pj::pix_automatico::{
 use inter_pj::{Environment, Error as InterError, endpoint};
 use serde_json::json;
 
+use super::solicitacao::descrever_status_solicitacao;
 use super::{
     descrever_ativacao, descrever_calendario, descrever_politica, descrever_status,
     descrever_valor, encerrada,
@@ -341,6 +342,28 @@ where
     }
     let titulo = format!("Recorrência {}", rec.id_rec.as_deref().unwrap_or_default());
     let mut texto = secao(titulo.trim(), &linhas);
+    for secao in [historico(rec, fuso), solicitacoes(rec, fuso)]
+        .into_iter()
+        .flatten()
+    {
+        let _ = write!(texto, "\n\n{secao}");
+    }
+    if let Some(copia_e_cola) = rec
+        .dados_qr
+        .as_ref()
+        .and_then(|qr| qr.pix_copia_e_cola.as_deref())
+        .filter(|texto| !texto.is_empty())
+    {
+        let _ = write!(texto, "\n\nCopia e cola  {copia_e_cola}");
+    }
+    texto
+}
+
+/// The changes of status of a recurrence, with their times in `fuso`.
+fn historico<Tz: TimeZone>(rec: &Rec, fuso: &Tz) -> Option<String>
+where
+    Tz::Offset: std::fmt::Display,
+{
     let historico: Vec<(String, String)> = rec
         .atualizacao
         .iter()
@@ -359,22 +382,41 @@ where
             )
         })
         .collect();
-    if !historico.is_empty() {
-        let linhas: Vec<(&str, String)> = historico
-            .iter()
-            .map(|(quando, oque)| (quando.as_str(), oque.clone()))
-            .collect();
-        let _ = write!(texto, "\n\n{}", secao("Histórico", &linhas));
-    }
-    if let Some(copia_e_cola) = rec
-        .dados_qr
-        .as_ref()
-        .and_then(|qr| qr.pix_copia_e_cola.as_deref())
-        .filter(|texto| !texto.is_empty())
-    {
-        let _ = write!(texto, "\n\nCopia e cola  {copia_e_cola}");
-    }
-    texto
+    let linhas: Vec<(&str, String)> = historico
+        .iter()
+        .map(|(quando, oque)| (quando.as_str(), oque.clone()))
+        .collect();
+    (!linhas.is_empty()).then(|| secao("Histórico", &linhas))
+}
+
+/// The confirmation requests of a recurrence, with their status.
+fn solicitacoes<Tz: TimeZone>(rec: &Rec, fuso: &Tz) -> Option<String>
+where
+    Tz::Offset: std::fmt::Display,
+{
+    let linhas: Vec<(&str, String)> = rec
+        .solicitacao
+        .iter()
+        .map(|solicitacao| {
+            let mut situacao = solicitacao
+                .status
+                .as_ref()
+                .map(|status| descrever_status_solicitacao(status).to_owned())
+                .unwrap_or_default();
+            if let Some(expira) = solicitacao
+                .calendario
+                .as_ref()
+                .and_then(|calendario| calendario.data_expiracao_solicitacao.as_deref())
+            {
+                let _ = write!(situacao, "; expira em {}", horario_em(expira, fuso));
+            }
+            (
+                solicitacao.id_solic_rec.as_deref().unwrap_or_default(),
+                situacao,
+            )
+        })
+        .collect();
+    (!linhas.is_empty()).then(|| secao("Solicitações de confirmação", &linhas))
 }
 
 /// `Empresa Exemplo Ltda (12.345.678/0001-95), convênio X`.
@@ -901,6 +943,7 @@ mod tests {
             "loc": {"id": 108, "location": "pix.example.com/qr/v2/rec/2353c790eefb11eaadc10242ac120002"},
             "atualizacao": [{"status": "CRIADA", "data": "2026-09-24T13:00:00.000Z"}, {"status": "APROVADA", "data": "2026-09-25T12:30:00.000Z"}],
             "ativacao": {"tipoJornada": "JORNADA_2"},
+            "solicitacao": [{"idSolicRec": "SC1234567820260924abcdefghijk", "status": "ACEITA", "calendario": {"dataExpiracaoSolicitacao": "2026-10-01T13:00:00.000Z"}}],
             "dadosQR": {"jornada": "JORNADA_2", "pixCopiaECola": "00020126180014br.gov.bcb.pix"}
         }))
         .unwrap()
@@ -1030,6 +1073,9 @@ Recorrência {ID}
 Histórico
   24/09/2026 10:00:00  criada
   25/09/2026 09:30:00  aprovada
+
+Solicitações de confirmação
+  SC1234567820260924abcdefghijk  aceita pelo pagador; expira em 01/10/2026 10:00:00
 
 Copia e cola  00020126180014br.gov.bcb.pix"
             )
