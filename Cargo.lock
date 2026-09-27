@@ -882,7 +882,7 @@ dependencies = [
 
 [[package]]
 name = "inter-pj"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "aws-lc-rs",
  "base64 0.23.1",
@@ -907,7 +907,7 @@ dependencies = [
 
 [[package]]
 name = "inter-pj-cli"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "assert_cmd",
  "base64 0.23.1",
