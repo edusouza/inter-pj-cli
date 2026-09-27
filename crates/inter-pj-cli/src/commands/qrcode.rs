@@ -81,17 +81,17 @@ impl OpcoesQr {
         if self.qrcode {
             match qr_code() {
                 Ok(qr) => output::print_raw(&format!("\n{}", qr.terminal(qr::cores())))?,
-                Err(err) => eprintln!("aviso: {err}"),
+                Err(err) => output::eprint_linha(&format!("aviso: {err}")),
             }
         }
         if let Some(png) = &self.png {
             let imagem = qr_code()?.png();
             png.gravar(&imagem)?;
-            eprintln!(
+            output::eprint_linha(&format!(
                 "QR Code salvo em {} ({})",
                 png.caminho().display(),
                 tamanho(imagem.len())
-            );
+            ));
         }
         Ok(())
     }

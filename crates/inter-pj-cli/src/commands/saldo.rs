@@ -15,7 +15,7 @@ pub(super) async fn run(context: &Context, args: &SaldoArgs) -> Result<(), CliEr
     let saldo = client.banking().saldo(args.data).await?;
     match context.formato() {
         Formato::Json => output::print_json(&saldo),
-        Formato::Csv => output::print_raw(&csv(&saldo, args.data).csv(context.separador())),
+        Formato::Csv => output::print_csv(&csv(&saldo, args.data), context.separador()),
         Formato::Texto => {
             context.warn_if_sandbox(&settings);
             output::print(&render(&saldo, args.data))

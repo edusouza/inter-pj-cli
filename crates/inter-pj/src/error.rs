@@ -2,7 +2,7 @@ use std::error::Error as StdError;
 use std::fmt;
 
 use crate::identity::IdentityError;
-use crate::problem::Problem;
+use crate::problem::{Problem, uma_linha};
 
 /// Result type used throughout the crate.
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -137,10 +137,10 @@ impl fmt::Display for ApiError {
         if let Some(problem) = &self.problem {
             write!(f, ": {problem}")?;
             if let Some(id) = &problem.correlation_id {
-                write!(f, "\n  correlationId: {id}")?;
+                write!(f, "\n  correlationId: {}", uma_linha(id))?;
             }
         } else if let Some(excerpt) = &self.body_excerpt {
-            write!(f, ": {excerpt}")?;
+            write!(f, ": {}", uma_linha(excerpt))?;
         }
         Ok(())
     }
@@ -235,6 +235,24 @@ mod tests {
         assert_eq!(
             err.to_string(),
             "GET /pix/v2/cob/abc respondeu 404 (não encontrado): Não encontrado — Entidade não encontrada.\n  correlationId: c-1"
+        );
+    }
+
+    #[test]
+    fn texts_of_the_api_stay_on_their_lines() {
+        let body = r#"{"title":"Erro\ndica: falsa","detail":"x\r\nerro: y","correlationId":"c\n1",
+            "violacoes":[{"razao":"inválido\n  • valor: R$ 1","propriedade":"valor\n","valor":"1\u2028"}]}"#;
+        let err = ApiError::new(400, "POST /banking/v2/pix".into(), body.as_bytes());
+        let texto = err.to_string();
+        assert_eq!(texto.lines().count(), 3, "{texto}");
+        assert!(
+            texto.lines().skip(1).all(|linha| linha.starts_with("  ")),
+            "{texto}"
+        );
+        assert!(texto.contains("Erro dica: falsa — x  erro: y"), "{texto}");
+        assert!(
+            texto.contains("\n  • valor : inválido   • valor: R$ 1 (valor: 1 )"),
+            "{texto}"
         );
     }
 

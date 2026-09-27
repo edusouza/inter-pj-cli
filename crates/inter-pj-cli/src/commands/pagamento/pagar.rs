@@ -31,7 +31,7 @@ pub(super) async fn run(
         Some(context.client(&settings)?)
     };
     let ambiente = settings.ambiente.as_ref().map(|setting| setting.value);
-    eprintln!("{}", resumo(&pagamento, hoje, ambiente));
+    output::eprint(&resumo(&pagamento, hoje, ambiente));
 
     let Some(client) = client else {
         return simulacao::mostrar(

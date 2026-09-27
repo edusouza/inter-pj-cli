@@ -45,7 +45,7 @@ pub(super) async fn listar(context: &Context, args: &CobrancaListarArgs) -> Resu
     };
     match context.formato() {
         Formato::Json => output::print_json(&json!({ "cobrancas": cobrancas })),
-        Formato::Csv => output::print_raw(&csv(&cobrancas).csv(context.separador())),
+        Formato::Csv => output::print_csv(&csv(&cobrancas), context.separador()),
         Formato::Texto => {
             context.warn_if_sandbox(&settings);
             let mut texto = format!("{}\n\n", titulo(&filtro));
@@ -70,7 +70,7 @@ pub(super) async fn sumario(context: &Context, args: &CobrancaSumarioArgs) -> Re
     let itens = client.cobranca().sumario(&filtro).await?;
     match context.formato() {
         Formato::Json => output::print_json(&json!({ "sumario": itens })),
-        Formato::Csv => output::print_raw(&csv_sumario(&itens).csv(context.separador())),
+        Formato::Csv => output::print_csv(&csv_sumario(&itens), context.separador()),
         Formato::Texto => {
             context.warn_if_sandbox(&settings);
             output::print(&render_sumario(&filtro, &itens))

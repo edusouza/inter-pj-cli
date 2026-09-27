@@ -42,7 +42,7 @@ async fn listar(context: &Context, args: &BoletoListarArgs) -> Result<(), CliErr
     let pagamentos = client.banking().pagamentos(&filtro).await?;
     match context.formato() {
         Formato::Json => output::print_json(&json!({ "pagamentos": pagamentos })),
-        Formato::Csv => output::print_raw(&csv(&pagamentos).csv(context.separador())),
+        Formato::Csv => output::print_csv(&csv(&pagamentos), context.separador()),
         Formato::Texto => {
             context.warn_if_sandbox(&settings);
             output::print(&render(&filtro, &pagamentos))
@@ -198,18 +198,15 @@ async fn cancelar(
                 .is_some_and(|c| c.eq_ignore_ascii_case(codigo))
         }),
         Err(err) => {
-            eprintln!(
+            output::eprint(&format!(
                 "aviso: não foi possível consultar o pagamento antes de cancelar: {}",
                 output::limpo(&err.to_string())
-            );
+            ));
             None
         }
     };
     let ambiente = settings.ambiente.as_ref().map(|setting| setting.value);
-    eprintln!(
-        "{}",
-        resumo_cancelamento(codigo, pagamento.as_ref(), ambiente)
-    );
+    output::eprint(&resumo_cancelamento(codigo, pagamento.as_ref(), ambiente));
     confirmar(terminal, args.sim, "Cancelar o agendamento?")?;
 
     client.banking().cancelar_pagamento(codigo).await?;

@@ -64,7 +64,7 @@ async fn emitir_com(
         Some(context.client(&settings)?)
     };
     let ambiente = settings.ambiente.as_ref().map(|setting| setting.value);
-    eprintln!("{}", resumo(&cobranca, hoje, ambiente));
+    output::eprint(&resumo(&cobranca, hoje, ambiente));
 
     let Some(client) = client else {
         return simulacao::mostrar(

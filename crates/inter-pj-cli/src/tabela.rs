@@ -1,6 +1,7 @@
 //! Tabular output shared by the listing commands: aligned text for people
 //! and CSV (RFC 4180) for spreadsheets and scripts.
 
+use std::borrow::Cow;
 use std::fmt::Write as _;
 
 use chrono::NaiveDate;
@@ -123,10 +124,17 @@ impl Celula {
         }
     }
 
-    fn para_csv(&self, separador: Separador) -> String {
+    /// The field in the CSV; for a terminal, the text cleaned as in the
+    /// text output.
+    fn para_csv(&self, separador: Separador, terminal: bool) -> String {
         match self {
             Self::Texto(text) | Self::Situacao(text, _) => {
-                escape_csv(&neutralize_formula(text), separador.campo())
+                let text = if terminal {
+                    limpo(text)
+                } else {
+                    Cow::Borrowed(text.as_str())
+                };
+                escape_csv(&neutralize_formula(&text), separador.campo())
             }
             Self::Dinheiro(value) => match separador {
                 Separador::Virgula => value.to_string(),
@@ -246,11 +254,22 @@ impl Tabela {
     }
 
     /// RFC 4180: header line, CRLF line endings, fields quoted when needed.
-    /// With `;`, a UTF-8 BOM lets Excel detect the encoding.
+    /// With `;`, a UTF-8 BOM lets Excel detect the encoding. The text goes
+    /// as sent, for the spreadsheets and the scripts.
     pub(crate) fn csv(&self, separador: Separador) -> String {
+        self.renderizar_csv(separador, false)
+    }
+
+    /// [`Tabela::csv`] to be read in a terminal: the text cleaned as in the
+    /// text output (one line per row, no escape sequence), without the BOM.
+    pub(crate) fn csv_para_terminal(&self, separador: Separador) -> String {
+        self.renderizar_csv(separador, true)
+    }
+
+    fn renderizar_csv(&self, separador: Separador, terminal: bool) -> String {
         let sep = separador.campo();
         let mut out = String::new();
-        if separador == Separador::PontoEVirgula {
+        if separador == Separador::PontoEVirgula && !terminal {
             out.push('\u{feff}');
         }
         let cabecalho: Vec<String> = self
@@ -260,7 +279,10 @@ impl Tabela {
             .collect();
         let _ = write!(out, "{}\r\n", cabecalho.join(&sep.to_string()));
         for linha in &self.linhas {
-            let campos: Vec<String> = linha.iter().map(|c| c.para_csv(separador)).collect();
+            let campos: Vec<String> = linha
+                .iter()
+                .map(|c| c.para_csv(separador, terminal))
+                .collect();
             let _ = write!(out, "{}\r\n", campos.join(&sep.to_string()));
         }
         out
@@ -292,13 +314,25 @@ fn escape_csv(field: &str, separador: char) -> String {
 
 /// Descriptions come from third parties (e.g. the message of a Pix): a text
 /// starting with `=`, `+`, `-` or `@` would run as a formula when the CSV is
-/// opened in a spreadsheet, so it is prefixed with an apostrophe.
+/// opened in a spreadsheet, so it is prefixed with an apostrophe. The same
+/// after a `,`, a `;`, a tab or a line break inside the text: a spreadsheet
+/// that splits the file on the other separator (Excel in Portuguese splits
+/// a `.csv` on `;`) would start a cell there.
 fn neutralize_formula(text: &str) -> String {
-    if text.starts_with(['=', '+', '-', '@', '\t', '\r']) {
-        format!("'{text}")
-    } else {
-        text.to_owned()
+    let formula = |c: char| matches!(c, '=' | '+' | '-' | '@');
+    let mut out = String::with_capacity(text.len() + 1);
+    if text.starts_with(formula) || text.starts_with(['\t', '\r']) {
+        out.push('\'');
     }
+    let mut anterior = None;
+    for c in text.chars() {
+        if formula(c) && matches!(anterior, Some(',' | ';' | '\t' | '\r' | '\n')) {
+            out.push('\'');
+        }
+        out.push(c);
+        anterior = Some(c);
+    }
+    out
 }
 
 #[cfg(test)]
@@ -443,6 +477,54 @@ Data        Descrição                  Valor
             tabela
                 .csv(Separador::PontoEVirgula)
                 .ends_with("\"a;b\"\r\n")
+        );
+    }
+
+    #[test]
+    fn csv_neutralizes_formulas_after_the_other_separator_too() {
+        // Excel in Portuguese splits a `.csv` on `;`: in a file separated by
+        // commas, the text after a `;` starts a cell (and the other way
+        // round).
+        assert_eq!(
+            neutralize_formula("x;=HYPERLINK(\"u\");y,+1\t-2\n@3"),
+            "x;'=HYPERLINK(\"u\");y,'+1\t'-2\n'@3"
+        );
+        assert_eq!(neutralize_formula("a - b, c = d"), "a - b, c = d");
+        let mut tabela = Tabela::new(vec![Coluna::texto("Descrição", "descricao")]);
+        tabela.linha(vec![Celula::texto(Some("Pix;=cmd|' /C calc'!A0"))]);
+        assert_eq!(
+            tabela.csv(Separador::Virgula),
+            "descricao\r\nPix;'=cmd|' /C calc'!A0\r\n"
+        );
+        assert_eq!(
+            tabela.csv(Separador::PontoEVirgula),
+            "\u{feff}descricao\r\n\"Pix;'=cmd|' /C calc'!A0\"\r\n"
+        );
+    }
+
+    #[test]
+    fn csv_for_a_terminal_is_clean_and_files_keep_the_text() {
+        let mut tabela = Tabela::new(vec![
+            Coluna::texto("Descrição", "descricao"),
+            Coluna::valor("Valor", "valor"),
+        ]);
+        let mensagem = "Pix\u{1b}]52;c;Y2hhdmU=\u{7}\u{202E}\n2026-01-01,999";
+        tabela.linha(vec![
+            Celula::texto(Some(mensagem)),
+            Celula::Dinheiro(dec("0.01")),
+        ]);
+        let terminal = tabela.csv_para_terminal(Separador::PontoEVirgula);
+        assert_eq!(
+            terminal,
+            "descricao;valor\r\n\"Pix\u{FFFD}]52;c;Y2hhdmU=\u{FFFD}\u{FFFD}\u{FFFD}2026-01-01,999\";0,01\r\n"
+        );
+        assert_eq!(terminal.lines().count(), 2);
+        // The file gets the text as sent, quoted, with the BOM for Excel.
+        let arquivo = tabela.csv(Separador::PontoEVirgula);
+        assert!(arquivo.starts_with('\u{feff}'));
+        assert!(
+            arquivo.contains(&format!("\"{mensagem}\";0,01")),
+            "{arquivo:?}"
         );
     }
 

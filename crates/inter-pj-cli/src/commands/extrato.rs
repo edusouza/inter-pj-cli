@@ -48,7 +48,7 @@ async fn simples(context: &Context, periodo: PeriodoArgs, dividir: bool) -> Resu
 
     match context.formato() {
         Formato::Json => output::print_json(&json!({ "transacoes": transacoes })),
-        Formato::Csv => output::print_raw(&csv_simples(&transacoes).csv(context.separador())),
+        Formato::Csv => output::print_csv(&csv_simples(&transacoes), context.separador()),
         Formato::Texto => {
             context.warn_if_sandbox(&settings);
             let valores = transacoes.iter().map(TransacaoSimples::valor_com_sinal);
@@ -160,7 +160,7 @@ async fn completo(context: &Context, args: &ExtratoCompletoArgs) -> Result<(), C
     }
     match context.formato() {
         Formato::Json => output::print_json(&json!({ "transacoes": transacoes })),
-        Formato::Csv => output::print_raw(&csv_completo(&transacoes).csv(context.separador())),
+        Formato::Csv => output::print_csv(&csv_completo(&transacoes), context.separador()),
         Formato::Texto => {
             context.warn_if_sandbox(&settings);
             let valores = transacoes.iter().map(TransacaoCompleta::valor_com_sinal);
@@ -187,9 +187,9 @@ fn mostrar_pagina(
         Formato::Json => output::print_json(pagina),
         Formato::Csv => {
             if let Some(aviso) = &aviso {
-                eprintln!("aviso: {aviso}");
+                output::eprint_linha(&format!("aviso: {aviso}"));
             }
-            output::print_raw(&csv_completo(&pagina.transacoes).csv(context.separador()))
+            output::print_csv(&csv_completo(&pagina.transacoes), context.separador())
         }
         Formato::Texto => {
             context.warn_if_sandbox(settings);

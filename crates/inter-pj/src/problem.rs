@@ -5,6 +5,7 @@
 //! endpoints and the standard OAuth `{"error": ...}` shape in the token
 //! endpoint. [`Problem::from_body`] normalises all of them.
 
+use std::borrow::Cow;
 use std::fmt;
 
 use serde::{Deserialize, Deserializer, Serialize};
@@ -124,13 +125,18 @@ impl Problem {
     }
 }
 
+/// The texts of the API go on one line each: the violations, and the
+/// correlationId of [`ApiError`](crate::ApiError), are the only other
+/// lines of the message, indented.
 impl fmt::Display for Problem {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match (&self.title, &self.detail) {
-            (Some(title), Some(detail)) if title != detail => write!(f, "{title} — {detail}")?,
-            (Some(text), _) | (None, Some(text)) => f.write_str(text)?,
+            (Some(title), Some(detail)) if title != detail => {
+                write!(f, "{} — {}", uma_linha(title), uma_linha(detail))?;
+            }
+            (Some(text), _) | (None, Some(text)) => f.write_str(&uma_linha(text))?,
             (None, None) => match &self.type_error {
-                Some(code) => f.write_str(code)?,
+                Some(code) => f.write_str(&uma_linha(code))?,
                 None => f.write_str("erro sem descrição")?,
             },
         }
@@ -145,13 +151,23 @@ impl fmt::Display for Violacao {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let razao = self.razao.as_deref().unwrap_or("valor inválido");
         match &self.propriedade {
-            Some(propriedade) => write!(f, "{propriedade}: {razao}")?,
-            None => f.write_str(razao)?,
+            Some(propriedade) => write!(f, "{}: {}", uma_linha(propriedade), uma_linha(razao))?,
+            None => f.write_str(&uma_linha(razao))?,
         }
         if let Some(valor) = &self.valor {
-            write!(f, " (valor: {valor})")?;
+            write!(f, " (valor: {})", uma_linha(valor))?;
         }
         Ok(())
+    }
+}
+
+/// `texto` with its line breaks as spaces.
+pub(crate) fn uma_linha(texto: &str) -> Cow<'_, str> {
+    let quebra = |c: char| matches!(c, '\n' | '\r' | '\u{85}' | '\u{2028}' | '\u{2029}');
+    if texto.contains(quebra) {
+        Cow::Owned(texto.replace(quebra, " "))
+    } else {
+        Cow::Borrowed(texto)
     }
 }
 

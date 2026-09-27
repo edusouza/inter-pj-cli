@@ -38,17 +38,14 @@ pub(super) async fn cancelar(
     let cobranca = client.cobranca().consultar(codigo).await?;
     alteravel(&cobranca, "cancelada")?;
     let ambiente = settings.ambiente.as_ref().map(|setting| setting.value);
-    eprintln!(
-        "{}",
-        resumo(
-            "Cobrança a cancelar",
-            codigo,
-            &cobranca,
-            None,
-            ambiente,
-            &[("Motivo", args.motivo.clone())],
-        )
-    );
+    output::eprint(&resumo(
+        "Cobrança a cancelar",
+        codigo,
+        &cobranca,
+        None,
+        ambiente,
+        &[("Motivo", args.motivo.clone())],
+    ));
     confirmar(terminal, args.sim, "Cancelar a cobrança?")?;
 
     client.cobranca().cancelar(codigo, &args.motivo).await?;
@@ -97,17 +94,14 @@ async fn editar_com(
     let cobranca = client.cobranca().consultar(codigo).await?;
     alteravel(&cobranca, "alterada")?;
     let ambiente = settings.ambiente.as_ref().map(|setting| setting.value);
-    eprintln!(
-        "{}",
-        resumo(
-            "Cobrança a alterar",
-            codigo,
-            &cobranca,
-            Some(&edicao),
-            ambiente,
-            &[],
-        )
-    );
+    output::eprint(&resumo(
+        "Cobrança a alterar",
+        codigo,
+        &cobranca,
+        Some(&edicao),
+        ambiente,
+        &[],
+    ));
     confirmar(terminal, args.sim, "Alterar a cobrança?")?;
 
     let solicitacao = client.cobranca().editar(codigo, &edicao).await?;

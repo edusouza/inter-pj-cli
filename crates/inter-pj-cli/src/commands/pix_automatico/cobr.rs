@@ -26,7 +26,7 @@ use crate::commands::{Context, hoje, simulacao};
 use crate::confirmacao::{Stdio, Terminal, confirmar, descrever_ambiente, pode_confirmar};
 use crate::cores::Tom;
 use crate::error::{CliError, resultado_incerto};
-use crate::output::{self, data_br, horario_em, parse_data, secao};
+use crate::output::{self, data_br, horario_em, limpo, parse_data, secao};
 use crate::tabela::{Celula, Coluna, Tabela};
 use crate::valor::por_extenso;
 
@@ -65,7 +65,7 @@ async fn criar(
     let txid = args.txid.clone().unwrap_or_else(Txid::novo);
     let ambiente = settings.ambiente.as_ref().map(|setting| setting.value);
     if args.simular {
-        eprintln!("{}", resumo(&cobr, &txid, None, ambiente));
+        output::eprint(&resumo(&cobr, &txid, None, ambiente));
         return simulacao::mostrar_em(
             context,
             &settings,
@@ -83,7 +83,7 @@ async fn criar(
         .consultar_rec(&cobr.id_rec, None)
         .await?;
     aceita_cobrancas(&rec)?;
-    eprintln!("{}", resumo(&cobr, &txid, Some(&rec), ambiente));
+    output::eprint(&resumo(&cobr, &txid, Some(&rec), ambiente));
     confirmar(terminal, args.sim, "Criar a cobrança recorrente?")?;
 
     let criada = client
@@ -445,7 +445,7 @@ where
     }
     let titulo = format!(
         "Cobrança recorrente {}",
-        cobr.txid.as_deref().unwrap_or_default()
+        limpo(cobr.txid.as_deref().unwrap_or_default())
     );
     let mut texto = secao(titulo.trim(), &linhas);
     if !cobr.tentativas.is_empty() {
@@ -617,7 +617,7 @@ async fn listar(context: &Context, args: &CobrListarArgs) -> Result<(), CliError
     };
     match context.formato() {
         Formato::Json => output::print_json(&json!({ "cobsr": cobrs })),
-        Formato::Csv => output::print_raw(&csv(&cobrs).csv(context.separador())),
+        Formato::Csv => output::print_csv(&csv(&cobrs), context.separador()),
         Formato::Texto => {
             context.warn_if_sandbox(&settings);
             let mut texto = format!("{}\n\n", titulo(&filtro));
@@ -809,7 +809,7 @@ async fn cancelar(
     if let Some(aviso) = prazo_do_cancelamento(&atual, Local::now().naive_local()) {
         let _ = write!(resumo, "\naviso: {aviso}");
     }
-    eprintln!("{resumo}");
+    output::eprint(&resumo);
     confirmar(terminal, args.sim, "Cancelar a cobrança recorrente?")?;
 
     let cancelada = client.pix_automatico().cancelar_cobr(&args.txid).await?;
@@ -873,7 +873,7 @@ async fn retentativa(
     let atual = client.pix_automatico().consultar_cobr(&args.txid).await?;
     retentavel(&atual, args.data)?;
     let ambiente = settings.ambiente.as_ref().map(|setting| setting.value);
-    eprintln!("{}", resumo_retentativa(&atual, args, ambiente));
+    output::eprint(&resumo_retentativa(&atual, args, ambiente));
     confirmar(terminal, args.sim, "Pedir a nova tentativa?")?;
 
     let cobr = client

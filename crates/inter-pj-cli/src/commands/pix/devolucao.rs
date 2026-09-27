@@ -59,7 +59,7 @@ async fn solicitar(
     let id = args.id.clone().unwrap_or_else(IdDevolucao::novo);
     let ambiente = settings.ambiente.as_ref().map(|setting| setting.value);
     if args.simular {
-        eprintln!("{}", resumo(&args.e2e, None, &devolucao, &id, ambiente));
+        output::eprint(&resumo(&args.e2e, None, &devolucao, &id, ambiente));
         return simulacao::mostrar_em(
             context,
             &settings,
@@ -80,9 +80,9 @@ async fn solicitar(
     {
         // Asked before, maybe with an unknown outcome: the API would not
         // refund again, so there is nothing to send.
-        eprintln!(
+        output::eprint_linha(&format!(
             "aviso: a devolução {id} já tinha sido solicitada; com o mesmo id, a API não devolve de novo"
-        );
+        ));
         let terminou = existente
             .status
             .as_ref()
@@ -101,10 +101,7 @@ async fn solicitar(
         verificar_limite(devolucao.valor, &settings)?;
     }
     cabe_no_pix(devolucao.valor, &pix)?;
-    eprintln!(
-        "{}",
-        resumo(&args.e2e, Some(&pix), &devolucao, &id, ambiente)
-    );
+    output::eprint(&resumo(&args.e2e, Some(&pix), &devolucao, &id, ambiente));
     confirmar(terminal, args.sim, "Devolver o Pix?")?;
 
     let feita = client
@@ -304,7 +301,7 @@ async fn aguardar(
             return Ok((devolucao, false));
         }
         if devolucao.status != anterior {
-            eprintln!("aguardando: {}", status(&devolucao));
+            output::eprint_linha(&format!("aguardando: {}", status(&devolucao)));
             anterior.clone_from(&devolucao.status);
         }
         tokio::time::sleep(intervalo.min(prazo - agora)).await;

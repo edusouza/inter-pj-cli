@@ -59,7 +59,7 @@ async fn criar(
     let settings = context.settings()?;
     let ambiente = settings.ambiente.as_ref().map(|setting| setting.value);
     if args.simular {
-        eprintln!("{}", resumo(&solicitacao, None, ambiente));
+        output::eprint(&resumo(&solicitacao, None, ambiente));
         return simulacao::mostrar(
             context,
             &settings,
@@ -76,7 +76,7 @@ async fn criar(
         .consultar_rec(&args.rec, None)
         .await?;
     aguarda_aprovacao(&rec)?;
-    eprintln!("{}", resumo(&solicitacao, Some(&rec), ambiente));
+    output::eprint(&resumo(&solicitacao, Some(&rec), ambiente));
     confirmar(
         terminal,
         args.sim,
@@ -262,13 +262,10 @@ async fn cancelar(
         .await?;
     cancelavel(atual.status.as_ref())?;
     let ambiente = settings.ambiente.as_ref().map(|setting| setting.value);
-    eprintln!(
-        "{}",
-        secao(
-            &format!("Solicitação {} a cancelar", args.id),
-            &cancelamento(&atual, ambiente)
-        )
-    );
+    output::eprint(&secao(
+        &format!("Solicitação {} a cancelar", args.id),
+        &cancelamento(&atual, ambiente),
+    ));
     confirmar(terminal, args.sim, "Cancelar a solicitação?")?;
     let cancelada = client
         .pix_automatico()

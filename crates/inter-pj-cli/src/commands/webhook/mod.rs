@@ -322,7 +322,7 @@ async fn cadastrar(
         };
     }
     let ambiente = settings.ambiente.as_ref().map(|setting| setting.value);
-    eprintln!("{}", resumo(alvo, url_atual, &args.url, ambiente));
+    output::eprint(&resumo(alvo, url_atual, &args.url, ambiente));
     let pergunta = if url_atual.is_some() {
         "Trocar a URL do webhook?"
     } else {
@@ -367,7 +367,7 @@ async fn excluir(
         )));
     };
     let ambiente = settings.ambiente.as_ref().map(|setting| setting.value);
-    eprintln!("{}", resumo_exclusao(alvo, &atual, ambiente));
+    output::eprint(&resumo_exclusao(alvo, &atual, ambiente));
     confirmar(terminal, args.sim, "Excluir o webhook?")?;
     alvo.excluir(&client)
         .await

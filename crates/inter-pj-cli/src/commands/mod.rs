@@ -29,6 +29,7 @@ use crate::cli::{Cli, Command, Formato, GlobalArgs, PeriodoArgs};
 use crate::config::{self as settings, Given, Inputs, Settings, Source};
 use crate::doctor;
 use crate::error::CliError;
+use crate::output;
 use crate::paths;
 use crate::tabela::Separador;
 use crate::token_store::FileTokenStore;
@@ -171,14 +172,14 @@ impl Context {
         })?;
         let resolved = Settings::resolve(&loaded, self.inputs())?;
         for warning in &resolved.warnings {
-            eprintln!("aviso: {warning}");
+            output::eprint_linha(&format!("aviso: {warning}"));
         }
         for (chave, caminho) in resolved.paths_with_control_chars() {
-            eprintln!(
+            output::eprint_linha(&format!(
                 "aviso: o caminho de {chave} tem um caractere de controle (\"{}\"): entre aspas duplas, a barra invertida começa um escape; use aspas simples ou execute `{}`",
                 doctor::escapar_controles(&caminho.display().to_string()),
                 self.sugestao("config verificar --corrigir")
-            );
+            ));
         }
         Ok(resolved)
     }
@@ -218,7 +219,7 @@ impl Context {
             .ok()
             .and_then(|certificado| auth::aviso_de_validade(&certificado, Utc::now()))
         {
-            eprintln!("aviso: {aviso}");
+            output::eprint_linha(&format!("aviso: {aviso}"));
         }
         let mut builder = InterClient::builder()
             .environment(required.ambiente)
