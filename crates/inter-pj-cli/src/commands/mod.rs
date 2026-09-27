@@ -25,8 +25,10 @@ use clap::parser::ValueSource;
 use inter_pj::{ClientIdentity, Credentials, InterClient};
 use secrecy::{ExposeSecret, SecretString};
 
+use crate::chamada::chamada;
 use crate::cli::{Cli, Command, Formato, GlobalArgs, PeriodoArgs};
 use crate::config::{self as settings, Given, Inputs, Settings, Source};
+use crate::doctor;
 use crate::error::CliError;
 use crate::output;
 use crate::paths;
@@ -149,11 +151,27 @@ impl Context {
     /// Loads the configuration file and resolves the selected profile.
     pub(crate) fn settings(&self) -> Result<Settings, CliError> {
         let loaded = settings::load(&self.config_path)?;
+        let resolved = Settings::resolve(&loaded, self.inputs())?;
+        for warning in &resolved.warnings {
+            output::eprint_linha(&format!("aviso: {warning}"));
+        }
+        for (chave, caminho) in resolved.paths_with_control_chars() {
+            output::eprint_linha(&format!(
+                "aviso: o caminho de {chave} tem um caractere de controle (\"{}\"): entre aspas duplas, a barra invertida começa um escape; use aspas simples ou execute `{} config verificar --corrigir`",
+                doctor::escapar_controles(&caminho.display().to_string()),
+                chamada()
+            ));
+        }
+        Ok(resolved)
+    }
+
+    /// The settings given by flags and environment variables.
+    pub(crate) fn inputs(&self) -> Inputs {
         let given = |value: &Option<String>, source: Option<Source>| Given {
             value: value.clone(),
             source,
         };
-        let inputs = Inputs {
+        Inputs {
             perfil: given(&self.global.perfil, self.sources.perfil),
             ambiente: given(&self.global.ambiente, self.sources.ambiente),
             client_id: given(&self.global.client_id, self.sources.client_id),
@@ -168,12 +186,7 @@ impl Context {
             conta_corrente: given(&self.global.conta_corrente, self.sources.conta_corrente),
             client_secret: self.client_secret.clone(),
             base_url: self.base_url.clone(),
-        };
-        let resolved = Settings::resolve(&loaded, inputs)?;
-        for warning in &resolved.warnings {
-            output::eprint_linha(&format!("aviso: {warning}"));
         }
-        Ok(resolved)
     }
 
     /// Builds a client for the selected profile.
