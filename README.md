@@ -92,6 +92,24 @@ chave_privada = '~/inter/chave.key'
 
 Escreva os caminhos entre **aspas simples**, principalmente no Windows (`certificado = 'C:\inter\certificado.crt'`). Entre aspas duplas, a barra invertida começa um escape do TOML. `"C:\Users\..."` impede a leitura do arquivo (`\U` pede 8 dígitos hexadecimais). Já `"C:\novo\teste.crt"` é lido, mas com uma quebra de linha e uma tabulação no lugar de `\n` e `\t`. Caminhos relativos são relativos ao arquivo de configuração, e `~/` é a sua pasta pessoal.
 
+Ou deixe o assistente perguntar e conferir tudo na hora:
+
+```console
+$ inter-pj config init --interativo
+Assistente de configuração do inter-pj: /home/voce/.config/inter-pj/config.toml. O client_secret não é perguntado; ele fica fora do arquivo.
+Nome do perfil [padrao]:
+Ambiente (sandbox, com dados fictícios, ou producao) [sandbox]:
+client_id da integração: <seu client_id>
+Certificado (.crt): ~/inter/certificado.crt
+  Integração Exemplo, válido até 05/12/2026
+Chave privada (.key): ~/inter/chave.key
+  certificado e chave aceitos
+Conta corrente, só se a integração tiver mais de uma conta (Enter para pular):
+Perfil "padrao" gravado em /home/voce/.config/inter-pj/config.toml.
+```
+
+O certificado e a chave são conferidos ao serem informados (um arquivo trocado, uma chave com senha ou um certificado vencido aparecem na hora, e a resposta é pedida de novo), e caminhos relativos são gravados como absolutos. Num arquivo que já existe, o assistente acrescenta um perfil novo, sem mexer nos outros nem nos comentários; `--forcar` recria o arquivo. As respostas também podem vir de um pipe, para automatizar a configuração.
+
 ### 3. Informe o segredo pela variável de ambiente
 
 ```console

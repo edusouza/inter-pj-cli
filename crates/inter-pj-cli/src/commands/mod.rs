@@ -1,5 +1,6 @@
 //! Command implementations and the context they share.
 
+mod assistente;
 mod auth;
 mod cobranca;
 mod config;
