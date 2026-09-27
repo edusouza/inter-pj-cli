@@ -674,6 +674,76 @@ pub mod pix_automatico {
         path: "/pix/v2/cobr/{txid}/retentativa/{data}",
         scopes: &[Scope::CobrWrite],
     };
+
+    /// `PUT /pix/v2/webhookrec` — registers the webhook of the recurrences.
+    pub const WEBHOOK_REC_CADASTRAR: Endpoint = Endpoint {
+        method: Method::Put,
+        path: "/pix/v2/webhookrec",
+        scopes: &[Scope::WebhookRecWrite],
+    };
+
+    /// `GET /pix/v2/webhookrec` — the webhook of the recurrences.
+    pub const WEBHOOK_REC_CONSULTAR: Endpoint = Endpoint {
+        method: Method::Get,
+        path: "/pix/v2/webhookrec",
+        scopes: &[Scope::WebhookRecRead],
+    };
+
+    /// `DELETE /pix/v2/webhookrec` — removes the webhook of the recurrences.
+    pub const WEBHOOK_REC_EXCLUIR: Endpoint = Endpoint {
+        method: Method::Delete,
+        path: "/pix/v2/webhookrec",
+        scopes: &[Scope::WebhookRecWrite],
+    };
+
+    /// `PUT /pix/v2/webhookcobr` — registers the webhook of the recurring charges.
+    pub const WEBHOOK_COBR_CADASTRAR: Endpoint = Endpoint {
+        method: Method::Put,
+        path: "/pix/v2/webhookcobr",
+        scopes: &[Scope::WebhookCobrWrite],
+    };
+
+    /// `GET /pix/v2/webhookcobr` — the webhook of the recurring charges.
+    pub const WEBHOOK_COBR_CONSULTAR: Endpoint = Endpoint {
+        method: Method::Get,
+        path: "/pix/v2/webhookcobr",
+        scopes: &[Scope::WebhookCobrRead],
+    };
+
+    /// `DELETE /pix/v2/webhookcobr` — removes the webhook of the recurring charges.
+    pub const WEBHOOK_COBR_EXCLUIR: Endpoint = Endpoint {
+        method: Method::Delete,
+        path: "/pix/v2/webhookcobr",
+        scopes: &[Scope::WebhookCobrWrite],
+    };
+
+    /// `PATCH /pix/v2/sandbox/rec/{idRec}/status` — approves or cancels a recurrence (sandbox only).
+    pub const SANDBOX_STATUS_REC: Endpoint = Endpoint {
+        method: Method::Patch,
+        path: "/pix/v2/sandbox/rec/{idRec}/status",
+        scopes: &[Scope::PixWrite],
+    };
+
+    /// `PATCH /pix/v2/sandbox/solicrec/{idRec}/status` — accepts or rejects a confirmation request (sandbox only).
+    pub const SANDBOX_STATUS_SOLICITACAO: Endpoint = Endpoint {
+        method: Method::Patch,
+        path: "/pix/v2/sandbox/solicrec/{idRec}/status",
+        scopes: &[Scope::SolicRecWrite],
+    };
+
+    /// `PATCH /pix/v2/sandbox/cobr/{txId}/status` — cancels a recurring charge (sandbox only).
+    pub const SANDBOX_STATUS_COBR: Endpoint = Endpoint {
+        method: Method::Patch,
+        path: "/pix/v2/sandbox/cobr/{txId}/status",
+        scopes: &[Scope::CobrWrite],
+    };
+
+    /// `POST /pix/v2/sandbox/cobr/pagamento` — pays a recurring charge (sandbox only).
+    pub const SANDBOX_PAGAR_COBR: Endpoint = Endpoint {
+        method: Method::Post,
+        path: "/pix/v2/sandbox/cobr/pagamento",
+        scopes: &[Scope::CobrWrite],
+    };
 }
 
 /// Every operation implemented by this crate.
@@ -759,4 +829,14 @@ pub const ALL: &[Endpoint] = &[
     pix_automatico::LISTAR_COBRS,
     pix_automatico::REVISAR_COBR,
     pix_automatico::RETENTATIVA_COBR,
+    pix_automatico::WEBHOOK_REC_CADASTRAR,
+    pix_automatico::WEBHOOK_REC_CONSULTAR,
+    pix_automatico::WEBHOOK_REC_EXCLUIR,
+    pix_automatico::WEBHOOK_COBR_CADASTRAR,
+    pix_automatico::WEBHOOK_COBR_CONSULTAR,
+    pix_automatico::WEBHOOK_COBR_EXCLUIR,
+    pix_automatico::SANDBOX_STATUS_REC,
+    pix_automatico::SANDBOX_STATUS_SOLICITACAO,
+    pix_automatico::SANDBOX_STATUS_COBR,
+    pix_automatico::SANDBOX_PAGAR_COBR,
 ];
