@@ -9,6 +9,8 @@ mod chave;
 mod cob;
 mod cobv;
 mod comum;
+mod loc;
+mod lote_cobv;
 mod recebido;
 mod txid;
 
@@ -31,6 +33,11 @@ pub use comum::{
     CobrancaPixError, Devedor, ITENS_POR_PAGINA_MAXIMO_PIX, InfoAdicional, LocationPix,
     MAX_INFO_ADICIONAIS, Paginacao, PeriodoPix, PeriodoPixError, PessoaPix, TipoCob,
     VALOR_MAXIMO_PIX,
+};
+pub use loc::{FiltroLocs, PagamentoSandbox, PaginaLocs};
+pub use lote_cobv::{
+    CobvDoLote, CobvNoLote, CobvRevisadaDoLote, LoteCobv, LoteCobvRevisado, LoteCobvSolicitado,
+    PaginaLotesCobv, StatusCobvLote, SumarioLoteCobv,
 };
 pub use recebido::{
     Devolucao, DevolucaoSolicitada, FiltroPixRecebidos, HorarioDevolucao, ID_DEVOLUCAO_MAXIMO,
