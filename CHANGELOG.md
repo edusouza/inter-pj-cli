@@ -21,6 +21,7 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ### Alterado
 
+- `pagamento lote consultar` mostra em cada linha qual é o pagamento, como o resumo do envio: a linha digitável do boleto ou da conta, ou a receita e o contribuinte do DARF. Antes, dois pagamentos do mesmo valor não se distinguiam, e não se sabia qual deles tinha falhado (#57).
 - Os erros de uso (uma opção desconhecida, um valor inválido, opções que não combinam, um argumento que falta) saem em português, como todas as outras mensagens, com as mesmas dicas (a opção ou o comando parecido com o digitado, os valores possíveis) e a linha de uso; o clap os escrevia em inglês. Os números fora da faixa dizem qual é ela. O código de saída continua 2 (#57).
 
 ### Corrigido
