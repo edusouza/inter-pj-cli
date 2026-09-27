@@ -9,14 +9,19 @@ use chrono::NaiveDate;
 use clap::{ArgGroup, Args, Subcommand, ValueEnum};
 use inter_pj::cobranca::Uf;
 use inter_pj::documento::Documento;
+use inter_pj::pix::ChavePix;
 use inter_pj::pix::Txid;
 use inter_pj::pix_automatico::{
-    IdRec, IdSolicRec, Periodicidade, StatusCobR, StatusRec, TipoContaRecebedor,
+    IdRec, IdSolicRec, Periodicidade, RazaoCancelamentoCobR, RazaoCancelamentoRec, StatusCobR,
+    StatusRec, StatusSolicRec, TipoContaRecebedor,
 };
 use rust_decimal::Decimal;
 
-use super::pix::{Momento, PeriodoPixArgs, QrCodeArgs, parse_expiracao, parse_momento, parse_txid};
-use super::{parse_cep, parse_data, parse_documento, parse_uf};
+use super::pix::{
+    Momento, PeriodoPixArgs, PixPagarQrcodeArgs, QrCodeArgs, parse_expiracao, parse_momento,
+    parse_txid,
+};
+use super::{parse_cep, parse_chave, parse_data, parse_documento, parse_uf};
 use crate::valor::parse_valor;
 
 #[derive(Debug, Subcommand)]
@@ -49,6 +54,13 @@ pub(crate) enum PixAutomaticoCommand {
         subcommand_value_name = "COMANDO"
     )]
     Locrec(LocrecCommand),
+    /// Sandbox: as respostas do pagador e do banco dele, simuladas, para testar o fluxo completo (recusado em produção)
+    #[command(
+        subcommand,
+        subcommand_help_heading = "Comandos",
+        subcommand_value_name = "COMANDO"
+    )]
+    Sandbox(SandboxPixAutomaticoCommand),
 }
 
 #[derive(Debug, Subcommand)]
@@ -698,4 +710,195 @@ pub(crate) struct LocrecDesvincularArgs {
     /// Confirma sem perguntar (para scripts)
     #[arg(long, help_heading = "Segurança")]
     pub(crate) sim: bool,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum SandboxPixAutomaticoCommand {
+    /// Aprova ou cancela uma recorrência, como o pagador faria
+    StatusRec(SandboxStatusRecArgs),
+    /// Aceita ou rejeita a solicitação de confirmação de uma recorrência, como o pagador faria
+    StatusSolicitacao(SandboxStatusSolicitacaoArgs),
+    /// Cancela uma cobrança recorrente, como o banco do pagador faria
+    StatusCobr(SandboxStatusCobrArgs),
+    /// Paga uma cobrança recorrente, como o débito na conta do pagador
+    PagarCobr(SandboxPagarCobrArgs),
+    /// Paga um Pix copia e cola, como o QR Code composto de uma cobrança imediata com uma recorrência
+    PagarQrcode(PixPagarQrcodeArgs),
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct SandboxStatusRecArgs {
+    /// idRec da recorrência
+    #[arg(value_name = "ID_REC", value_parser = parse_id_rec)]
+    pub(crate) id_rec: IdRec,
+
+    /// Novo status: aprovada ou cancelada
+    #[arg(
+        long,
+        value_enum,
+        ignore_case = true,
+        value_name = "STATUS",
+        hide_possible_values = true
+    )]
+    pub(crate) status: StatusRecSandboxArg,
+
+    /// Motivo do cancelamento, com --status cancelada: sldb (pedido do recebedor), nres (pedido do pagador), accl (conta encerrada), cpcl (empresa encerrada), dcsd (falecimento), ersl (erro na solicitação de confirmação), frud (fraude), pcfd (solicitação sem resposta no prazo) ou slcr (confirmada de outra forma, como pelo QR Code)
+    #[arg(
+        long,
+        value_enum,
+        ignore_case = true,
+        value_name = "MOTIVO",
+        hide_possible_values = true
+    )]
+    pub(crate) razao: Option<RazaoRecArg>,
+}
+
+/// What the sandbox makes of a recurrence, as an option.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum StatusRecSandboxArg {
+    Aprovada,
+    Cancelada,
+}
+
+impl From<StatusRecSandboxArg> for StatusRec {
+    fn from(arg: StatusRecSandboxArg) -> Self {
+        match arg {
+            StatusRecSandboxArg::Aprovada => Self::Aprovada,
+            StatusRecSandboxArg::Cancelada => Self::Cancelada,
+        }
+    }
+}
+
+/// Why a recurrence was cancelled in the sandbox, as an option.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum RazaoRecArg {
+    Accl,
+    Cpcl,
+    Dcsd,
+    Ersl,
+    Frud,
+    Pcfd,
+    Slcr,
+    Sldb,
+    Nres,
+}
+
+impl From<RazaoRecArg> for RazaoCancelamentoRec {
+    fn from(arg: RazaoRecArg) -> Self {
+        match arg {
+            RazaoRecArg::Accl => Self::Accl,
+            RazaoRecArg::Cpcl => Self::Cpcl,
+            RazaoRecArg::Dcsd => Self::Dcsd,
+            RazaoRecArg::Ersl => Self::Ersl,
+            RazaoRecArg::Frud => Self::Frud,
+            RazaoRecArg::Pcfd => Self::Pcfd,
+            RazaoRecArg::Slcr => Self::Slcr,
+            RazaoRecArg::Sldb => Self::Sldb,
+            RazaoRecArg::Nres => Self::Nres,
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct SandboxStatusSolicitacaoArgs {
+    /// idRec da recorrência da solicitação: o sandbox a responde pela recorrência
+    #[arg(value_name = "ID_REC", value_parser = parse_id_rec)]
+    pub(crate) id_rec: IdRec,
+
+    /// A resposta do pagador: aceita ou rejeitada
+    #[arg(
+        long,
+        value_enum,
+        ignore_case = true,
+        value_name = "STATUS",
+        hide_possible_values = true
+    )]
+    pub(crate) status: StatusSolicitacaoSandboxArg,
+}
+
+/// The payer's answer to a confirmation request in the sandbox, as an
+/// option.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum StatusSolicitacaoSandboxArg {
+    Aceita,
+    Rejeitada,
+}
+
+impl From<StatusSolicitacaoSandboxArg> for StatusSolicRec {
+    fn from(arg: StatusSolicitacaoSandboxArg) -> Self {
+        match arg {
+            StatusSolicitacaoSandboxArg::Aceita => Self::Aceita,
+            StatusSolicitacaoSandboxArg::Rejeitada => Self::Rejeitada,
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct SandboxStatusCobrArgs {
+    /// txid da cobrança recorrente
+    #[arg(value_name = "TXID", value_parser = parse_txid)]
+    pub(crate) txid: Txid,
+
+    /// Motivo: requested-by-receiver (pedido do recebedor), requested-by-payer (do pagador), settlement-failed (falha na liquidação), recurrence-canceled (recorrência cancelada), account-canceled (conta encerrada), account-blocked (conta bloqueada), other ou unspecified [padrão: unspecified]
+    #[arg(
+        long,
+        value_enum,
+        ignore_case = true,
+        value_name = "MOTIVO",
+        hide_possible_values = true,
+        default_value = "unspecified",
+        hide_default_value = true
+    )]
+    pub(crate) razao: RazaoCobrArg,
+}
+
+/// Why a recurring charge was cancelled in the sandbox, as an option.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum RazaoCobrArg {
+    Unspecified,
+    AccountCanceled,
+    AccountBlocked,
+    RecurrenceCanceled,
+    SettlementFailed,
+    Other,
+    RequestedByPayer,
+    RequestedByReceiver,
+}
+
+impl From<RazaoCobrArg> for RazaoCancelamentoCobR {
+    fn from(arg: RazaoCobrArg) -> Self {
+        match arg {
+            RazaoCobrArg::Unspecified => Self::Unspecified,
+            RazaoCobrArg::AccountCanceled => Self::AccountCanceled,
+            RazaoCobrArg::AccountBlocked => Self::AccountBlocked,
+            RazaoCobrArg::RecurrenceCanceled => Self::RecurrenceCanceled,
+            RazaoCobrArg::SettlementFailed => Self::SettlementFailed,
+            RazaoCobrArg::Other => Self::Other,
+            RazaoCobrArg::RequestedByPayer => Self::RequestedByPayer,
+            RazaoCobrArg::RequestedByReceiver => Self::RequestedByReceiver,
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct SandboxPagarCobrArgs {
+    /// txid da cobrança recorrente
+    #[arg(value_name = "TXID", value_parser = parse_txid)]
+    pub(crate) txid: Txid,
+
+    /// Chave Pix da conta que recebe
+    #[arg(long, value_name = "CHAVE", value_parser = parse_chave)]
+    pub(crate) chave: ChavePix,
+
+    /// Valor pago: 149,90, 1.500,00 ou 149.90 [padrão: o valor da cobrança]
+    #[arg(long, value_name = "VALOR", value_parser = parse_valor)]
+    pub(crate) valor: Option<Decimal>,
+
+    /// CPF ou CNPJ de quem paga [padrão: o devedor da recorrência]
+    #[arg(long, value_name = "CPF/CNPJ", value_parser = parse_documento)]
+    pub(crate) documento: Option<Documento>,
 }

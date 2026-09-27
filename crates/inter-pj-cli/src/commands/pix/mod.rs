@@ -23,6 +23,7 @@ use inter_pj::pix::{
 };
 use rust_decimal::Decimal;
 
+pub(super) use self::sandbox::{mostrar as mostrar_pagamento, pagar_qrcode};
 use super::Context;
 use crate::cli::{Momento, PeriodoPixArgs, PixCobListarArgs, PixCommand, StatusCobArg};
 use crate::confirmacao::Stdio;

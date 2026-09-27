@@ -27,17 +27,20 @@ api_enum! {
         Cpcl => "CPCL",
         /// The payer died.
         Dcsd => "DCSD",
-        /// The receiver asked, for an error in the confirmation request.
+        /// The receiver or their bank asked, for an error in the
+        /// confirmation request.
         Ersl => "ERSL",
         /// Fraud.
         Frud => "FRUD",
-        /// The payer's bank found an error.
+        /// The receiver's bank asked, as the confirmation request got no
+        /// answer in time.
         Pcfd => "PCFD",
-        /// The receiver asked.
+        /// The receiver's bank asked, as the same recurrence was confirmed
+        /// another way (by the QR Code, say).
         Slcr => "SLCR",
-        /// The payer asked.
+        /// The receiver asked.
         Sldb => "SLDB",
-        /// No answer.
+        /// The payer asked.
         Nres => "NRES",
     }
 }

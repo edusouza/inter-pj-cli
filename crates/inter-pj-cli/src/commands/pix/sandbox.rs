@@ -17,7 +17,9 @@ use crate::output;
 
 pub(super) async fn run(context: &Context, command: PixSandboxCommand) -> Result<(), CliError> {
     match command {
-        PixSandboxCommand::PagarQrcode(args) => pagar_qrcode(context, &args).await,
+        PixSandboxCommand::PagarQrcode(args) => {
+            pagar_qrcode(context, &args, "pix sandbox pagar-qrcode").await
+        }
     }
 }
 
@@ -91,11 +93,15 @@ fn valor_da_cobranca(valor: Option<Decimal>) -> Result<Decimal, CliError> {
     })
 }
 
-/// `pix sandbox pagar-qrcode`: pays a "copia e cola", by default the amount
-/// in it.
-async fn pagar_qrcode(context: &Context, args: &PixPagarQrcodeArgs) -> Result<(), CliError> {
+/// `pix sandbox pagar-qrcode` (and `comando`, the same for Pix Automático):
+/// pays a "copia e cola", by default the amount in it.
+pub(crate) async fn pagar_qrcode(
+    context: &Context,
+    args: &PixPagarQrcodeArgs,
+    comando: &str,
+) -> Result<(), CliError> {
     let settings = context.settings()?;
-    so_no_sandbox(&settings, "pix sandbox pagar-qrcode")?;
+    so_no_sandbox(&settings, comando)?;
     let valor = args
         .valor
         .or(args.copia_e_cola.brcode.valor)
@@ -110,7 +116,8 @@ async fn pagar_qrcode(context: &Context, args: &PixPagarQrcodeArgs) -> Result<()
     mostrar(context, &pagamento, valor, "inter-pj pix recebidos listar")
 }
 
-fn mostrar(
+/// A payment of the sandbox, and the command that shows what it paid.
+pub(crate) fn mostrar(
     context: &Context,
     pagamento: &PagamentoSandbox,
     valor: Decimal,
