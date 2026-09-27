@@ -6,6 +6,10 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+## [0.6.0] - 2026-09-24
+
+Pix Cobrança: cobranças Pix imediatas e com vencimento, com o QR Code, os Pix recebidos e as suas devoluções, locations, lotes de cobranças e pagamentos no sandbox.
+
 ### Adicionado
 
 - `inter-pj pix cob criar`: cria uma cobrança Pix imediata (QR Code dinâmico) com chave, valor (opcionalmente alterável pelo pagador), expiração (`30m`, `2h`, `7d`), devedor, texto ao pagador e informações adicionais, conferidos antes de qualquer requisição. O txid é gerado (ou vem de `--txid`) e aparece no resumo; com ele, um resultado incerto vem com o comando que consulta a cobrança e o que repete a criação sem duplicá-la. Resumo, confirmação, `--sim`, `--simular` e, depois de criada, o QR Code no terminal (`--qrcode`) ou em PNG (`--qrcode-png`) (#34).
