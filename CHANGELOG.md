@@ -26,6 +26,7 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ### Corrigido
 
+- A ajuda de `pagamento boleto pagar` e a de `cobranca emitir` ainda tinham rótulos do clap em inglês ("Arguments:" e "[possible values: boleto, pix]"). Agora os argumentos de todos os comandos aparecem sob "Argumentos", antes das opções, e um teste confere cada tela de ajuda, curta e longa (#57).
 - `extrato completo --todas-paginas` mostra o título "Extrato completo de...", como uma página do mesmo comando, e não mais "Extrato de..." (#57).
 - O Pix Automático segue o calendário do banco, como os outros comandos: a data do primeiro pagamento que já passou e as datas do `rec modelo` usam o dia em Brasília, e não o do fuso da máquina, e o aviso do cancelamento depois das 22h do dia anterior à liquidação usa a hora de Brasília (#57).
 
