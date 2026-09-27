@@ -7,13 +7,14 @@
 //! immediate Pix charges, [`cobv`], those with a due date, [`loc`], the
 //! locations of their QR Codes, [`lote_cobv`], the batches of charges with a
 //! due date, [`sandbox_pix`], the payments of the sandbox, which share one
-//! state ([`cobrancas_pix`]), [`rec`], the recurrences of Pix Automático, in
-//! a state of their own ([`automatico`]), and [`webhooks`], the addresses
-//! the bank notifies and the history of the notifications. The data tell one
-//! story: the balance follows from the statement, the Pix received, the
-//! bills paid, the charges paid before and the notifications of the webhooks
-//! are those of the statement, and what is sent, refunded, paid or issued
-//! can be queried. Every name, document, key and amount is synthetic.
+//! state ([`cobrancas_pix`]), [`rec`] and [`solicrec`], the recurrences of
+//! Pix Automático and the requests of their approval, in a state of their
+//! own ([`automatico`]), and [`webhooks`], the addresses the bank notifies
+//! and the history of the notifications. The data tell one story: the
+//! balance follows from the statement, the Pix received, the bills paid, the
+//! charges paid before and the notifications of the webhooks are those of
+//! the statement, and what is sent, refunded, paid or issued can be queried.
+//! Every name, document, key and amount is synthetic.
 
 mod automatico;
 mod cob;
@@ -28,6 +29,7 @@ mod pix;
 mod rec;
 mod recebidos;
 mod sandbox_pix;
+mod solicrec;
 mod webhooks;
 
 use std::collections::HashMap;
@@ -65,6 +67,7 @@ impl Banco {
         sandbox_pix::montar(&servidor, &cobrancas).await;
         let automatico = Arc::new(Mutex::new(automatico::Automatico::novo()));
         rec::montar(&servidor, &automatico).await;
+        solicrec::montar(&servidor, &automatico).await;
         webhooks::montar(&servidor).await;
         Self { servidor }
     }
