@@ -278,6 +278,12 @@ fn resumo_copia_e_cola(brcode: &BrCode) -> Vec<(&'static str, String)> {
     if let Some(url) = &brcode.url {
         linhas.push(("Cobrança", limpo(url)));
     }
+    if let Some(recorrencia) = &brcode.recorrencia {
+        linhas.push((
+            "Recorrência",
+            format!("{} (Pix Automático)", limpo(recorrencia)),
+        ));
+    }
     if let Some(txid) = brcode.txid.as_deref().filter(|txid| *txid != "***") {
         linhas.push(("Identificador", limpo(txid)));
     }
@@ -670,6 +676,23 @@ Pix a enviar
             "Valor                  R$ 151,20 (cento e cinquenta e um reais e vinte centavos)",
             "Valor no código        R$ 150,00",
             "\naviso: o valor informado é diferente do valor do código: confira-o com a cobrança antes de confirmar",
+        ] {
+            assert!(texto.contains(linha), "{linha}\n{texto}");
+        }
+    }
+
+    #[test]
+    fn a_composite_code_shows_its_recurrence() {
+        // An immediate charge that also asks for the approval of a
+        // recurrence (`JORNADA_3`), from the examples of the API.
+        let composto = "00020101021226760014br.gov.bcb.pix2554pix.example.com/qr/v2/8b3da2f39a4140d1a91abd93113bd4415204000053039865802BR5913Fulano de Tal6008BRASILIA62070503***80800014br.gov.bcb.pix2558pix.example.com/qr/v2/rec/94ed2badcbc04c15b0bb7fa35319489063047741";
+        let args = args(&["--copia-e-cola", composto, "--valor", "10"]);
+        let construido = pagamento(&args, hoje()).unwrap();
+        let brcode = &args.copia_e_cola.as_ref().unwrap().brcode;
+        let texto = resumo(&construido, Some(brcode), None, &id());
+        for linha in [
+            "Cobrança               pix.example.com/qr/v2/8b3da2f39a4140d1a91abd93113bd441\n",
+            "Recorrência            pix.example.com/qr/v2/rec/94ed2badcbc04c15b0bb7fa353194890 (Pix Automático)\n",
         ] {
             assert!(texto.contains(linha), "{linha}\n{texto}");
         }

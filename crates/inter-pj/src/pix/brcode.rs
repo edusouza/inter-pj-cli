@@ -9,7 +9,9 @@ const PIX_GUI: &str = "br.gov.bcb.pix";
 /// locally so it can be shown before paying.
 ///
 /// Dynamic codes point to a URL where the receiver's institution keeps the
-/// charge; their final amount is defined there, not in the code.
+/// charge; their final amount is defined there, not in the code. The QR Code
+/// of a recurrence of Pix Automático points to the recurrence, alone or next
+/// to a charge.
 ///
 /// ```
 /// use inter_pj::pix::BrCode;
@@ -29,6 +31,11 @@ pub struct BrCode {
     pub chave: Option<String>,
     /// Location of the charge (dynamic codes), without the scheme.
     pub url: Option<String>,
+    /// Location of a recurrence of Pix Automático (field 80), without the
+    /// scheme, for the payer to approve it in their bank. With a charge at
+    /// [`url`](Self::url), paying it also asks for the approval; alone,
+    /// there is nothing to pay ([`apenas_recorrencia`](Self::apenas_recorrencia)).
+    pub recorrencia: Option<String>,
     /// Message to the payer (static codes).
     pub info_adicional: Option<String>,
     /// Amount, when the code fixes one.
@@ -78,12 +85,7 @@ impl BrCode {
             .iter()
             .filter(|(id, _)| ("26".."52").contains(&id.as_str()))
             .map(|(_, value)| parse_tlv(value))
-            .find_map(|template| {
-                template.ok().filter(|sub| {
-                    sub.iter()
-                        .any(|(id, v)| id == "00" && v.eq_ignore_ascii_case(PIX_GUI))
-                })
-            })
+            .find_map(|template| template.ok().filter(|sub| de_pix(sub)))
             .ok_or(BrCodeError::NaoPix)?;
         let sub = |id: &str| {
             conta
@@ -93,7 +95,12 @@ impl BrCode {
         };
         let chave = sub("01");
         let url = sub("25");
-        if chave.is_none() && url.is_none() {
+        let recorrencia = get("80")
+            .and_then(|value| parse_tlv(value).ok())
+            .filter(|template| de_pix(template))
+            .and_then(|template| template.into_iter().find(|(id, _)| id == "25"))
+            .map(|(_, url)| url);
+        if chave.is_none() && url.is_none() && recorrencia.is_none() {
             return Err(BrCodeError::CampoAusente("chave (26.01) ou URL (26.25)"));
         }
         if get("53").map(String::as_str) != Some("986") {
@@ -125,6 +132,7 @@ impl BrCode {
         Ok(Self {
             chave,
             url,
+            recorrencia,
             info_adicional: sub("02"),
             valor,
             nome_recebedor,
@@ -137,6 +145,12 @@ impl BrCode {
     /// and its final amount is defined there.
     pub fn dinamico(&self) -> bool {
         self.url.is_some()
+    }
+
+    /// Whether the code only asks for the approval of a recurrence of Pix
+    /// Automático, with no key nor charge to pay.
+    pub fn apenas_recorrencia(&self) -> bool {
+        self.chave.is_none() && self.url.is_none() && self.recorrencia.is_some()
     }
 }
 
@@ -171,6 +185,13 @@ pub enum BrCodeError {
         /// CRC of the content.
         calculado: String,
     },
+}
+
+/// Whether a template is Pix's: its GUI (00) is `br.gov.bcb.pix`.
+fn de_pix(template: &[(String, String)]) -> bool {
+    template
+        .iter()
+        .any(|(id, v)| id == "00" && v.eq_ignore_ascii_case(PIX_GUI))
 }
 
 /// Splits `IDLLvalue...` fields. Sizes count characters.
@@ -226,6 +247,14 @@ mod tests {
     use super::*;
 
     const MANUAL: &str = "00020126580014br.gov.bcb.pix0136123e4567-e12b-12d1-a456-4266554400005204000053039865802BR5913Fulano de Tal6008BRASILIA62070503***63041D3D";
+
+    /// The QR Code of a recurrence of Pix Automático alone (`JORNADA_2`),
+    /// from the examples of the API: the Pix template has only the GUI.
+    const RECORRENCIA: &str = "00020126180014br.gov.bcb.pix5204000053039865802BR5913Fulano de Tal6008BRASILIA62070503***80800014br.gov.bcb.pix2558pix.example.com/qr/v2/rec/2353c790eefb11eaadc10242ac120002630462C9";
+
+    /// An immediate charge whose payment also asks for the approval of a
+    /// recurrence (`JORNADA_3`), from the same examples.
+    const COMPOSTO: &str = "00020101021226760014br.gov.bcb.pix2554pix.example.com/qr/v2/8b3da2f39a4140d1a91abd93113bd4415204000053039865802BR5913Fulano de Tal6008BRASILIA62070503***80800014br.gov.bcb.pix2558pix.example.com/qr/v2/rec/94ed2badcbc04c15b0bb7fa35319489063047741";
 
     /// `IDLLvalue` fields, back to back.
     fn tlv<V: AsRef<str>>(fields: &[(&str, V)]) -> String {
@@ -326,6 +355,61 @@ mod tests {
             Some("qr.exemplo.invalid/v2/cobv/abc")
         );
         assert_eq!(brcode.chave, None);
+    }
+
+    #[test]
+    fn reads_the_recurrence_of_pix_automatico() {
+        let rec = BrCode::parse(RECORRENCIA).unwrap();
+        assert_eq!(
+            rec.recorrencia.as_deref(),
+            Some("pix.example.com/qr/v2/rec/2353c790eefb11eaadc10242ac120002")
+        );
+        assert_eq!((rec.chave.as_deref(), rec.url.as_deref()), (None, None));
+        assert!(rec.apenas_recorrencia());
+        assert!(!rec.dinamico());
+        assert_eq!(rec.nome_recebedor, "Fulano de Tal");
+
+        let composto = BrCode::parse(COMPOSTO).unwrap();
+        assert_eq!(
+            composto.url.as_deref(),
+            Some("pix.example.com/qr/v2/8b3da2f39a4140d1a91abd93113bd441")
+        );
+        assert_eq!(
+            composto.recorrencia.as_deref(),
+            Some("pix.example.com/qr/v2/rec/94ed2badcbc04c15b0bb7fa353194890")
+        );
+        assert!(composto.dinamico());
+        assert!(!composto.apenas_recorrencia());
+        assert_eq!(BrCode::parse(MANUAL).unwrap().recorrencia, None);
+    }
+
+    #[test]
+    fn a_recurrence_needs_the_pix_gui_and_its_url() {
+        let campos = |recorrencia: &str| {
+            encode(&[
+                ("00", "01".to_owned()),
+                ("26", tlv(&[("00", "br.gov.bcb.pix")])),
+                ("52", "0000".to_owned()),
+                ("53", "986".to_owned()),
+                ("58", "BR".to_owned()),
+                ("59", "Loja Exemplo".to_owned()),
+                ("60", "CURITIBA".to_owned()),
+                ("80", recorrencia.to_owned()),
+            ])
+        };
+        let url = "qr.exemplo.invalid/v2/rec/abc";
+        assert!(BrCode::parse(&campos(&tlv(&[("00", "BR.GOV.BCB.PIX"), ("25", url)]))).is_ok());
+        for sem_recorrencia in [
+            tlv(&[("00", "com.exemplo.carteira"), ("25", url)]),
+            tlv(&[("00", "br.gov.bcb.pix")]),
+            "sem formato".to_owned(),
+        ] {
+            assert_eq!(
+                BrCode::parse(&campos(&sem_recorrencia)),
+                Err(BrCodeError::CampoAusente("chave (26.01) ou URL (26.25)")),
+                "{sem_recorrencia}"
+            );
+        }
     }
 
     #[test]

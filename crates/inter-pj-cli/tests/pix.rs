@@ -512,6 +512,9 @@ async fn wrong_amounts_and_corrupted_codes_are_refused() {
     let com_valor = copia_e_cola(Some("150.00"));
     let sem_valor = copia_e_cola(None);
     let corrompido = com_valor.replacen("150.00", "950.00", 1);
+    // The QR Code of a recurrence of Pix Automático, from the examples of
+    // the API: there is nothing to pay.
+    let recorrencia = "00020126180014br.gov.bcb.pix5204000053039865802BR5913Fulano de Tal6008BRASILIA62070503***80800014br.gov.bcb.pix2558pix.example.com/qr/v2/rec/2353c790eefb11eaadc10242ac120002630462C9";
 
     for (args, mensagem) in [
         (
@@ -525,6 +528,10 @@ async fn wrong_amounts_and_corrupted_codes_are_refused() {
         (
             vec!["--copia-e-cola", corrompido.as_str()],
             "copie o código novamente",
+        ),
+        (
+            vec!["--copia-e-cola", recorrencia, "--valor", "10"],
+            "é o QR Code de uma recorrência do Pix Automático, sem nada a pagar",
         ),
         (
             vec![
