@@ -11,7 +11,7 @@ use chrono::NaiveDate;
 use inter_pj::banking::ItemLote;
 use serde_json::{Map, Value};
 
-use super::{CAMPOS_BOLETO, CAMPOS_DARF, Campos, boleto, csv, darf, ler};
+use super::{CAMPOS_BOLETO, CAMPOS_DARF, Campos, boleto, csv, darf, ler, notacao_cientifica};
 use crate::error::CliError;
 
 /// Most problems listed at once.
@@ -244,16 +244,6 @@ fn estragado_pelo_excel(objeto: &Map<String, Value>, onde: &str) -> Option<CliEr
         )),
         _ => None,
     }
-}
-
-/// `1,36094E+16` or `1.36094E+16`.
-fn notacao_cientifica(texto: &str) -> bool {
-    let Some((mantissa, expoente)) = texto.split_once(['E', 'e']) else {
-        return false;
-    };
-    let digitos = |parte: &str| !parte.is_empty() && parte.bytes().all(|b| b.is_ascii_digit());
-    digitos(expoente.strip_prefix('+').unwrap_or(expoente))
-        && mantissa.split([',', '.']).all(digitos)
 }
 
 fn item_de(valor: &Value, onde: &str, hoje: NaiveDate) -> Result<ItemLote, CliError> {

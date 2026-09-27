@@ -8,6 +8,7 @@ mod cobranca;
 mod cobv;
 mod csv;
 mod lote;
+mod lote_cobv;
 
 use std::fmt::Display;
 use std::io::{self, Read};
@@ -30,6 +31,7 @@ const TAMANHO_MAXIMO: u64 = 1024 * 1024;
 pub(crate) use cobranca::{cobranca, modelo_cobranca};
 pub(crate) use cobv::{cobv, modelo_cobv};
 pub(crate) use lote::{ArquivoLote, MODELO_CSV, MODELO_JSON, ler_lote};
+pub(crate) use lote_cobv::{ler_lote_cobv, ler_revisao_lote_cobv, modelo_lote_cobv};
 
 /// Fields of a payment by barcode, as in the API (`EfetuarPagamento`).
 pub(crate) const CAMPOS_BOLETO: [&str; 5] = [
@@ -62,6 +64,17 @@ pub(crate) fn nome(caminho: &Path) -> String {
     } else {
         caminho.display().to_string()
     }
+}
+
+/// `1,36094E+16` or `1.36094E+16`: how Excel shows a long number, whose
+/// digits it then loses.
+fn notacao_cientifica(texto: &str) -> bool {
+    let Some((mantissa, expoente)) = texto.split_once(['E', 'e']) else {
+        return false;
+    };
+    let digitos = |parte: &str| !parte.is_empty() && parte.bytes().all(|b| b.is_ascii_digit());
+    digitos(expoente.strip_prefix('+').unwrap_or(expoente))
+        && mantissa.split([',', '.']).all(digitos)
 }
 
 /// Reads a text file, or the standard input for `-`.
@@ -185,6 +198,16 @@ impl<'a> Campos<'a> {
             format!("{}{item}.", self.prefixo),
             aceitos,
         )
+    }
+
+    /// An error about the object as a whole.
+    pub(crate) fn erro_geral(&self, problema: impl Display) -> CliError {
+        CliError::Usage(format!("{}: {problema}", self.onde))
+    }
+
+    /// Whether `campo` has a value.
+    pub(crate) fn presente(&self, campo: &str) -> bool {
+        self.bruto(campo).is_some()
     }
 
     /// An error about `campo`.

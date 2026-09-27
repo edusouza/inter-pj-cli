@@ -5,8 +5,9 @@ use chrono::{Days, NaiveDate};
 use inter_pj::cobranca::Uf;
 use inter_pj::documento::Documento;
 use inter_pj::pix::{
-    AbatimentoCobv, ChavePix, CobvSolicitada, DescontoCobv, DescontoData, DevedorCobv,
-    InfoAdicional, JurosCobv, LocCob, ModalidadeJuros, MultaCobv, TipoCob,
+    AbatimentoCobv, CalendarioCobv, ChavePix, CobrancaPixError, CobvRevisada, CobvSolicitada,
+    DescontoCobv, DescontoData, DevedorCobv, InfoAdicional, JurosCobv, LocCob, ModalidadeJuros,
+    MultaCobv, StatusCob, TipoCob, ValorCobvRevisada,
 };
 use rust_decimal::Decimal;
 use serde_json::Value;
@@ -23,6 +24,18 @@ pub(crate) const CAMPOS_COBV: [&str; 7] = [
     "chave",
     "solicitacaoPagador",
     "infoAdicionais",
+];
+/// Fields of a change to a charge (`CobVRevisada`): those of a charge, and
+/// `status` to remove it.
+pub(crate) const CAMPOS_REVISAO_COBV: [&str; 8] = [
+    "calendario",
+    "devedor",
+    "loc",
+    "valor",
+    "chave",
+    "solicitacaoPagador",
+    "infoAdicionais",
+    "status",
 ];
 const CAMPOS_CALENDARIO: [&str; 2] = ["dataDeVencimento", "validadeAposVencimento"];
 const CAMPOS_DEVEDOR: [&str; 8] = [
@@ -50,14 +63,25 @@ pub(crate) fn cobv(valor: &Value, onde: &str) -> Result<CobvSolicitada, CliError
 /// A charge from its fields ([`CAMPOS_COBV`]), validated as the creation
 /// is. The due date is not compared with today: the caller does that.
 pub(crate) fn ler_cobv(campos: &Campos<'_>) -> Result<CobvSolicitada, CliError> {
-    let obrigatorio = |campo: &str, aceitos: &[&str]| {
+    // A missing object is named by what it needs, as the columns of a CSV.
+    let obrigatorio = |campo: &str, aceitos: &[&str], falta: &str, problema: &str| {
         campos
-            .objeto(campo, aceitos)
-            .and_then(|objeto| campos.obrigatorio(campo, objeto))
+            .objeto(campo, aceitos)?
+            .ok_or_else(|| campos.erro(falta, problema))
     };
-    let calendario = obrigatorio("calendario", &CAMPOS_CALENDARIO)?;
-    let devedor = obrigatorio("devedor", &CAMPOS_DEVEDOR)?;
-    let valor = obrigatorio("valor", &CAMPOS_VALOR)?;
+    let calendario = obrigatorio(
+        "calendario",
+        &CAMPOS_CALENDARIO,
+        "calendario.dataDeVencimento",
+        "obrigatório",
+    )?;
+    let devedor = obrigatorio(
+        "devedor",
+        &CAMPOS_DEVEDOR,
+        "devedor",
+        "obrigatório: nome e cpf ou cnpj",
+    )?;
+    let valor = obrigatorio("valor", &CAMPOS_VALOR, "valor.original", "obrigatório")?;
     let chave = campos.obrigatorio("chave", campos.texto("chave")?)?;
     let chave: ChavePix = chave.parse().map_err(|err| campos.erro("chave", err))?;
     let mut cobv = CobvSolicitada::new(
@@ -89,11 +113,99 @@ pub(crate) fn ler_cobv(campos: &Campos<'_>) -> Result<CobvSolicitada, CliError> 
         .transpose()?;
     cobv.solicitacao_pagador = campos.texto("solicitacaoPagador")?;
     cobv.info_adicionais = infos(campos)?;
-    cobv.validar().map_err(|err| {
-        let campo = err.campo().to_owned();
-        campos.erro(&campo, err)
-    })?;
+    cobv.validar().map_err(|err| erro(campos, &err))?;
     Ok(cobv)
+}
+
+/// A change to a charge from its fields ([`CAMPOS_REVISAO_COBV`]),
+/// validated. Only what is given changes; `calendario` needs the due date,
+/// and `status` (`REMOVIDA_PELO_USUARIO_RECEBEDOR`) removes the charge.
+pub(crate) fn ler_revisao_cobv(campos: &Campos<'_>) -> Result<CobvRevisada, CliError> {
+    let removida = StatusCob::RemovidaPeloUsuarioRecebedor;
+    if let Some(status) = campos.texto("status")? {
+        if status != removida.as_str() {
+            return Err(campos.erro(
+                "status",
+                format!(
+                    "\"{status}\": a única mudança de status é {}, que remove a cobrança",
+                    removida.as_str()
+                ),
+            ));
+        }
+        if let Some(outro) = CAMPOS_REVISAO_COBV
+            .iter()
+            .find(|campo| **campo != "status" && campos.presente(campo))
+        {
+            return Err(campos.erro(
+                outro,
+                "uma cobrança removida não muda mais nada: tire este campo ou o status",
+            ));
+        }
+        return Ok(CobvRevisada::remocao());
+    }
+    let mut revisao = CobvRevisada::new();
+    if let Some(calendario) = campos.objeto("calendario", &CAMPOS_CALENDARIO)? {
+        let vencimento = calendario.data("dataDeVencimento")?.ok_or_else(|| {
+            calendario.erro(
+                "dataDeVencimento",
+                "obrigatório para mudar o calendário, mesmo que só a validade mude",
+            )
+        })?;
+        let mut novo = CalendarioCobv::new(vencimento);
+        novo.validade_apos_vencimento = calendario.inteiro("validadeAposVencimento")?;
+        revisao.calendario = Some(novo);
+    }
+    revisao.devedor = campos
+        .objeto("devedor", &CAMPOS_DEVEDOR)?
+        .map(|campos| ler_devedor(&campos))
+        .transpose()?;
+    if let Some(valor) = campos.objeto("valor", &CAMPOS_VALOR)? {
+        let mut novo = ValorCobvRevisada::default();
+        novo.original = valor.valor("original")?;
+        novo.multa = valor
+            .objeto("multa", &CAMPOS_ENCARGO)?
+            .map(|campos| multa(&campos))
+            .transpose()?;
+        novo.juros = valor
+            .objeto("juros", &CAMPOS_ENCARGO)?
+            .map(|campos| juros(&campos))
+            .transpose()?;
+        novo.abatimento = valor
+            .objeto("abatimento", &CAMPOS_ENCARGO)?
+            .map(|campos| abatimento(&campos))
+            .transpose()?;
+        novo.desconto = valor
+            .objeto("desconto", &CAMPOS_DESCONTO)?
+            .map(|campos| desconto(&campos))
+            .transpose()?;
+        revisao.valor = Some(novo);
+    }
+    revisao.loc = campos
+        .objeto("loc", &CAMPOS_LOC)?
+        .map(|campos| loc(&campos))
+        .transpose()?;
+    revisao.chave = campos
+        .texto("chave")?
+        .map(|chave| {
+            chave
+                .parse::<ChavePix>()
+                .map_err(|err| campos.erro("chave", err))
+        })
+        .transpose()?;
+    revisao.solicitacao_pagador = campos.texto("solicitacaoPagador")?;
+    if campos.lista("infoAdicionais")?.is_some() {
+        revisao.info_adicionais = Some(infos(campos)?);
+    }
+    revisao.validar().map_err(|err| erro(campos, &err))?;
+    Ok(revisao)
+}
+
+/// An error of the library's checks, named by its field.
+fn erro(campos: &Campos<'_>, err: &CobrancaPixError) -> CliError {
+    match err.campo() {
+        "" => campos.erro_geral(err),
+        campo => campos.erro(campo, err),
+    }
 }
 
 /// `cpf` or `cnpj`, the name and, optionally, e-mail and address.
@@ -453,7 +565,7 @@ mod tests {
         assert!(
             ler(&valor)
                 .unwrap_err()
-                .starts_with("cobv.json, campo \"devedor\": obrigatório")
+                .starts_with("cobv.json, campo \"devedor\": obrigatório: nome e cpf ou cnpj")
         );
     }
 }
