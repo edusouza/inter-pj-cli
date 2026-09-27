@@ -308,6 +308,8 @@ pub(crate) enum ConfigCommand {
     Caminho,
     /// Mostra a configuração efetiva do perfil (segredos ocultos)
     Mostrar,
+    /// Confere o arquivo de configuração e o perfil, apontando o que corrigir
+    Verificar(VerificarArgs),
 }
 
 #[derive(Debug, Args)]
@@ -316,6 +318,16 @@ pub(crate) struct InitArgs {
     /// Sobrescreve o arquivo se ele já existir
     #[arg(long)]
     pub(crate) forcar: bool,
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct VerificarArgs {
+    /// Troca as aspas duplas dos caminhos do Windows por aspas simples,
+    /// guardando uma cópia do arquivo original (config.toml.bak, sem
+    /// sobrescrever uma cópia anterior)
+    #[arg(long)]
+    pub(crate) corrigir: bool,
 }
 
 fn parse_data(value: &str) -> Result<NaiveDate, String> {
