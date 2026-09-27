@@ -18,7 +18,7 @@ use crate::cli::{
     SolicitacaoCriarArgs,
 };
 use crate::commands::pix::{documento, pessoa};
-use crate::commands::{Context, simulacao};
+use crate::commands::{Context, agora, simulacao};
 use crate::confirmacao::{Stdio, Terminal, confirmar, descrever_ambiente, pode_confirmar};
 use crate::error::{CliError, resultado_incerto};
 use crate::output::{self, horario_em, secao};
@@ -39,8 +39,7 @@ async fn criar(
     args: &SolicitacaoCriarArgs,
     terminal: &mut dyn Terminal,
 ) -> Result<(), CliError> {
-    let agora = Local::now().fixed_offset();
-    let expiracao = expira_em(args.expiracao, agora, &Local)?;
+    let expiracao = expira_em(args.expiracao, agora(), &Local)?;
     let mut destinatario =
         DestinatarioSolicRec::new(args.documento.clone(), args.conta.trim(), args.ispb.trim());
     destinatario.agencia = args

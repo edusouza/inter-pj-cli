@@ -171,6 +171,39 @@ async fn simulacao_e_erros_nao_consultam_nem_enviam() {
     env.cmd().args(criar()).assert().code(2);
 }
 
+/// The expiration counts from the bank's now: with today fixed by
+/// `INTER_HOJE`, a day after it has not passed, whatever the clock says,
+/// and a day before it has.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_expiracao_conta_do_dia_do_banco() {
+    let env = env().await;
+    nothing_is_sent(&env).await;
+    let assert = env
+        .cmd()
+        .env("INTER_HOJE", "2020-01-10")
+        .args(criar_com("--expiracao", "2020-01-15"))
+        .arg("--simular")
+        .assert()
+        .success();
+    assert!(
+        stderr_of(&assert).contains("15/01/2020 23:59:59"),
+        "{}",
+        stderr_of(&assert)
+    );
+    let assert = env
+        .cmd()
+        .env("INTER_HOJE", "2020-01-10")
+        .args(criar_com("--expiracao", "2020-01-09"))
+        .arg("--sim")
+        .assert()
+        .code(2);
+    assert!(
+        stderr_of(&assert).contains("--expiracao: 09/01/2020 23:59:59 já passou"),
+        "{}",
+        stderr_of(&assert)
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn recusa_uma_recorrencia_que_nao_aguarda_aprovacao() {
     let env = env().await;

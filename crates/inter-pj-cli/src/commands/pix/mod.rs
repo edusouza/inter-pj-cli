@@ -53,7 +53,7 @@ pub(super) async fn run(context: &Context, command: PixCommand) -> Result<(), Cl
 /// The period of the arguments, in the local time zone: by default, from
 /// the start of the day 30 days ago (today included) to now.
 pub(crate) fn periodo(args: PeriodoPixArgs) -> Result<PeriodoPix, CliError> {
-    periodo_em(args, Local::now().fixed_offset(), &Local)
+    periodo_em(args, super::agora(), &Local)
 }
 
 fn periodo_em<Tz: TimeZone>(
