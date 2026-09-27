@@ -25,7 +25,7 @@ use crate::cli::{
 };
 use crate::commands::pix::{antes_e_depois, documento, pagina, periodo, pessoa};
 use crate::commands::qrcode::OpcoesQr;
-use crate::commands::{Context, simulacao};
+use crate::commands::{Context, hoje, simulacao};
 use crate::confirmacao::{Stdio, Terminal, confirmar, descrever_ambiente, pode_confirmar};
 use crate::cores::Tom;
 use crate::error::{CliError, resultado_incerto};
@@ -45,10 +45,6 @@ pub(super) async fn run(context: &Context, command: RecCommand) -> Result<(), Cl
         RecCommand::Revisar(args) => revisar(context, &args, &mut Stdio).await,
         RecCommand::Cancelar(args) => cancelar(context, &args, &mut Stdio).await,
     }
-}
-
-fn hoje() -> NaiveDate {
-    Local::now().date_naive()
 }
 
 async fn criar(

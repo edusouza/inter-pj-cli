@@ -20,6 +20,9 @@ pub(crate) const CLIENT_SECRET: &str = "segredo-dos-guias-que-nunca-deve-vazar";
 /// Where the session's home is in what the commands print.
 const CASA: &str = "/home/voce";
 
+/// Today in the guides (`INTER_HOJE`), so that their dates do not go stale.
+pub(crate) const HOJE: &str = "2026-09-24";
+
 #[derive(Debug)]
 pub(crate) struct Sessao {
     dir: TempDir,
@@ -140,6 +143,7 @@ impl Sessao {
             .env("TZ", "America/Sao_Paulo")
             .env("NO_COLOR", "1")
             .env("INTER_BASE_URL", &self.servidor)
+            .env("INTER_HOJE", HOJE)
             .env("INTER_CLIENT_SECRET", CLIENT_SECRET)
             .envs(linha.variaveis.iter().map(|(nome, valor)| (nome, valor)));
         comando.stdin(match &linha.entrada {

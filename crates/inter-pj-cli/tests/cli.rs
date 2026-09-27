@@ -97,6 +97,39 @@ async fn data_em_formato_invalido_e_erro_de_uso() {
         .stderr(predicate::str::contains("AAAA-MM-DD"));
 }
 
+/// `INTER_HOJE` fixes today for the tests against a local mock of the API:
+/// the default period of the statement ends on it. Without a local mock, it
+/// is refused.
+#[tokio::test(flavor = "multi_thread")]
+async fn inter_hoje_fixa_o_dia_so_nos_testes() {
+    let env = TestEnv::new().await;
+    env.write_config("");
+    env.mount_token("extrato.read", None).await;
+    Mock::given(method("GET"))
+        .and(path("/banking/v2/extrato"))
+        .and(query_param("dataInicio", "2026-08-26"))
+        .and(query_param("dataFim", "2026-09-24"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"transacoes": []})))
+        .expect(1)
+        .mount(&env.server)
+        .await;
+    env.cmd()
+        .env("INTER_HOJE", "2026-09-24")
+        .arg("extrato")
+        .assert()
+        .success()
+        .stdout("Extrato de 26/08/2026 a 24/09/2026\n\nNenhuma transação no período.\n");
+    env.cmd()
+        .env("INTER_HOJE", "2026-09-24")
+        .env_remove("INTER_BASE_URL")
+        .arg("extrato")
+        .assert()
+        .code(3)
+        .stderr(predicate::str::contains(
+            "INTER_HOJE só vale junto com INTER_BASE_URL",
+        ));
+}
+
 /// The errors of the parser are in Portuguese, like every other, and go to
 /// stderr with the exit code of a usage error.
 #[tokio::test(flavor = "multi_thread")]
