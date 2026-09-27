@@ -1,5 +1,6 @@
 //! The `console` blocks of a guide: the commands, what the guide shows after
-//! each one, and the comparison with what they printed.
+//! each one, and the comparison with what they printed; and the files the
+//! guide shows, which its commands read.
 
 use std::fs;
 use std::ops::Range;
@@ -29,6 +30,15 @@ pub(crate) struct Guia {
 pub(crate) struct Bloco {
     pub(crate) diretiva: Diretiva,
     pub(crate) comandos: Vec<Comando>,
+    /// `<!-- guia: arquivo NOME -->` before a block of any kind: a file,
+    /// written in the session's home before the blocks after it run.
+    pub(crate) arquivo: Option<Arquivo>,
+}
+
+#[derive(Debug)]
+pub(crate) struct Arquivo {
+    pub(crate) nome: String,
+    pub(crate) conteudo: String,
 }
 
 #[derive(Debug)]
@@ -57,20 +67,35 @@ impl Guia {
         let mut blocos = Vec::new();
         let mut i = 0;
         while i < linhas.len() {
-            if linhas[i].trim_end() != "```console" {
+            let abertura = linhas[i].trim_end();
+            if !abertura.starts_with("```") {
                 i += 1;
                 continue;
             }
-            let diretiva = diretiva(&linhas[..i]);
             let fim = (i + 1..linhas.len())
                 .find(|&j| linhas[j].trim_end() == "```")
                 .unwrap_or_else(|| {
                     panic!("{}: bloco sem fim na linha {}", caminho.display(), i + 1)
                 });
-            blocos.push(Bloco {
-                diretiva,
-                comandos: comandos(&linhas, i + 1..fim),
-            });
+            let comentario = comentario(&linhas[..i]);
+            if let Some(nome) = comentario.and_then(|texto| texto.strip_prefix("guia: arquivo ")) {
+                let mut conteudo = linhas[i + 1..fim].join("\n");
+                conteudo.push('\n');
+                blocos.push(Bloco {
+                    diretiva: Diretiva::Conferir,
+                    comandos: Vec::new(),
+                    arquivo: Some(Arquivo {
+                        nome: nome.trim().to_owned(),
+                        conteudo,
+                    }),
+                });
+            } else if abertura == "```console" {
+                blocos.push(Bloco {
+                    diretiva: diretiva(comentario),
+                    comandos: comandos(&linhas, i + 1..fim),
+                    arquivo: None,
+                });
+            }
             i = fim + 1;
         }
         Self { linhas, blocos }
@@ -93,11 +118,23 @@ impl Guia {
     }
 }
 
-/// The comment right before a block, if it is a directive.
-fn diretiva(antes: &[String]) -> Diretiva {
-    match antes.iter().rev().find(|linha| !linha.trim().is_empty()) {
-        Some(linha) if linha.trim() == "<!-- guia: saída ilustrativa -->" => Diretiva::Ilustrativa,
-        Some(linha) if linha.trim() == "<!-- guia: não executar -->" => Diretiva::NaoExecutar,
+/// The text of the comment right before a block, if there is one.
+fn comentario(antes: &[String]) -> Option<&str> {
+    antes
+        .iter()
+        .rev()
+        .find(|linha| !linha.trim().is_empty())?
+        .trim()
+        .strip_prefix("<!--")?
+        .strip_suffix("-->")
+        .map(str::trim)
+}
+
+/// What the comment before a `console` block says to do with it.
+fn diretiva(comentario: Option<&str>) -> Diretiva {
+    match comentario {
+        Some("guia: saída ilustrativa") => Diretiva::Ilustrativa,
+        Some("guia: não executar") => Diretiva::NaoExecutar,
         _ => Diretiva::Conferir,
     }
 }
@@ -220,15 +257,19 @@ impl Comando {
 
 /// Where a terminal shows the question of a confirmation: after the
 /// summary, which is the banner of production, if any, a title, and its
-/// indented lines and warnings.
+/// indented lines and warnings, blank lines between them included (the
+/// table of a batch).
 fn depois_do_resumo(linhas: &[String]) -> usize {
     let banner = usize::from(linhas.first().is_some_and(|linha| linha.starts_with("***")));
-    let titulo = (banner + 1).min(linhas.len());
-    titulo
-        + linhas[titulo..]
-            .iter()
-            .take_while(|linha| linha.starts_with("  ") || linha.starts_with("aviso: "))
-            .count()
+    let mut fim = (banner + 1).min(linhas.len());
+    for (i, linha) in linhas.iter().enumerate().skip(fim) {
+        if linha.starts_with("  ") || linha.starts_with("aviso: ") {
+            fim = i + 1;
+        } else if !linha.is_empty() {
+            break;
+        }
+    }
+    fim
 }
 
 /// Whether the texts are the same, but for the generated keys and txids,
@@ -301,6 +342,10 @@ mod tests {
             depois_do_resumo(&linhas("Devolução\n  Valor  R$ 1,00\nFeito.")),
             2
         );
+        let lote = linhas(
+            "Lote a enviar\n  Total  R$ 2,00\n\n  Onde     Valor\n  linha 2  R$ 1,00\naviso: confira\nLote recebido.\n\nAcompanhe",
+        );
+        assert_eq!(depois_do_resumo(&lote), 6);
         assert_eq!(depois_do_resumo(&[]), 0);
     }
 

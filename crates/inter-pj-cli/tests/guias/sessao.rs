@@ -77,6 +77,15 @@ impl Sessao {
         sessao
     }
 
+    /// Writes a file the guide shows, in the session's home.
+    pub(crate) fn gravar(&self, nome: &str, conteudo: &str) {
+        let caminho = self.casa().join(nome);
+        if let Some(pasta) = caminho.parent() {
+            fs::create_dir_all(pasta).unwrap();
+        }
+        fs::write(caminho, conteudo).unwrap();
+    }
+
     /// The real directory that the commands see as `/home/voce`.
     fn casa(&self) -> PathBuf {
         self.dir.path().join(CASA.trim_start_matches('/'))

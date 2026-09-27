@@ -12,6 +12,8 @@
 //!   which follow the clock).
 //! - `<!-- guia: não executar -->` before a block skips it (installation, a
 //!   pipe to another program).
+//! - `<!-- guia: arquivo lote.json -->` before a block of any kind writes it
+//!   in the session's home, for the commands after it to read.
 //! - The keys and txids the CLI generates match any other of the same shape,
 //!   the same one wherever the guide repeats it.
 //! - No command, in any block, may print the `client_secret`.
@@ -73,6 +75,10 @@ async fn os_exemplos_dos_guias_funcionam() {
         let banco = banco::Banco::novo().await;
         let sessao = Sessao::nova(&banco.uri());
         for bloco in &mut guia.blocos {
+            if let Some(arquivo) = &bloco.arquivo {
+                sessao.gravar(&arquivo.nome, &arquivo.conteudo);
+                continue;
+            }
             if bloco.diretiva == Diretiva::NaoExecutar {
                 continue;
             }

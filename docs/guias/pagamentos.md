@@ -1,8 +1,16 @@
 # Pagamentos
 
-Boletos, contas de consumo e tributos com código de barras são pagos pelo código. Pagar tira dinheiro da conta, e os trilhos de segurança são os do [Pix](pix.md): o resumo com o valor por extenso, a confirmação num terminal (ou `--sim`), `--simular` e o limite por operação do perfil. Diferente do Pix, esta API não tem chave de idempotência, então um resultado incerto pede uma conferência antes de qualquer nova tentativa.
+Boletos, contas de consumo e tributos com código de barras são pagos pelo código, e os DARFs sem código de barras, pelos seus campos; uns e outros podem ir juntos num lote, a partir de uma planilha. Pagar tira dinheiro da conta, e os trilhos de segurança são os do [Pix](pix.md): o resumo com o valor por extenso, a confirmação num terminal (ou `--sim`), `--simular` e o limite por operação do perfil. Diferente do Pix, estas APIs não têm chave de idempotência, então um resultado incerto pede uma conferência antes de qualquer nova tentativa.
 
-Os exemplos são da Empresa Exemplo Ltda, uma empresa fictícia, no perfil de produção. Pagar precisa do escopo `pagamento-boleto.write`, e listar, do `pagamento-boleto.read`.
+Os exemplos são da Empresa Exemplo Ltda, uma empresa fictícia, no perfil de produção. Cada comando precisa de um escopo da integração:
+
+| Comando | Escopo |
+| --- | --- |
+| `pagamento boleto pagar` e `cancelar` | `pagamento-boleto.write` |
+| `pagamento boleto listar` e `pagamento darf listar` | `pagamento-boleto.read` |
+| `pagamento darf pagar` | `pagamento-darf.write` |
+| `pagamento lote enviar` | `pagamento-lote.write` |
+| `pagamento lote consultar` | `pagamento-lote.read` |
 
 - [Pagar um boleto](#pagar-um-boleto)
 - [Contas e tributos](#contas-e-tributos)
@@ -12,6 +20,11 @@ Os exemplos são da Empresa Exemplo Ltda, uma empresa fictícia, no perfil de pr
 - [Quando o resultado fica incerto](#quando-o-resultado-fica-incerto)
 - [Os pagamentos feitos](#os-pagamentos-feitos)
 - [Cancelar um agendamento](#cancelar-um-agendamento)
+- [DARF](#darf)
+- [DARF vencido](#darf-vencido)
+- [Os DARFs pagos](#os-darfs-pagos)
+- [Lotes](#lotes)
+- [Um lote com problemas](#um-lote-com-problemas)
 
 ## Pagar um boleto
 
@@ -251,3 +264,275 @@ Agendamento a cancelar
 aviso: o pagamento está pago: a API deve recusar o cancelamento
 erro: DELETE /banking/v2/pagamento/{codigoTransacao} respondeu 422 (não processável): Pagamento não pode ser cancelado — Só um pagamento agendado pode ser cancelado.
 ```
+
+## DARF
+
+O DARF sem código de barras, de tributos federais como o PIS e a COFINS, é pago pelos campos do documento. Cada campo tem uma opção, e o seu nome na API é o do arquivo JSON que `--arquivo` lê:
+
+| Campo do DARF | Opção | Campo da API |
+| --- | --- | --- |
+| 01 Nome e telefone | `--nome-empresa` e, se quiser, `--telefone` | `nomeEmpresa` e `telefoneEmpresa` |
+| 02 Período de apuração | `--periodo-apuracao` | `periodoApuracao` |
+| 03 CPF ou CNPJ | `--contribuinte` | `cnpjCpf` |
+| 04 Código da receita | `--codigo-receita` | `codigoReceita` |
+| 05 Número de referência | `--referencia` | `referencia` |
+| 06 Data de vencimento | `--vencimento` | `dataVencimento` |
+| 07 Valor do principal | `--valor-principal` | `valorPrincipal` |
+| 08 Valor da multa | `--multa` | `valorMulta` |
+| 09 Valor dos juros | `--juros` | `valorJuros` |
+
+`--descricao`, que não está no DARF, descreve o pagamento. A API exige todos os campos, menos o telefone, a multa e os juros. A COFINS de agosto da Empresa Exemplo vence amanhã:
+
+```console
+$ inter-pj pagamento darf pagar --codigo-receita 2172 --contribuinte 11.444.777/0001-61 \
+    --nome-empresa "Empresa Exemplo Ltda" --periodo-apuracao 2026-08-31 --vencimento 2026-09-25 \
+    --referencia 13609400849201739 --descricao "COFINS de agosto" --valor-principal 1.234,56
+*** PRODUÇÃO: este pagamento movimenta dinheiro da conta real ***
+DARF a pagar
+  Ambiente             PRODUÇÃO (conta real)
+  Contribuinte         Empresa Exemplo Ltda (11.444.777/0001-61)
+  Código da receita    2172
+  Período de apuração  31/08/2026
+  Vencimento           25/09/2026
+  Referência           13609400849201739
+  Descrição            COFINS de agosto
+  Valor principal      R$ 1.234,56
+  Total                R$ 1.234,56 (mil duzentos e trinta e quatro reais e cinquenta e seis centavos)
+  Quando               agora
+Confirmar o pagamento do DARF? [s/N] s
+DARF pago.
+Código da solicitação  b1c2d3e4-f5a6-4b7c-8d9e-0f1a2b3c4d5e
+Data do pagamento      24/09/2026
+Autenticação           202609240001
+
+Acompanhe com: inter-pj pagamento darf listar --codigo-solicitacao b1c2d3e4-f5a6-4b7c-8d9e-0f1a2b3c4d5e
+```
+
+Antes de enviar, a CLI confere o CPF ou o CNPJ (os dígitos verificadores), o código da receita (4 dígitos), a referência (só dígitos, até 30), os textos e os valores. Como nos boletos, conforme a configuração da conta o pagamento pode esperar a aprovação de outra pessoa no Internet Banking, e, se a resposta se perder, a CLI sai com o código 9 e mostra como conferir antes de qualquer nova tentativa (veja [Quando o resultado fica incerto](#quando-o-resultado-fica-incerto)).
+
+## DARF vencido
+
+Um DARF pago depois do vencimento precisa da multa e dos juros, que a API não calcula. Sem eles, o resumo avisa. Com `--simular`, nada é enviado, e a CLI mostra a requisição:
+
+```console
+$ inter-pj pagamento darf pagar --codigo-receita 8109 --contribuinte 11.444.777/0001-61 \
+    --nome-empresa "Empresa Exemplo Ltda" --periodo-apuracao 2026-07-31 --vencimento 2026-08-25 \
+    --referencia 13609400849201747 --descricao "PIS de julho" --valor-principal 267,49 --simular
+*** PRODUÇÃO: este pagamento movimenta dinheiro da conta real ***
+DARF a pagar
+  Ambiente             PRODUÇÃO (conta real)
+  Contribuinte         Empresa Exemplo Ltda (11.444.777/0001-61)
+  Código da receita    8109
+  Período de apuração  31/07/2026
+  Vencimento           25/08/2026
+  Referência           13609400849201747
+  Descrição            PIS de julho
+  Valor principal      R$ 267,49
+  Total                R$ 267,49 (duzentos e sessenta e sete reais e quarenta e nove centavos)
+  Quando               agora
+aviso: o DARF venceu em 25/08/2026 e não tem multa nem juros: pago depois do vencimento, ele precisa dos acréscimos calculados
+Simulação: nada foi enviado.
+
+POST https://cdpj.partners.bancointer.com.br/banking/v2/pagamento/darf
+
+{
+  "cnpjCpf": "11444777000161",
+  "codigoReceita": "8109",
+  "dataVencimento": "2026-08-25",
+  "descricao": "PIS de julho",
+  "nomeEmpresa": "Empresa Exemplo Ltda",
+  "periodoApuracao": "2026-07-31",
+  "referencia": "13609400849201747",
+  "valorPrincipal": 267.49
+}
+```
+
+O arquivo que `--arquivo` lê é um objeto JSON com os mesmos campos. Com a multa e os juros, o PIS de julho fica assim, em `darf.json`:
+
+<!-- guia: arquivo darf.json -->
+```json
+{
+  "cnpjCpf": "11.444.777/0001-61",
+  "codigoReceita": "8109",
+  "nomeEmpresa": "Empresa Exemplo Ltda",
+  "periodoApuracao": "2026-07-31",
+  "dataVencimento": "2026-08-25",
+  "referencia": "13609400849201747",
+  "descricao": "PIS de julho",
+  "valorPrincipal": "267,49",
+  "valorMulta": "26,48",
+  "valorJuros": "2,67"
+}
+```
+
+```console
+$ inter-pj pagamento darf pagar --arquivo darf.json
+*** PRODUÇÃO: este pagamento movimenta dinheiro da conta real ***
+DARF a pagar
+  Ambiente             PRODUÇÃO (conta real)
+  Contribuinte         Empresa Exemplo Ltda (11.444.777/0001-61)
+  Código da receita    8109
+  Período de apuração  31/07/2026
+  Vencimento           25/08/2026
+  Referência           13609400849201747
+  Descrição            PIS de julho
+  Valor principal      R$ 267,49
+  Multa                R$ 26,48
+  Juros                R$ 2,67
+  Total                R$ 296,64 (duzentos e noventa e seis reais e sessenta e quatro centavos)
+  Quando               agora
+Confirmar o pagamento do DARF? [s/N] s
+DARF pago.
+Código da solicitação  c2d3e4f5-a6b7-4c8d-9e0f-1a2b3c4d5e6f
+Data do pagamento      24/09/2026
+Autenticação           202609240002
+
+Acompanhe com: inter-pj pagamento darf listar --codigo-solicitacao c2d3e4f5-a6b7-4c8d-9e0f-1a2b3c4d5e6f
+```
+
+Os valores podem ser números (`267.49`) ou textos (`"267,49"`). Um campo desconhecido é recusado, para que um erro de digitação (`valorMuta`) não apague a multa, e as mensagens apontam o campo. Com `--arquivo -`, o DARF vem da entrada padrão, e a confirmação exige `--sim`.
+
+## Os DARFs pagos
+
+`pagamento darf listar` mostra os DARFs pagos num período, pelo dia do pagamento; sem datas, os incluídos nos últimos 30 dias, como a API faz. `--codigo-receita` e `--codigo-solicitacao` filtram:
+
+```console
+$ inter-pj pagamento darf listar
+DARFs incluídos nos últimos 30 dias
+
+Pagamento   Receita  Apuração    Vencimento  Status        Total  Código da solicitação
+24/09/2026  2172     31/08/2026  25/09/2026  pago    R$ 1.234,56  b1c2d3e4-f5a6-4b7c-8d9e-0f1a2b3c4d5e
+24/09/2026  8109     31/07/2026  25/08/2026  pago      R$ 296,64  c2d3e4f5-a6b7-4c8d-9e0f-1a2b3c4d5e6f
+
+2 DARFs
+
+$ inter-pj pagamento darf listar --inicio 2026-09-01 --fim 2026-09-30 --codigo-receita 8109
+DARFs pagos de 01/09/2026 a 30/09/2026
+Código da receita: 8109
+
+Pagamento   Receita  Apuração    Vencimento  Status      Total  Código da solicitação
+24/09/2026  8109     31/07/2026  25/08/2026  pago    R$ 296,64  c2d3e4f5-a6b7-4c8d-9e0f-1a2b3c4d5e6f
+
+1 DARF
+```
+
+A listagem sai também em `--json` e em `--formato csv`, com os campos da API.
+
+## Lotes
+
+De 2 a 150 boletos, contas, tributos e DARFs podem ir juntos num lote, a partir de uma planilha CSV ou de um arquivo JSON. `pagamento lote modelo` imprime um exemplo, com um boleto, uma conta e um DARF de dados fictícios: em JSON ou, com `csv`, numa planilha separada por `;`, como o Excel em português salva.
+
+```console
+$ inter-pj pagamento lote modelo csv > lote.csv
+```
+
+Na planilha, cada linha é um pagamento, e cada coluna, um campo da API; as colunas que um pagamento não usa ficam vazias, e as que nenhum usa podem sair. Cada pagamento tem o `tipoPagamento` e os campos do seu tipo:
+
+- `BOLETO`, para boletos, contas e tributos com código de barras: `codBarraLinhaDigitavel` e, quando o código não os traz ou para pagar outro valor, `dataVencimento` e `valorPagar`; se quiser, `dataPagamento`, para agendar, e `cpfCnpjBeneficiario`, como em `pagamento boleto pagar`;
+- `DARF`: os campos da API do [DARF](#darf).
+
+A planilha dos pagamentos do dia, `lote.csv`, tem o boleto de outubro do fornecedor, cujo agendamento foi cancelado, o PIS de agosto e, por engano, o boleto de setembro, que já foi pago:
+
+<!-- guia: arquivo lote.csv -->
+```csv
+tipoPagamento;codBarraLinhaDigitavel;dataVencimento;cnpjCpf;nomeEmpresa;codigoReceita;periodoApuracao;referencia;descricao;valorPrincipal
+BOLETO;07790.00017 23456.700006 00000.016022 7 16000000189000;;;;;;;;
+BOLETO;07790.00017 23456.700006 00000.015818 1 15850000189000;;;;;;;;
+DARF;;2026-09-25;11.444.777/0001-61;Empresa Exemplo Ltda;8109;2026-08-31;13609400849201755;PIS de agosto;267,49
+```
+
+```console
+$ inter-pj pagamento lote enviar --arquivo lote.csv --identificador "Pagamentos de 24/09"
+*** PRODUÇÃO: este lote movimenta dinheiro da conta real ***
+Lote a enviar
+  Ambiente       PRODUÇÃO (conta real)
+  Arquivo        lote.csv
+  Identificador  Pagamentos de 24/09
+  Pagamentos     2 boletos e contas (R$ 3.780,00) e 1 DARF (R$ 267,49)
+  Total          R$ 4.047,49 (quatro mil e quarenta e sete reais e quarenta e nove centavos)
+
+  Onde     Tipo    Documento                                                 Vencimento  Quando        Valor
+  linha 2  boleto  07790.00017 23456.700006 00000.016022 7 16000000189000    15/10/2026  agora   R$ 1.890,00
+  linha 3  boleto  07790.00017 23456.700006 00000.015818 1 15850000189000    30/09/2026  agora   R$ 1.890,00
+  linha 4  DARF    receita 8109 · Empresa Exemplo Ltda (11.444.777/0001-61)  25/09/2026  agora     R$ 267,49
+Enviar o lote de 3 pagamentos (R$ 4.047,49)? [s/N] s
+Lote recebido: 3 pagamentos, em processamento.
+Identificador do lote  5f1b2c3d4e5f60718293a4b5
+Meu identificador      Pagamentos de 24/09
+
+Acompanhe com: inter-pj pagamento lote consultar 5f1b2c3d4e5f60718293a4b5 --aguardar
+```
+
+O resumo mostra o total de cada tipo e o do lote, por extenso, e cada pagamento, e avisa, como nos pagamentos avulsos, sobre os vencimentos que já passaram e os valores diferentes dos do código.
+
+O banco processa o lote depois de recebê-lo. `pagamento lote consultar` mostra o status do lote e de cada pagamento, e com `--aguardar` consulta de novo a cada 6 segundos, até o fim do processamento:
+
+```console
+$ inter-pj pagamento lote consultar 5f1b2c3d4e5f60718293a4b5 --aguardar
+Lote 5f1b2c3d4e5f60718293a4b5
+  Status             processado com erro
+  Meu identificador  Pagamentos de 24/09
+  Criado em          24/09/2026 10:15:00
+  Pagamentos         3
+
+Tipo    Documento                                                 Status        Valor  Código                                Detalhe
+boleto  07790.00017 23456.700006 00000.016022 7 16000000189000    pago    R$ 1.890,00  6b8d0f2a-4c6e-4a8b-9d0f-2a4c6e8b0d3f
+boleto  07790.00017 23456.700006 00000.015818 1 15850000189000    erro    R$ 1.890,00                                        Pagamento já realizado para este código de barras.
+DARF    receita 8109 · Empresa Exemplo Ltda (11.444.777/0001-61)  pago      R$ 267,49  d3e4f5a6-b7c8-4d9e-8f1a-2b3c4d5e6f7a
+erro: o lote foi processado com erro: 1 de 3 pagamentos não foi feito
+```
+
+O banco recusou o boleto de setembro, que já tinha sido pago em [Pagar um boleto](#pagar-um-boleto). Não conte com isso: a CLI recusa um pagamento repetido dentro do arquivo, mas não confere os que já foram feitos, e nem todo pagamento em dobro é recusado pelo banco. Antes de enviar um lote, confira os pagamentos feitos com `pagamento boleto listar`.
+
+Com `--aguardar`, a CLI sai com o código 0 quando o lote é processado sem erro, 5 quando algum pagamento não foi feito e 8 quando o tempo acaba (`--timeout`, de 5 minutos por padrão).
+
+Os trilhos de segurança são os dos outros pagamentos: a confirmação ou `--sim`, `--simular` e o limite por operação do perfil, que vale para cada pagamento do lote, e não para o total. Também não há chave de idempotência: se o resultado do envio ficar incerto, confira `pagamento boleto listar` e `pagamento darf listar` antes de enviar de novo.
+
+## Um lote com problemas
+
+Antes de enviar, a CLI confere o lote inteiro, com as regras de cada tipo, e recusa campos desconhecidos ou de outro tipo. Havendo problemas, aponta cada pagamento com problema, pela linha (na planilha) ou pela posição (no JSON), e o campo, e não envia nada.
+
+O Excel, ao abrir um CSV, converte o que parece número ou data: números longos viram notação científica e perdem dígitos, códigos perdem os zeros à esquerda (`0220` vira `220`) e datas mudam de formato. Esta planilha, `excel.csv`, foi aberta e salva no Excel:
+
+<!-- guia: arquivo excel.csv -->
+```csv
+tipoPagamento;codBarraLinhaDigitavel;dataVencimento;cnpjCpf;nomeEmpresa;codigoReceita;periodoApuracao;referencia;descricao;valorPrincipal
+BOLETO;7,79716E+42;;;;;;;;
+BOLETO;83640000002-9 48370101202-1 60901000000-6 00001234567-4;28/09/2026;;;;;;;
+DARF;;25/09/2026;11.444.777/0001-61;Empresa Exemplo Ltda;8109;31/08/2026;1,36094E+16;PIS de agosto;267,49
+```
+
+```console
+$ inter-pj pagamento lote enviar --arquivo excel.csv
+erro: excel.csv: 3 pagamentos com problema; nada foi enviado:
+  linha 2, campo "codBarraLinhaDigitavel": "7,79716E+42" está em notação científica, como o Excel mostra números longos, e os dígitos se perderam; formate a coluna como texto e digite de novo
+  linha 3, campo "dataVencimento": data inválida "28/09/2026": use AAAA-MM-DD
+  linha 4, campo "referencia": "1,36094E+16" está em notação científica, como o Excel mostra números longos, e os dígitos se perderam; formate a coluna como texto e digite de novo
+```
+
+Para editar a planilha no Excel, importe o arquivo (Dados > De Texto/CSV) sem detectar os tipos de dados, ou formate as colunas como texto antes de digitar; linhas digitáveis e CPF ou CNPJ com pontuação, como no modelo, já ficam como texto. A planilha pode ser separada por `,` ou `;`, em UTF-8, com ou sem BOM, e os valores podem ter vírgula (`267,49`).
+
+Em JSON, o arquivo é um objeto com os `pagamentos` e, se quiser, o `meuIdentificador`, que `--identificador` substitui; ou só a lista dos pagamentos, como em `outubro.json`. Nele, o boleto do fornecedor aparece duas vezes:
+
+<!-- guia: arquivo outubro.json -->
+```json
+[
+  {
+    "tipoPagamento": "BOLETO",
+    "codBarraLinhaDigitavel": "07790.00017 23456.700006 00000.016022 7 16000000189000"
+  },
+  {
+    "tipoPagamento": "BOLETO",
+    "codBarraLinhaDigitavel": "07797160000001890000000123456700000000001602"
+  }
+]
+```
+
+```console
+$ inter-pj pagamento lote enviar --arquivo outubro.json
+erro: pagamentos repetidos em outubro.json:
+  pagamento 1 e pagamento 2: o mesmo pagamento aparece mais de uma vez; confira se não é um pagamento em dobro
+dica: se forem mesmo pagamentos distintos, use --permitir-repetidos
+```
+
+Um pagamento repetido no arquivo é recusado: o mesmo código, na linha digitável ou no código de barras, ou um DARF com o mesmo contribuinte, receita, período, referência e total. Com `--sim`, um aviso não impediria o pagamento em dobro. Se forem mesmo pagamentos distintos, use `--permitir-repetidos`.

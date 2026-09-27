@@ -5,7 +5,7 @@ Como usar a `inter-pj` no dia a dia, um assunto por guia, com exemplos de termin
 | Guia | O que tem |
 | --- | --- |
 | [Saldo e extrato](saldo-e-extrato.md) | o saldo, o extrato de um período, o extrato completo com os detalhes de cada transação, planilhas e PDF |
-| [Pagamentos](pagamentos.md) | pagar boletos, contas e tributos pelo código, agendar, conferir o beneficiário, listar os pagamentos e cancelar um agendamento |
+| [Pagamentos](pagamentos.md) | pagar boletos, contas e tributos pelo código, agendar, conferir o beneficiário, listar os pagamentos e cancelar um agendamento; pagar DARFs, pelas opções ou por um arquivo; e pagar em lote, a partir de uma planilha ou de um JSON |
 | [Pix](pix.md) | enviar um Pix por chave, copia e cola ou dados bancários, agendar, os trilhos de segurança (resumo, confirmação, limite, idempotência), acompanhar o Pix enviado, os Pix recebidos e as devoluções |
 
 A instalação e a configuração estão no [README](../../README.md#instalação).
@@ -14,6 +14,7 @@ A instalação e a configuração estão no [README](../../README.md#instalaçã
 
 - Uma linha que começa com `$ ` é um comando. As linhas seguintes, até o próximo comando, são o que o terminal mostra: a saída do comando e as mensagens de erro e avisos, na ordem em que aparecem.
 - Um comando que pede confirmação aparece com a resposta: `Enviar o Pix? [s/N] s`.
+- Os arquivos que um comando lê, como uma planilha de pagamentos, aparecem antes dele, com o nome do arquivo no texto.
 - Os exemplos rodam no perfil `padrao`, de produção, de uma empresa fictícia, a Empresa Exemplo Ltda. Nomes, documentos, chaves e valores são todos fictícios.
 - Nos exemplos, hoje é 24/09/2026, e a pasta pessoal aparece como `/home/voce`.
 
@@ -32,4 +33,5 @@ Cada bloco `console` de `docs/guias`, `docs/receitas.md` e `docs/faq.md` é uma 
 
 - Escreva o comando e deixe a saída em branco: `ATUALIZAR_GUIAS=1 cargo test -p inter-pj-cli --test guias` grava no guia o que cada comando imprime. Num comando com confirmação, escreva só a linha da resposta (`Enviar o Pix? [s/N] s`), que fica depois do resumo. Revise o diff antes do commit.
 - Um comentário `<!-- guia: saída ilustrativa -->` antes do bloco faz o teste só conferir que o comando funciona (ou falha, se o guia mostra um `erro:`); `<!-- guia: não executar -->`, que o bloco não rode.
+- Um comentário `<!-- guia: arquivo lote.csv -->` antes de um bloco de qualquer linguagem grava o conteúdo do bloco em `lote.csv`, na pasta pessoal da sessão, para os comandos seguintes. O comentário não aparece no guia: diga o nome do arquivo no texto.
 - Os comandos aceitos são `inter-pj` e `cat`, com `>` e `<`; um exemplo com `|` ou com variáveis do shell precisa de `<!-- guia: não executar -->`.
