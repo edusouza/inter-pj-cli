@@ -6,6 +6,7 @@ Como usar a `inter-pj` no dia a dia, um assunto por guia, com exemplos de termin
 | --- | --- |
 | [Saldo e extrato](saldo-e-extrato.md) | o saldo, o extrato de um período, o extrato completo com os detalhes de cada transação, planilhas e PDF |
 | [Pagamentos](pagamentos.md) | pagar boletos, contas e tributos pelo código, agendar, conferir o beneficiário, listar os pagamentos e cancelar um agendamento; pagar DARFs, pelas opções ou por um arquivo; e pagar em lote, a partir de uma planilha ou de um JSON |
+| [Cobranças](cobrancas.md) | emitir cobranças (boletos com Pix) pelas opções ou por um arquivo, esperar a emissão, o boleto, o Pix e o QR Code, o PDF, o prazo depois do vencimento, as cobranças de um período e o resumo por situação |
 | [Pix](pix.md) | enviar um Pix por chave, copia e cola ou dados bancários, agendar, os trilhos de segurança (resumo, confirmação, limite, idempotência), acompanhar o Pix enviado, os Pix recebidos e as devoluções |
 
 A instalação e a configuração estão no [README](../../README.md#instalação).
