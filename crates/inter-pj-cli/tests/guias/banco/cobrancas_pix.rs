@@ -179,7 +179,7 @@ pub(super) fn copia_e_cola(location: &str) -> String {
 }
 
 /// CRC16-CCITT (polynomial 0x1021, initial value 0xFFFF), as the BR Code.
-fn crc16(bytes: &[u8]) -> u16 {
+pub(super) fn crc16(bytes: &[u8]) -> u16 {
     let mut crc: u16 = 0xFFFF;
     for byte in bytes {
         crc ^= u16::from(*byte) << 8;

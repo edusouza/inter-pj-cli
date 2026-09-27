@@ -2,13 +2,15 @@
 //! authorization of the charges of a contract. The account already has
 //! Fulano de Tal's basic plan, approved in September by a confirmation
 //! request, Cliente Exemplo Ltda's support contract, which the payer
-//! rejected, and Beltrana de Tal's monthly fee, created with the wrong
-//! amount and waiting for her approval. A lookup shows the requests of the
-//! recurrence ([`solicrec`](super::solicrec)). A recurrence created is waiting for
-//! the payer; the answer to the creation of Cliente Exemplo Ltda's second
+//! rejected and whose location still leads to it, and Beltrana de Tal's
+//! monthly fee, created with the wrong amount and waiting for her approval.
+//! A lookup shows the requests of the recurrence
+//! ([`solicrec`](super::solicrec)) and the QR Code of its location
+//! ([`locrec`](super::locrec)). A recurrence created is waiting for the
+//! payer; the answer to the creation of Cliente Exemplo Ltda's second
 //! contract gets lost, though the recurrence is created. A change of the
-//! first payment or of the payer's name is made at once, and so is a
-//! cancellation.
+//! first payment, of the payer's name or of the location is made at once,
+//! and so is a cancellation.
 
 use std::sync::{Arc, Mutex};
 
@@ -18,7 +20,7 @@ use wiremock::{MockServer, Request, ResponseTemplate};
 
 use super::automatico::Automatico;
 use super::cobrancas_pix::{no_periodo, pagina, periodo, periodo_invalido};
-use super::{parametros, problema, requisicao};
+use super::{locrec, parametros, problema, requisicao};
 
 /// The contract whose creation is made but whose answer gets lost.
 const RESPOSTA_PERDIDA: &str = "suporte-2026-007";
@@ -65,6 +67,12 @@ pub(super) fn iniciais() -> Vec<Value> {
         "recebedor": recebedor(),
         "status": "REJEITADA",
         "politicaRetentativa": "NAO_PERMITE",
+        "loc": {
+            "id": 8100,
+            "location": locrec::location(8100),
+            "criacao": "2026-09-10T17:31:02.000Z",
+            "idRec": "RN1234567820260910m2Hc6Vy8Qd1",
+        },
         "atualizacao": [
             {"status": "CRIADA", "data": "2026-09-10T17:32:45.000Z"},
             {"status": "REJEITADA", "data": "2026-09-12T12:05:09.000Z"},
@@ -111,7 +119,7 @@ pub(super) async fn montar(servidor: &MockServer, automatico: &Arc<Mutex<Automat
                 .recs
                 .iter()
                 .find(|rec| rec["idRec"] == id(request))
-                .map(|rec| automatico.com_solicitacoes(rec));
+                .map(|rec| automatico.consulta(rec));
             match rec {
                 Some(rec) => ResponseTemplate::new(200).set_body_json(rec),
                 None => nao_encontrada(),
@@ -130,10 +138,6 @@ fn id(request: &Request) -> &str {
     request.url.path().rsplit('/').next().unwrap_or_default()
 }
 
-fn achar<'a>(automatico: &'a mut Automatico, id: &str) -> Option<&'a mut Value> {
-    automatico.recs.iter_mut().find(|rec| rec["idRec"] == id)
-}
-
 fn nao_encontrada() -> ResponseTemplate {
     problema(
         404,
@@ -142,9 +146,17 @@ fn nao_encontrada() -> ResponseTemplate {
     )
 }
 
-/// A recurrence created now, waiting for the payer's approval.
+/// A recurrence created now, waiting for the payer's approval, with the
+/// free location it asks for.
 fn criar(automatico: &mut Automatico, request: &Request) -> ResponseTemplate {
     let corpo: Value = serde_json::from_slice(&request.body).unwrap();
+    let loc = match corpo["loc"].as_u64() {
+        Some(pedida) => match automatico.locrec_livre(pedida) {
+            Some(loc) => Some(loc),
+            None => return locrec::location_invalida(),
+        },
+        None => None,
+    };
     let retentativas = corpo["politicaRetentativa"] == "PERMITE_3R_7D";
     let id = automatico.id_rec(retentativas);
     let agora = automatico.agora();
@@ -162,6 +174,10 @@ fn criar(automatico: &mut Automatico, request: &Request) -> ResponseTemplate {
     }
     if let Some(txid) = corpo.pointer("/ativacao/dadosJornada/txid") {
         rec["ativacao"] = json!({"tipoJornada": "JORNADA_3", "dadosJornada": {"txid": txid}});
+    }
+    if let Some(mut loc) = loc {
+        loc["idRec"] = json!(id);
+        rec["loc"] = loc;
     }
     automatico.recs.push(rec.clone());
     if corpo["vinculo"]["contrato"] == RESPOSTA_PERDIDA {
@@ -199,17 +215,20 @@ fn listar(automatico: &Automatico, request: &Request) -> ResponseTemplate {
     pagina(&recs, &parametros, "recs")
 }
 
-/// A change of a recurrence, or its cancellation, made at once.
+/// A change of a recurrence, or its cancellation, made at once. A location
+/// asked for takes the place of the one the recurrence had, which becomes
+/// free.
 fn revisar(automatico: &mut Automatico, request: &Request) -> ResponseTemplate {
     let corpo: Value = serde_json::from_slice(&request.body).unwrap();
     let cancelamento = corpo["status"] == "CANCELADA";
     let agora = cancelamento.then(|| automatico.agora());
-    let Some(rec) = achar(automatico, id(request)) else {
+    let id = id(request);
+    let Some(indice) = automatico.recs.iter().position(|rec| rec["idRec"] == id) else {
         return nao_encontrada();
     };
     if ["REJEITADA", "EXPIRADA", "CANCELADA"]
         .iter()
-        .any(|encerrada| rec["status"] == *encerrada)
+        .any(|encerrada| automatico.recs[indice]["status"] == *encerrada)
     {
         return problema(
             400,
@@ -218,6 +237,7 @@ fn revisar(automatico: &mut Automatico, request: &Request) -> ResponseTemplate {
         );
     }
     if let Some(agora) = agora {
+        let rec = &mut automatico.recs[indice];
         rec["status"] = json!("CANCELADA");
         rec["encerramento"] = json!({"cancelamento": {
             "solicitante": "USUARIO_RECEBEDOR",
@@ -230,6 +250,14 @@ fn revisar(automatico: &mut Automatico, request: &Request) -> ResponseTemplate {
             .push(json!({"status": "CANCELADA", "data": agora}));
         return ResponseTemplate::new(200).set_body_json(&*rec);
     }
+    let loc = match corpo["loc"].as_u64() {
+        Some(pedida) => match automatico.locrec_livre(pedida) {
+            Some(loc) => Some(loc),
+            None => return locrec::location_invalida(),
+        },
+        None => None,
+    };
+    let rec = &mut automatico.recs[indice];
     if let Some(nome) = corpo.pointer("/vinculo/devedor/nome") {
         rec["vinculo"]["devedor"]["nome"] = nome.clone();
     }
@@ -239,5 +267,13 @@ fn revisar(automatico: &mut Automatico, request: &Request) -> ResponseTemplate {
     if let Some(txid) = corpo.pointer("/ativacao/dadosJornada/txid") {
         rec["ativacao"] = json!({"tipoJornada": "JORNADA_3", "dadosJornada": {"txid": txid}});
     }
-    ResponseTemplate::new(200).set_body_json(&*rec)
+    let antiga = loc.and_then(|mut loc| {
+        loc["idRec"] = json!(id);
+        rec.as_object_mut().unwrap().insert("loc".to_owned(), loc)
+    });
+    let resposta = ResponseTemplate::new(200).set_body_json(&*rec);
+    if let Some(antiga) = antiga {
+        automatico.liberar_locrec(antiga);
+    }
+    resposta
 }
