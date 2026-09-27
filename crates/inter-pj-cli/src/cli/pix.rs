@@ -32,6 +32,8 @@ pub(crate) enum PixCobCommand {
     Consultar(PixCobConsultarArgs),
     /// Cobranças imediatas criadas em um período (padrão: últimos 30 dias), com filtros
     Listar(PixCobListarArgs),
+    /// Sandbox: paga uma cobrança imediata, para testar o fluxo completo (recusado em produção)
+    Pagar(PixSandboxPagarArgs),
 }
 
 #[derive(Debug, Args)]
@@ -230,6 +232,8 @@ pub(crate) enum PixCobvCommand {
     Consultar(PixCobvConsultarArgs),
     /// Cobranças com vencimento criadas em um período (padrão: últimos 30 dias), com filtros
     Listar(PixCobvListarArgs),
+    /// Sandbox: paga uma cobrança com vencimento, para testar o fluxo completo (recusado em produção)
+    Pagar(PixSandboxPagarArgs),
 }
 
 /// The options of a charge with a due date, which `--arquivo` replaces.
@@ -952,6 +956,38 @@ impl From<SituacaoLoteArg> for StatusCobvLote {
             SituacaoLoteArg::Negada => Self::Negada,
         }
     }
+}
+
+/// `pix cob pagar` and `pix cobv pagar`, in the sandbox.
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct PixSandboxPagarArgs {
+    /// txid da cobrança
+    #[arg(value_name = "TXID", value_parser = parse_txid)]
+    pub(crate) txid: Txid,
+
+    /// Valor pago: 150,00, 1.500,00 ou 150.00 [padrão: o valor da cobrança]
+    #[arg(long, value_name = "VALOR", value_parser = parse_valor)]
+    pub(crate) valor: Option<Decimal>,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum PixSandboxCommand {
+    /// Sandbox: paga um Pix copia e cola, como um cliente pagaria o QR Code (recusado em produção)
+    #[command(name = "pagar-qrcode")]
+    PagarQrcode(PixPagarQrcodeArgs),
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct PixPagarQrcodeArgs {
+    /// O código copia e cola (o texto do QR Code) de uma cobrança do sandbox
+    #[arg(long, value_name = "CODIGO", value_parser = super::parse_copia_e_cola)]
+    pub(crate) copia_e_cola: super::CopiaECola,
+
+    /// Valor pago [padrão: o do código; obrigatório quando o código não o traz]
+    #[arg(long, value_name = "VALOR", value_parser = parse_valor)]
+    pub(crate) valor: Option<Decimal>,
 }
 
 /// `--inicio` and `--fim` of the Pix listings.
