@@ -134,8 +134,15 @@ impl PagarCom {
     }
 }
 
-/// A reason of 1 to [`MAX_MOTIVO_CANCELAMENTO`] characters, trimmed.
-pub(crate) fn motivo(motivo: &str) -> Result<String, &'static str> {
+/// The reason for [`Cobranca::cancelar`](super::Cobranca::cancelar),
+/// trimmed, as the API accepts it: 1 to [`MAX_MOTIVO_CANCELAMENTO`]
+/// characters, on one line.
+///
+/// # Errors
+///
+/// When the reason is empty, too long, or has line breaks or other control
+/// characters.
+pub fn motivo_cancelamento(motivo: &str) -> Result<String, &'static str> {
     let motivo = motivo.trim();
     if motivo.is_empty()
         || motivo.chars().count() > MAX_MOTIVO_CANCELAMENTO
@@ -174,15 +181,18 @@ mod tests {
 
     #[test]
     fn reasons_have_up_to_50_characters() {
-        assert_eq!(motivo(" Pedido cancelado ").unwrap(), "Pedido cancelado");
-        assert!(motivo(&"a".repeat(50)).is_ok());
+        assert_eq!(
+            motivo_cancelamento(" Pedido cancelado ").unwrap(),
+            "Pedido cancelado"
+        );
+        assert!(motivo_cancelamento(&"a".repeat(50)).is_ok());
         for invalido in [
             String::new(),
             " ".to_owned(),
             "a".repeat(51),
             "a\nb".to_owned(),
         ] {
-            assert!(motivo(&invalido).is_err(), "{invalido:?}");
+            assert!(motivo_cancelamento(&invalido).is_err(), "{invalido:?}");
         }
     }
 

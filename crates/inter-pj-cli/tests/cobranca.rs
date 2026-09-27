@@ -806,3 +806,280 @@ async fn resultado_incerto_orienta_a_conferir_antes_de_emitir_de_novo() {
         "{stderr}"
     );
 }
+
+// --- cancelar, editar, edicao e pagar ----------------------------------------------
+
+const EDICAO: &str = "5a6b7c8d-1e2f-4a3b-8c9d-0e1f2a3b4c5d";
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cancela_depois_de_mostrar_a_cobranca() {
+    let env = env().await;
+    env.mount_token("boleto-cobranca.write boleto-cobranca.read", None)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/cobranca/v3/cobrancas/{CODIGO}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(cobranca(true)))
+        .expect(1)
+        .mount(&env.server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(format!("/cobranca/v3/cobrancas/{CODIGO}/cancelar")))
+        .and(body_json(json!({"motivoCancelamento": "Pedido cancelado"})))
+        .respond_with(ResponseTemplate::new(202))
+        .expect(1)
+        .mount(&env.server)
+        .await;
+
+    let assert = env
+        .cmd()
+        .args([
+            "cobranca",
+            "cancelar",
+            CODIGO,
+            "--motivo",
+            " Pedido cancelado ",
+            "--sim",
+        ])
+        .assert()
+        .success();
+    assert_eq!(
+        stdout_of(&assert),
+        format!("Cancelamento solicitado.\n\nConfira com: inter-pj cobranca consultar {CODIGO}\n")
+    );
+    let stderr = stderr_of(&assert);
+    for linha in [
+        "Cobrança a cancelar",
+        "NF-123",
+        "a receber",
+        "R$ 150,00",
+        "Cliente Exemplo Ltda (12.345.678/0001-95)",
+        "Pedido cancelado",
+    ] {
+        assert!(stderr.contains(linha), "{linha}\n{stderr}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cancelamento_sem_confirmacao_ou_motivo_nao_chama_a_api() {
+    let env = env().await;
+    nothing_is_sent(&env).await;
+    // No terminal and no --sim: not even the lookup.
+    let assert = env
+        .cmd()
+        .args([
+            "cobranca",
+            "cancelar",
+            CODIGO,
+            "--motivo",
+            "Pedido cancelado",
+        ])
+        .write_stdin("s\n")
+        .assert()
+        .code(2);
+    assert!(
+        stderr_of(&assert).contains("use --sim"),
+        "{}",
+        stderr_of(&assert)
+    );
+    let longo = "x".repeat(51);
+    for motivo in ["", "  ", longo.as_str(), "linha\nquebrada"] {
+        env.cmd()
+            .args(["cobranca", "cancelar", CODIGO, "--motivo", motivo, "--sim"])
+            .assert()
+            .code(2);
+    }
+    env.cmd()
+        .args(["cobranca", "cancelar", CODIGO, "--sim"])
+        .assert()
+        .code(2);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn edita_e_acompanha_a_alteracao() {
+    let env = env().await;
+    let vencimento = daqui_a(40);
+    env.mount_token("boleto-cobranca.write boleto-cobranca.read", None)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/cobranca/v3/cobrancas/{CODIGO}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(cobranca(true)))
+        .expect(1)
+        .mount(&env.server)
+        .await;
+    Mock::given(method("PATCH"))
+        .and(path(format!("/cobranca/v3/cobrancas/{CODIGO}")))
+        .and(body_json(
+            json!({"dataVencimento": vencimento, "valorNominal": 200}),
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "status": "PROCESSANDO",
+            "codigoEdicao": EDICAO
+        })))
+        .expect(1)
+        .mount(&env.server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/cobranca/v3/cobrancas/edicao/{EDICAO}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "SUCESSO"})))
+        .expect(2)
+        .mount(&env.server)
+        .await;
+
+    let assert = env
+        .cmd()
+        .args([
+            "cobranca",
+            "editar",
+            CODIGO,
+            "--valor",
+            "200,00",
+            "--vencimento",
+            &vencimento,
+            "--sim",
+        ])
+        .assert()
+        .success();
+    let stdout = stdout_of(&assert);
+    assert!(
+        stdout.starts_with("Alteração em processamento."),
+        "{stdout}"
+    );
+    assert!(
+        stdout.ends_with(&format!(
+            "Acompanhe com: inter-pj cobranca edicao {EDICAO} --aguardar\n"
+        )),
+        "{stdout}"
+    );
+    let stderr = stderr_of(&assert);
+    let novo = chrono::NaiveDate::parse_from_str(&vencimento, "%Y-%m-%d")
+        .unwrap()
+        .format("%d/%m/%Y")
+        .to_string();
+    for linha in [
+        "Cobrança a alterar".to_owned(),
+        "R$ 150,00 → R$ 200,00".to_owned(),
+        format!("20/10/2026 → {novo}"),
+        "aviso: a consulta pode levar até 30 minutos".to_owned(),
+    ] {
+        assert!(stderr.contains(&linha), "{linha}\n{stderr}");
+    }
+
+    let texto = stdout_of(
+        &env.cmd()
+            .args(["cobranca", "edicao", EDICAO, "--aguardar"])
+            .assert()
+            .success(),
+    );
+    assert!(texto.starts_with("Alteração feita"), "{texto}");
+    let json: Value = serde_json::from_str(&stdout_of(
+        &env.cmd()
+            .args(["cobranca", "edicao", EDICAO, "--json"])
+            .assert()
+            .success(),
+    ))
+    .unwrap();
+    assert_eq!(json, json!({"codigoEdicao": EDICAO, "status": "SUCESSO"}));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn alteracao_que_falhou_sai_com_5() {
+    let env = env().await;
+    env.mount_token("boleto-cobranca.read", None).await;
+    Mock::given(method("GET"))
+        .and(path(format!("/cobranca/v3/cobrancas/edicao/{EDICAO}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "FALHA"})))
+        .expect(2)
+        .mount(&env.server)
+        .await;
+    // Only waiting makes the failure an error: a query just shows it.
+    let texto = stdout_of(
+        &env.cmd()
+            .args(["cobranca", "edicao", EDICAO])
+            .assert()
+            .success(),
+    );
+    assert!(texto.starts_with("A alteração não foi feita."), "{texto}");
+    env.cmd()
+        .args(["cobranca", "edicao", EDICAO, "--aguardar"])
+        .assert()
+        .code(5);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn edicao_invalida_nao_chama_a_api() {
+    let env = env().await;
+    nothing_is_sent(&env).await;
+    for args in [
+        &["cobranca", "editar", CODIGO, "--sim"][..],
+        &["cobranca", "editar", CODIGO, "--valor", "2,00", "--sim"][..],
+        &[
+            "cobranca",
+            "editar",
+            CODIGO,
+            "--vencimento",
+            "2020-01-10",
+            "--sim",
+        ][..],
+        &["cobranca", "editar", CODIGO, "--valor", "200"][..],
+        &[
+            "cobranca",
+            "editar",
+            "../banking/v2/saldo",
+            "--valor",
+            "200",
+            "--sim",
+        ][..],
+        &["cobranca", "edicao", "../../banking/v2/saldo"][..],
+    ] {
+        env.cmd().args(args).assert().code(2);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn paga_no_sandbox() {
+    let env = env().await;
+    env.mount_token("boleto-cobranca.write", Some(1)).await;
+    Mock::given(method("POST"))
+        .and(path(format!("/cobranca/v3/cobrancas/{CODIGO}/pagar")))
+        .and(body_json(json!({"pagarCom": "PIX"})))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&env.server)
+        .await;
+    let assert = env
+        .cmd()
+        .args(["cobranca", "pagar", CODIGO, "--com", "pix"])
+        .assert()
+        .success();
+    assert_eq!(
+        stdout_of(&assert),
+        format!(
+            "Cobrança paga no sandbox, com o Pix.\n\nConfira com: inter-pj cobranca consultar {CODIGO}\n"
+        )
+    );
+}
+
+/// Refused before any request: not even a token is asked for.
+#[tokio::test(flavor = "multi_thread")]
+async fn pagar_em_producao_nao_chama_a_api() {
+    let env = env().await;
+    nothing_is_sent(&env).await;
+    let assert = env
+        .cmd()
+        .args([
+            "--ambiente",
+            "producao",
+            "cobranca",
+            "pagar",
+            CODIGO,
+            "--com",
+            "boleto",
+        ])
+        .assert()
+        .code(2);
+    assert!(
+        stderr_of(&assert).contains("cobranca pagar existe só no sandbox"),
+        "{}",
+        stderr_of(&assert)
+    );
+}

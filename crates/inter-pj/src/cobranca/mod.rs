@@ -8,7 +8,7 @@ mod listagem;
 
 pub use alteracao::{
     ConsultaEdicao, EdicaoCobranca, MAX_MOTIVO_CANCELAMENTO, PagarCom, SolicitacaoEdicao,
-    StatusEdicao,
+    StatusEdicao, motivo_cancelamento,
 };
 pub use consulta::{
     BoletoCobranca, CobrancaDetalhada, DadosCobranca, EncargoCobranca, NotaFiscalCobranca,
@@ -190,7 +190,7 @@ impl<'a> Cobranca<'a> {
     /// Cancels a charge (`POST
     /// /cobranca/v3/cobrancas/{codigoSolicitacao}/cancelar`, scope
     /// `boleto-cobranca.write`), with a reason of up to
-    /// [`MAX_MOTIVO_CANCELAMENTO`] characters.
+    /// [`MAX_MOTIVO_CANCELAMENTO`] characters (see [`motivo_cancelamento`]).
     ///
     /// # Errors
     ///
@@ -200,7 +200,7 @@ impl<'a> Cobranca<'a> {
     /// the API's status.
     pub async fn cancelar(&self, codigo_solicitacao: &str, motivo: &str) -> Result<()> {
         let codigo = codigo(codigo_solicitacao)?;
-        let motivo = alteracao::motivo(motivo).map_err(|err| Error::InvalidInput(err.into()))?;
+        let motivo = motivo_cancelamento(motivo).map_err(|err| Error::InvalidInput(err.into()))?;
         let request = ApiRequest::new(endpoint::cobranca::CANCELAR)
             .path_param("codigoSolicitacao", codigo)
             .json(json!({ "motivoCancelamento": motivo }))
