@@ -2,20 +2,24 @@
 //! refunds of the Pix API.
 
 mod cob;
+mod cobv;
 mod consultar;
+mod encargos;
 mod enviar;
+
+use std::fmt::Write as _;
 
 use chrono::{DateTime, Days, FixedOffset, Local, NaiveDate, NaiveTime, TimeZone};
 use inter_pj::Error as InterError;
 use inter_pj::documento::Documento;
-use inter_pj::pix::{PeriodoPix, PessoaPix, PixRecebido, StatusCob, Txid};
+use inter_pj::pix::{ParametrosConsulta, PeriodoPix, PessoaPix, PixRecebido, StatusCob, Txid};
 use rust_decimal::Decimal;
 
 use super::Context;
-use crate::cli::{Momento, PeriodoPixArgs, PixCommand};
+use crate::cli::{Momento, PeriodoPixArgs, PixCobListarArgs, PixCommand, StatusCobArg};
 use crate::confirmacao::Stdio;
 use crate::error::{CliError, resultado_incerto};
-use crate::output::horario_em;
+use crate::output::{self, horario_em};
 use crate::tabela::{Celula, Coluna, Tabela};
 
 /// Days in the default period of the listings (the last 30, today
@@ -27,6 +31,7 @@ pub(super) async fn run(context: &Context, command: PixCommand) -> Result<(), Cl
         PixCommand::Enviar(args) => enviar::run(context, &args, &mut Stdio).await,
         PixCommand::Consultar(args) => consultar::run(context, &args).await,
         PixCommand::Cob(command) => cob::run(context, command).await,
+        PixCommand::Cobv(command) => cobv::run(context, command).await,
     }
 }
 
@@ -141,6 +146,142 @@ fn incerta(err: InterError, tipo: &'static str, txid: &Txid) -> CliError {
     }
 }
 
+/// Refuses what can no longer change: a charge paid or removed.
+fn alteravel(status: Option<&StatusCob>) -> Result<(), CliError> {
+    let motivo = match status {
+        Some(StatusCob::Concluida) => "já foi paga",
+        Some(StatusCob::RemovidaPeloUsuarioRecebedor | StatusCob::RemovidaPeloPsp) => {
+            "já foi removida"
+        }
+        _ => return Ok(()),
+    };
+    Err(CliError::Usage(format!(
+        "a cobrança {motivo}: não pode ser alterada"
+    )))
+}
+
+/// The "copia e cola" of a charge that can still be paid, or why there is
+/// none.
+fn copia_e_cola_ativa<'a>(
+    status: Option<&StatusCob>,
+    texto: Option<&'a str>,
+) -> Result<&'a str, String> {
+    match status {
+        Some(StatusCob::Ativa) | None => texto
+            .filter(|texto| !texto.trim().is_empty())
+            .ok_or_else(|| "a API não informou o copia e cola desta cobrança".to_owned()),
+        Some(status) => Err(format!(
+            "a cobrança está {}: o QR Code não serve mais para pagar",
+            descrever_status(status)
+        )),
+    }
+}
+
+/// `R$ 37,00 → R$ 40,00`, or what stays.
+fn antes_e_depois(antes: Option<String>, depois: Option<String>) -> Option<String> {
+    match (antes, depois) {
+        (Some(antes), Some(depois)) => Some(format!("{antes} → {depois}")),
+        (None, Some(depois)) => Some(format!("→ {depois}")),
+        (antes, None) => antes,
+    }
+}
+
+/// The filters of the listings of charges, from the options.
+struct Filtros {
+    periodo: PeriodoPix,
+    devedor: Option<Documento>,
+    status: Option<StatusCob>,
+    location_presente: Option<bool>,
+}
+
+impl Filtros {
+    fn de(args: &PixCobListarArgs) -> Result<Self, CliError> {
+        Ok(Self {
+            periodo: periodo(args.periodo)?,
+            devedor: args.documento.clone(),
+            status: args.status.map(|status| match status {
+                StatusCobArg::Ativa => StatusCob::Ativa,
+                StatusCobArg::Concluida => StatusCob::Concluida,
+                StatusCobArg::RemovidaPeloUsuario => StatusCob::RemovidaPeloUsuarioRecebedor,
+                StatusCobArg::RemovidaPeloPsp => StatusCob::RemovidaPeloPsp,
+            }),
+            location_presente: match (args.com_location, args.sem_location) {
+                (true, _) => Some(true),
+                (_, true) => Some(false),
+                _ => None,
+            },
+        })
+    }
+
+    /// `Cobranças Pix imediatas criadas de 25/08/2026 00:00 a 23/09/2026
+    /// 23:59`, and the filters, plus `outros`.
+    fn titulo(&self, cobrancas: &str, outros: &[String]) -> String {
+        let formato = "%d/%m/%Y %H:%M";
+        let mut texto = format!(
+            "{cobrancas} criadas de {} a {}",
+            self.periodo.inicio.format(formato),
+            self.periodo.fim.format(formato)
+        );
+        let mut filtros = Vec::new();
+        if let Some(status) = &self.status {
+            filtros.push(descrever_status(status).to_owned());
+        }
+        if let Some(documento) = &self.devedor {
+            filtros.push(format!("devedor {}", documento.formatado()));
+        }
+        match self.location_presente {
+            Some(true) => filtros.push("com location".to_owned()),
+            Some(false) => filtros.push("sem location".to_owned()),
+            None => {}
+        }
+        filtros.extend_from_slice(outros);
+        if !filtros.is_empty() {
+            let _ = write!(texto, " ({})", filtros.join(", "));
+        }
+        texto
+    }
+}
+
+/// `3 cobranças · R$ 450,00 · pagas R$ 150,00`, from the amount and the
+/// status of each charge.
+fn totais<'a>(cobs: impl IntoIterator<Item = (Option<Decimal>, Option<&'a StatusCob>)>) -> String {
+    let (mut quantas, mut total, mut pagas) = (0_usize, Decimal::ZERO, Decimal::ZERO);
+    for (valor, status) in cobs {
+        quantas += 1;
+        let valor = valor.unwrap_or_default();
+        total += valor;
+        if status == Some(&StatusCob::Concluida) {
+            pagas += valor;
+        }
+    }
+    let quantas = match quantas {
+        1 => "1 cobrança".to_owned(),
+        n => format!("{n} cobranças"),
+    };
+    let mut texto = format!("{quantas} · {}", output::brl(total));
+    if !pagas.is_zero() {
+        let _ = write!(texto, " · pagas {}", output::brl(pagas));
+    }
+    texto
+}
+
+/// Where the page asked for with `--pagina` stands among the others, from
+/// the parameters of the page and its number of charges.
+fn paginacao(numero: u32, parametros: &ParametrosConsulta, itens: usize) -> String {
+    let mut texto = format!("\n\nPágina {numero}");
+    let paginacao = parametros.paginacao.unwrap_or_default();
+    if let Some(total) = paginacao.quantidade_de_paginas {
+        let _ = write!(texto, " de {} (a primeira é 0)", total.saturating_sub(1));
+    }
+    if let Some(total) = paginacao.quantidade_total_de_itens {
+        let _ = write!(texto, "; {total} cobranças no período");
+    }
+    if paginacao.tem_mais(numero, itens) {
+        let _ = write!(texto, "; a próxima é --pagina {}", numero + 1);
+    }
+    texto
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -202,6 +343,31 @@ mod tests {
             &brasilia,
         );
         assert!(invertido.is_err());
+    }
+
+    #[test]
+    fn where_a_page_stands() {
+        let parametros = |paginacao: serde_json::Value| -> ParametrosConsulta {
+            serde_json::from_value(serde_json::json!({ "paginacao": paginacao })).unwrap()
+        };
+        let completa = parametros(serde_json::json!({
+            "paginaAtual": 1, "itensPorPagina": 100, "quantidadeDePaginas": 3, "quantidadeTotalDeItens": 250
+        }));
+        assert_eq!(
+            paginacao(1, &completa, 100),
+            "\n\nPágina 1 de 2 (a primeira é 0); 250 cobranças no período; a próxima é --pagina 2"
+        );
+        assert_eq!(
+            paginacao(2, &completa, 50),
+            "\n\nPágina 2 de 2 (a primeira é 0); 250 cobranças no período"
+        );
+        // Without the number of pages, a full page may have a next one.
+        let sem_total = parametros(serde_json::json!({"paginaAtual": 0, "itensPorPagina": 2}));
+        assert_eq!(
+            paginacao(0, &sem_total, 2),
+            "\n\nPágina 0; a próxima é --pagina 1"
+        );
+        assert_eq!(paginacao(0, &sem_total, 1), "\n\nPágina 0");
     }
 
     #[test]
