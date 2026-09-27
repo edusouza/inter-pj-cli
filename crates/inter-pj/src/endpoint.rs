@@ -119,6 +119,27 @@ pub mod banking {
         scopes: &[Scope::ExtratoRead],
     };
 
+    /// `POST /banking/v2/pagamento` — pays a boleto, utility bill or tax by barcode.
+    pub const PAGAMENTO_INCLUIR: Endpoint = Endpoint {
+        method: Method::Post,
+        path: "/banking/v2/pagamento",
+        scopes: &[Scope::PagamentoBoletoWrite],
+    };
+
+    /// `GET /banking/v2/pagamento` — payments by barcode.
+    pub const PAGAMENTO_BUSCAR: Endpoint = Endpoint {
+        method: Method::Get,
+        path: "/banking/v2/pagamento",
+        scopes: &[Scope::PagamentoBoletoRead],
+    };
+
+    /// `DELETE /banking/v2/pagamento/{codigoTransacao}` — cancels a scheduled payment.
+    pub const PAGAMENTO_CANCELAR: Endpoint = Endpoint {
+        method: Method::Delete,
+        path: "/banking/v2/pagamento/{codigoTransacao}",
+        scopes: &[Scope::PagamentoBoletoWrite],
+    };
+
     /// `POST /banking/v2/pix` — sends a Pix (key, bank details or copia e cola).
     pub const PIX_INCLUIR: Endpoint = Endpoint {
         method: Method::Post,
@@ -143,4 +164,7 @@ pub const ALL: &[Endpoint] = &[
     banking::EXTRATO_EXPORTAR,
     banking::PIX_INCLUIR,
     banking::PIX_CONSULTAR,
+    banking::PAGAMENTO_INCLUIR,
+    banking::PAGAMENTO_BUSCAR,
+    banking::PAGAMENTO_CANCELAR,
 ];
