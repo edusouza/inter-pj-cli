@@ -10,8 +10,9 @@
 //! state ([`cobrancas_pix`]), [`rec`], [`solicrec`], [`cobr`] and
 //! [`locrec`], the recurrences of Pix Automático, the requests of their
 //! approval, their charges and the locations of their QR Codes, in a state
-//! of their own ([`automatico`]), and [`webhooks`], the addresses the bank
-//! notifies and the history of the notifications. The data tell one story: the
+//! of their own ([`automatico`]), with the answers of the payers in the
+//! sandbox ([`sandbox_automatico`]), and [`webhooks`], the addresses the
+//! bank notifies and the history of the notifications. The data tell one story: the
 //! balance follows from the statement, the Pix received, the bills paid, the
 //! charges paid before and the notifications of the webhooks are those of
 //! the statement, and what is sent, refunded, paid or issued can be queried.
@@ -31,6 +32,7 @@ mod pagamentos;
 mod pix;
 mod rec;
 mod recebidos;
+mod sandbox_automatico;
 mod sandbox_pix;
 mod solicrec;
 mod webhooks;
@@ -73,6 +75,7 @@ impl Banco {
         solicrec::montar(&servidor, &automatico).await;
         cobr::montar(&servidor, &automatico).await;
         locrec::montar(&servidor, &automatico).await;
+        sandbox_automatico::montar(&servidor, &automatico).await;
         webhooks::montar(&servidor).await;
         Self { servidor }
     }

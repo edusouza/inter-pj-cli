@@ -207,7 +207,7 @@ fn criar(automatico: &mut Automatico, request: &Request) -> ResponseTemplate {
 
 /// The charges created, scheduled by the payer's bank by the time anyone
 /// looks, 5 seconds after they were created.
-fn agendar(automatico: &mut Automatico) {
+pub(super) fn agendar(automatico: &mut Automatico) {
     for cobr in &mut automatico.cobrs {
         if cobr["status"] != "CRIADA" {
             continue;

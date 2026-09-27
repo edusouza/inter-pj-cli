@@ -2,7 +2,7 @@
 
 No Pix Automático, o pagador autoriza uma vez, no banco dele, as cobranças de um contrato (uma mensalidade, uma assinatura, um plano), que depois são feitas a cada vencimento sem que ele precise pagar uma a uma. A autorização é a **recorrência**: o devedor e o contrato, a periodicidade, o valor (fixo, um mínimo para o limite que o pagador define, ou o de cada cobrança) e se as cobranças não pagas podem ser tentadas de novo. O pagador aprova a recorrência no banco dele, e cada pagamento é então uma cobrança recorrente, que o banco do pagador debita no vencimento.
 
-A API é só para CNPJs com pelo menos 6 meses de atividade. Os exemplos são da Empresa Exemplo Ltda, uma empresa fictícia, no perfil de produção. Criar, alterar e cancelar uma recorrência precisam do escopo `rec.write`, e consultar e listar, do `rec.read`.
+A API é só para CNPJs com pelo menos 6 meses de atividade. Os exemplos são da Empresa Exemplo Ltda, uma empresa fictícia, no perfil de produção. Criar, alterar e cancelar uma recorrência precisam do escopo `rec.write`, e consultar e listar, do `rec.read`. As mudanças das recorrências e das cobranças recorrentes chegam pelos webhooks do Pix Automático, no guia [Webhooks](webhooks.md#pix-automático).
 
 - [Criar uma recorrência](#criar-uma-recorrência)
 - [Por um arquivo](#por-um-arquivo)
@@ -14,6 +14,7 @@ A API é só para CNPJs com pelo menos 6 meses de atividade. Os exemplos são da
 - [Pedir a aprovação](#pedir-a-aprovação)
 - [As cobranças recorrentes](#as-cobranças-recorrentes)
 - [O QR Code da recorrência](#o-qr-code-da-recorrência)
+- [Testar no sandbox](#testar-no-sandbox)
 
 ## Criar uma recorrência
 
@@ -680,7 +681,7 @@ Copia e cola  00020126180014br.gov.bcb.pix5204000053039865802BR5920EMPRESA EXEMP
 QR Code salvo em mensalidade-beltrana.png (25,9 KB)
 ```
 
-O QR Code de uma recorrência rejeitada, expirada ou cancelada não serve mais, e a CLI não o desenha.
+O QR Code de uma recorrência rejeitada, expirada ou cancelada não serve mais, e a CLI não o desenha. A aprovação também pode vir junto com um pagamento: a recorrência criada ou alterada com `--txid-ativacao`, o txid de uma cobrança imediata ([`pix cob`](cobrancas-pix.md)), é aprovada quando o pagador paga essa cobrança pelo QR Code composto, que `rec consultar --txid` traz.
 
 `locrec listar` mostra as locations criadas num período, com a recorrência de cada uma; os filtros são `--com-recorrencia`, `--sem-recorrencia` e `--convenio`:
 
@@ -729,3 +730,122 @@ A location livre serve a outra recorrência, com `--loc`, e o QR Code dela, se j
 $ inter-pj pix-automatico locrec desvincular 8100 --sim
 erro: a location 8100 não tem recorrência vinculada: não há o que desvincular
 ```
+
+## Testar no sandbox
+
+No sandbox, a CLI faz o papel do pagador e do banco dele, para testar o fluxo inteiro: aprovar ou cancelar uma recorrência, aceitar ou rejeitar uma solicitação de confirmação, e cancelar ou pagar uma cobrança recorrente. Em produção, quem responde e paga é o pagador, e os comandos são recusados antes de qualquer requisição:
+
+```console
+$ inter-pj pix-automatico sandbox status-rec RR1234567820260924Bw2Jy6Fs9Nt --status aprovada
+erro: pix-automatico sandbox status-rec existe só no sandbox, para testes: em produção, quem responde e paga é o pagador, no banco dele
+```
+
+No perfil do sandbox, uma recorrência de teste:
+
+```console
+$ inter-pj -p sandbox pix-automatico rec criar --devedor-documento 123.456.789-09 --devedor-nome "Fulano de Tal" \
+    --contrato teste-0001 --objeto "Plano de teste" --data-inicial 2026-10-01 --periodicidade mensal --valor 10,00
+Recorrência a criar
+  Ambiente       sandbox (dados fictícios)
+  Devedor        Fulano de Tal (123.456.789-09)
+  Contrato       teste-0001
+  Objeto         Plano de teste
+  Periodicidade  mensal, a partir de 01/10/2026, sem fim
+  Valor          R$ 10,00 (dez reais) em cada pagamento
+  Retentativas   não permitidas
+Criar a recorrência? [s/N] s
+Recorrência criada: aguarda a aprovação do pagador.
+
+Recorrência RN1234567820260924Zc5Mg1Qr8Xe
+  Status         criada (aguarda a aprovação do pagador)
+  Devedor        Fulano de Tal (123.456.789-09)
+  Contrato       teste-0001
+  Objeto         Plano de teste
+  Periodicidade  mensal, a partir de 01/10/2026, sem fim
+  Valor          R$ 10,00 em cada pagamento
+  Retentativas   não permitidas
+  Recebedor      Empresa Exemplo Ltda (11.444.777/0001-61)
+
+Histórico
+  24/09/2026 11:10:00  criada
+
+Acompanhe com: inter-pj -p sandbox pix-automatico rec consultar RN1234567820260924Zc5Mg1Qr8Xe
+O pagador aprova no banco dele: peça com inter-pj -p sandbox pix-automatico solicitacao criar --rec RN1234567820260924Zc5Mg1Qr8Xe
+```
+
+O pagador a aprova:
+
+```console
+$ inter-pj -p sandbox pix-automatico sandbox status-rec RN1234567820260924Zc5Mg1Qr8Xe --status aprovada
+Recorrência RN1234567820260924Zc5Mg1Qr8Xe aprovada no sandbox.
+
+Confira com: inter-pj -p sandbox pix-automatico rec consultar RN1234567820260924Zc5Mg1Qr8Xe
+```
+
+Aprovada a recorrência, a cobrança do primeiro mês:
+
+```console
+$ inter-pj -p sandbox pix-automatico cobr criar --rec RN1234567820260924Zc5Mg1Qr8Xe --valor 10,00 \
+    --vencimento 2026-10-01 --conta 1234567 --agencia 0001 --txid teste0001outubro2026planoteste
+Cobrança recorrente a criar
+  Ambiente          sandbox (dados fictícios)
+  Recorrência       RN1234567820260924Zc5Mg1Qr8Xe
+  Devedor           Fulano de Tal (123.456.789-09)
+  Contrato          teste-0001
+  Objeto            Plano de teste
+  Valor             R$ 10,00 (dez reais)
+  Vencimento        01/10/2026, ou o próximo dia útil
+  Conta que recebe  conta corrente 1234567, agência 0001
+  Retentativas      não permitidas
+  txid              teste0001outubro2026planoteste
+Criar a cobrança recorrente? [s/N] s
+Cobrança recorrente criada: o banco do pagador agenda o débito para o vencimento.
+
+Cobrança recorrente teste0001outubro2026planoteste
+  Status        criada (aguarda o banco do pagador)
+  Recorrência   RN1234567820260924Zc5Mg1Qr8Xe
+  Valor         R$ 10,00
+  Vencimento    01/10/2026, ou o próximo dia útil
+  Criada em     24/09/2026
+  Retentativas  não permitidas
+  Recebedor     Empresa Exemplo Ltda (11.444.777/0001-61), conta corrente 1234567, agência 0001
+
+Histórico
+  24/09/2026 11:20:00  criada
+
+Acompanhe com: inter-pj -p sandbox pix-automatico cobr consultar teste0001outubro2026planoteste
+```
+
+E o débito na conta do pagador. `pagar-cobr` consulta antes a cobrança e a recorrência, e paga o valor da cobrança pelo devedor da recorrência, para a chave Pix da conta que recebe:
+
+```console
+$ inter-pj -p sandbox pix-automatico sandbox pagar-cobr teste0001outubro2026planoteste --chave pix@empresa.example
+Pago no sandbox: R$ 10,00.
+endToEndId  E87654321202610010300Gm2Vx7Ls4Qd
+
+Confira com: inter-pj -p sandbox pix-automatico cobr consultar teste0001outubro2026planoteste
+```
+
+```console
+$ inter-pj -p sandbox pix-automatico cobr consultar teste0001outubro2026planoteste
+aviso: ambiente sandbox — os dados retornados são fictícios
+Cobrança recorrente teste0001outubro2026planoteste
+  Status        concluída (paga)
+  Recorrência   RN1234567820260924Zc5Mg1Qr8Xe
+  Valor         R$ 10,00
+  Vencimento    01/10/2026, ou o próximo dia útil
+  Criada em     24/09/2026
+  Retentativas  não permitidas
+  Recebedor     Empresa Exemplo Ltda (11.444.777/0001-61), conta corrente 1234567, agência 0001
+
+Tentativas de liquidação
+Liquidação  Tipo         Status  endToEndId                        Motivo
+01/10/2026  agendamento  paga    E87654321202610010300Gm2Vx7Ls4Qd
+
+Histórico
+  24/09/2026 11:20:00  criada
+  24/09/2026 11:20:05  ativa
+  24/09/2026 11:25:00  concluída
+```
+
+`--valor` e `--documento` pagam outro valor, ou por outro pagador. `status-solicitacao --status aceita` ou `rejeitada` responde à solicitação de confirmação de uma recorrência, que o sandbox identifica pelo idRec; `status-rec --status cancelada` cancela uma recorrência, com o motivo em `--razao`; e `status-cobr` cancela uma cobrança como o banco do pagador faria, com o motivo em `--razao` (`account-blocked`, `settlement-failed`, `requested-by-payer`...). `pagar-qrcode --copia-e-cola` paga um QR Code, como o composto de uma cobrança imediata que também ativa uma recorrência. Os escopos são os de cada recurso: `pix.write` para a recorrência e o QR Code, `solicrec.write` para a solicitação e `cobr.write` para a cobrança; a API aceita até 10 chamadas por minuto.
