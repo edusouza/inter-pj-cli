@@ -7,15 +7,21 @@ use std::collections::BTreeSet;
 
 use chrono::NaiveDate;
 use inter_pj::cobranca::{
-    BeneficiarioFinal, CobrancaDetalhada, DadosCobranca, Desconto, EmissaoCobranca,
-    EmissaoCobrancaError, FormaRecebimento, MAX_CARACTERES_LINHA, MAX_DIAS_AGENDA,
-    MAX_LINHAS_MENSAGEM, MAX_SEU_NUMERO, Mora, Multa, NotaFiscal, OrigemRecebimento, Pagador,
-    SituacaoCobranca, SolicitacaoCobranca, TipoCobranca, Uf, VALOR_MAXIMO, VALOR_MINIMO,
+    BeneficiarioFinal, CobrancaDetalhada, ConsultaEdicao, DadosCobranca, Desconto, EdicaoCobranca,
+    EmissaoCobranca, EmissaoCobrancaError, FiltrarDataPor, FormaRecebimento,
+    ITENS_POR_PAGINA_MAXIMO, ItemSumario, MAX_CARACTERES_LINHA, MAX_DIAS_AGENDA,
+    MAX_LINHAS_MENSAGEM, MAX_MOTIVO_CANCELAMENTO, MAX_SEU_NUMERO, Mora, Multa, NotaFiscal,
+    OrdenarCobrancasPor, OrigemRecebimento, Pagador, PagarCom, PaginaCobrancas, SituacaoCobranca,
+    SolicitacaoCobranca, SolicitacaoEdicao, StatusEdicao, TipoCobranca, Uf, VALOR_MAXIMO,
+    VALOR_MINIMO,
 };
 use inter_pj::endpoint;
 use rust_decimal::Decimal;
 use serde_json::{Map, Value, json};
-use spec::{enum_values, keys, operation, property_names, resolve, schema, spec};
+use spec::{
+    enum_values, example_for_schema, keys, operation, parameter_names, parameters, property_names,
+    resolve, schema, spec,
+};
 
 fn example(name: &str) -> &'static Value {
     let example = &spec()["components"]["examples"][name]["value"];
@@ -93,7 +99,17 @@ fn completa() -> EmissaoCobranca {
 
 #[test]
 fn cobranca_endpoints_are_registered() {
-    for endpoint in [endpoint::cobranca::EMITIR, endpoint::cobranca::CONSULTAR] {
+    for endpoint in [
+        endpoint::cobranca::EMITIR,
+        endpoint::cobranca::CONSULTAR,
+        endpoint::cobranca::LISTAR,
+        endpoint::cobranca::SUMARIO,
+        endpoint::cobranca::PDF,
+        endpoint::cobranca::CANCELAR,
+        endpoint::cobranca::EDITAR,
+        endpoint::cobranca::EDICAO,
+        endpoint::cobranca::PAGAR,
+    ] {
         assert!(endpoint::ALL.contains(&endpoint), "{endpoint}");
         operation(&endpoint);
     }
@@ -422,5 +438,180 @@ fn normalizar(value: &Value) -> Value {
         Value::Array(items) => Value::Array(items.iter().map(normalizar).collect()),
         Value::Number(n) => json!(n.as_f64()),
         other => other.clone(),
+    }
+}
+
+/// The parameters `listar` and `sumario` send (see `tests/cobranca.rs`) are
+/// the documented ones, and the summary has no order nor pages.
+#[test]
+fn listing_and_summary_parameters_are_documented() {
+    let filtro = [
+        "dataInicial",
+        "dataFinal",
+        "filtrarDataPor",
+        "situacao",
+        "pessoaPagadora",
+        "cpfCnpjPessoaPagadora",
+        "seuNumero",
+        "tipoCobranca",
+    ];
+    let listagem = [
+        "ordenarPor",
+        "tipoOrdenacao",
+        "paginacao.paginaAtual",
+        "paginacao.itensPorPagina",
+    ];
+    let sem_conta = |endpoint| {
+        let mut nomes = parameter_names(&endpoint);
+        assert!(nomes.remove("x-conta-corrente"));
+        nomes
+    };
+    let nossos = |nomes: &[&str]| nomes.iter().map(|&n| n.to_owned()).collect::<BTreeSet<_>>();
+    assert_eq!(
+        sem_conta(endpoint::cobranca::LISTAR),
+        nossos(&[&filtro[..], &listagem[..]].concat())
+    );
+    assert_eq!(sem_conta(endpoint::cobranca::SUMARIO), nossos(&filtro));
+    let parametros = parameters(&endpoint::cobranca::LISTAR);
+    for obrigatorio in ["dataInicial", "dataFinal"] {
+        assert_eq!(parametros[obrigatorio]["required"], true, "{obrigatorio}");
+    }
+    let itens = &parametros["paginacao.itensPorPagina"]["schema"];
+    assert_eq!(
+        itens["maximum"].as_u64(),
+        Some(u64::from(ITENS_POR_PAGINA_MAXIMO))
+    );
+}
+
+#[test]
+fn listing_enums_match_the_spec() {
+    let codigos = |nomes: Vec<&'static str>| nomes.into_iter().collect::<BTreeSet<_>>();
+    assert_eq!(
+        codigos(FiltrarDataPor::TODOS.iter().map(|f| f.as_str()).collect()),
+        enum_values("FiltrarDataPorEnum")
+    );
+    assert_eq!(
+        codigos(
+            OrdenarCobrancasPor::TODOS
+                .iter()
+                .map(|o| o.as_str())
+                .collect()
+        ),
+        enum_values("OrdenarCobrancasPorEnum")
+    );
+    assert_eq!(
+        enum_values("TipoOrdenacaoCobrancasEnum"),
+        BTreeSet::from(["ASC", "DESC"])
+    );
+}
+
+#[test]
+fn listing_page_maps_every_documented_field() {
+    let documentado = example("exemploRetornoListaCobrancas");
+    let pagina: PaginaCobrancas = serde_json::from_value(documentado.clone()).unwrap();
+    assert_eq!(pagina.cobrancas.len(), 1);
+    let de_volta = serde_json::to_value(&pagina).unwrap();
+    assert_eq!(normalizar(&de_volta), normalizar(documentado));
+    assert_eq!(keys(&de_volta), property_names("CobrancasResponse"));
+}
+
+#[test]
+fn summary_maps_every_documented_field() {
+    let documentado = example("exemploRetornoSumario");
+    let itens: Vec<ItemSumario> = serde_json::from_value(documentado.clone()).unwrap();
+    assert_eq!(itens.len(), SituacaoCobranca::DOCUMENTADOS.len());
+    assert!(
+        itens
+            .iter()
+            .all(|item| !matches!(item.situacao, Some(SituacaoCobranca::Outro(_))))
+    );
+    let de_volta = serde_json::to_value(&itens).unwrap();
+    assert_eq!(normalizar(&de_volta), normalizar(documentado));
+    assert_eq!(keys(&de_volta[0]), property_names("itemSumarioCobrancas"));
+}
+
+#[test]
+fn pdf_answer_has_the_field_we_read() {
+    assert_eq!(
+        property_names("PdfResponse"),
+        BTreeSet::from(["pdf".to_owned()])
+    );
+}
+
+#[test]
+fn cancel_body_matches_the_spec() {
+    assert_eq!(
+        property_names("CancelarCobrancaRequestBody"),
+        BTreeSet::from(["motivoCancelamento".to_owned()])
+    );
+    let motivo = &schema("CancelarCobrancaRequestBody")["properties"]["motivoCancelamento"];
+    assert_eq!(
+        motivo["maxLength"].as_u64(),
+        Some(u64::try_from(MAX_MOTIVO_CANCELAMENTO).unwrap())
+    );
+    assert_eq!(
+        keys(example("ExemploCancelarCobranca")),
+        property_names("CancelarCobrancaRequestBody")
+    );
+}
+
+#[test]
+fn edit_models_match_the_spec() {
+    let edicao = EdicaoCobranca::new(Some(dia(2026, 11, 10)), Some(dec("175.9")));
+    assert_eq!(
+        keys(&serde_json::to_value(&edicao).unwrap()),
+        property_names("UpdateCobrancaRequestBody")
+    );
+    let valor = &schema("UpdateCobrancaRequestBody")["properties"]["valorNominal"];
+    assert_eq!(dec(&valor["minimum"].to_string()), VALOR_MINIMO);
+    assert_eq!(dec(&valor["maximum"].to_string()), VALOR_MAXIMO);
+
+    let resposta: SolicitacaoEdicao =
+        serde_json::from_value(example_for_schema("UpdateCobrancaResponseBody")).unwrap();
+    assert!(resposta.status.is_some() && resposta.codigo_edicao.is_some());
+    assert_eq!(
+        keys(&serde_json::to_value(&resposta).unwrap()),
+        property_names("UpdateCobrancaResponseBody")
+    );
+    let consulta: ConsultaEdicao =
+        serde_json::from_value(example_for_schema("GetStatusUpdateResponseBody")).unwrap();
+    assert_eq!(
+        keys(&serde_json::to_value(&consulta).unwrap()),
+        property_names("GetStatusUpdateResponseBody")
+    );
+    for nome in ["UpdateCobrancaResponseBody", "GetStatusUpdateResponseBody"] {
+        let documentados: BTreeSet<&str> = schema(nome)["properties"]["status"]["enum"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(Value::as_str)
+            .collect();
+        let nossos: BTreeSet<&str> = StatusEdicao::DOCUMENTADOS
+            .iter()
+            .map(StatusEdicao::as_str)
+            .collect();
+        assert_eq!(nossos, documentados, "{nome}");
+    }
+}
+
+#[test]
+fn sandbox_payment_body_matches_the_spec() {
+    let documentados: BTreeSet<&str> =
+        schema("PagamentoCobrancaRequestBody")["properties"]["pagarCom"]["enum"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(Value::as_str)
+            .collect();
+    let nossos: BTreeSet<&str> = [PagarCom::Boleto, PagarCom::Pix]
+        .iter()
+        .map(|c| c.as_str())
+        .collect();
+    assert_eq!(nossos, documentados);
+    for (nome, com) in [
+        ("exemploPagarCobranca1", PagarCom::Pix),
+        ("exemploPagarCobranca2", PagarCom::Boleto),
+    ] {
+        assert_eq!(example(nome), &json!({"pagarCom": com.as_str()}), "{nome}");
     }
 }

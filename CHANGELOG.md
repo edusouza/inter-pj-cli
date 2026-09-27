@@ -9,6 +9,7 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 ### Adicionado
 
 - Biblioteca: `InterClient::cobranca`, com `Cobranca::emitir` (cobrança com boleto e Pix, conferida localmente: seu número, valor, pagador com CPF/CNPJ, UF e CEP, desconto, multa, mora, mensagem, formas de recebimento e nota fiscal, cuja chave de acesso confere número e série; o tipo de pessoa vem do documento) e `Cobranca::consultar` (situação, valores, encargos, boleto, Pix e nota fiscal) (#28).
+- Biblioteca: `Cobranca::listar` e `listar_todas` (período por vencimento, emissão ou pagamento, situação, pagador, seu número, tipo e ordenação, com páginas de até 1.000), `sumario` (quantidade e valor por situação), `pdf`, `cancelar` (com motivo), `editar` (vencimento e valor) com `consultar_edicao`, e `pagar_no_sandbox`, recusado fora do sandbox sem nenhuma requisição (#29, #30, #32).
 
 ## [0.4.0] - 2026-09-23
 
