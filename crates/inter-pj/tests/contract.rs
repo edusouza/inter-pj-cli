@@ -5,7 +5,10 @@ use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::OnceLock;
 
-use inter_pj::banking::Saldo;
+use inter_pj::banking::{
+    Detalhe, LoteScroll, PaginaExtrato, Saldo, TipoOperacao, TipoTransacao, TransacaoCompleta,
+    TransacaoSimples,
+};
 use inter_pj::endpoint::{self, Endpoint};
 use inter_pj::{Environment, Scope};
 use serde_json::{Map, Value, json};
@@ -143,15 +146,168 @@ fn saldo_model_accepts_schema_example() {
 
 #[test]
 fn saldo_endpoint_documents_the_date_parameter() {
-    let op = operation(&endpoint::banking::SALDO);
-    let names: Vec<&str> = op["parameters"]
+    let names = parameter_names(&endpoint::banking::SALDO);
+    assert!(names.contains("dataSaldo"), "{names:?}");
+    assert!(names.contains("x-conta-corrente"), "{names:?}");
+}
+
+/// Parameters sent by `inter_pj::banking` (asserted one by one against a mock
+/// API in tests/extrato.rs) must be documented for the operation.
+#[test]
+fn statement_endpoints_document_the_parameters_we_send() {
+    let cases: [(Endpoint, &[&str]); 3] = [
+        (endpoint::banking::EXTRATO, &["dataInicio", "dataFim"]),
+        (
+            endpoint::banking::EXTRATO_COMPLETO,
+            &[
+                "dataInicio",
+                "dataFim",
+                "pagina",
+                "tamanhoPagina",
+                "tipoOperacao",
+                "tipoTransacao",
+                "scrollEnabled",
+                "scrollId",
+            ],
+        ),
+        (
+            endpoint::banking::EXTRATO_EXPORTAR,
+            &["dataInicio", "dataFim"],
+        ),
+    ];
+    for (endpoint, sent) in cases {
+        let documented = parameter_names(&endpoint);
+        for name in sent {
+            assert!(
+                documented.contains(*name),
+                "{endpoint}: {name} não documentado"
+            );
+        }
+        assert!(documented.contains("x-conta-corrente"), "{endpoint}");
+    }
+
+    let completo = parameters(&endpoint::banking::EXTRATO_COMPLETO);
+    assert_eq!(completo["scrollEnabled"]["schema"]["enum"], json!(["true"]));
+    assert_eq!(
+        completo["tamanhoPagina"]["schema"]["maximum"],
+        json!(10_000)
+    );
+    let codes: BTreeSet<&str> = completo["tipoOperacao"]["schema"]["enum"]
         .as_array()
         .unwrap()
         .iter()
-        .filter_map(|p| resolve(p)["name"].as_str())
+        .filter_map(Value::as_str)
         .collect();
-    assert!(names.contains(&"dataSaldo"), "{names:?}");
-    assert!(names.contains(&"x-conta-corrente"), "{names:?}");
+    let ours = BTreeSet::from([
+        TipoOperacao::Credito.as_str(),
+        TipoOperacao::Debito.as_str(),
+    ]);
+    assert_eq!(codes, ours);
+    assert_eq!(
+        schema("PdfModel")["properties"]["pdf"]["type"],
+        json!("string")
+    );
+}
+
+#[test]
+fn transaction_types_match_the_documented_list() {
+    for name in ["TransacaoSimples", "TransacaoCompleta"] {
+        let description = schema(name)["properties"]["tipoTransacao"]["description"]
+            .as_str()
+            .unwrap();
+        let documented: BTreeSet<&str> = description
+            .lines()
+            .filter_map(|line| line.trim().strip_prefix("* `")?.strip_suffix('`'))
+            .collect();
+        let ours: BTreeSet<&str> = TipoTransacao::DOCUMENTADOS
+            .iter()
+            .map(TipoTransacao::as_str)
+            .collect();
+        assert_eq!(ours, documented, "{name}");
+    }
+}
+
+#[test]
+fn simple_transaction_accepts_the_schema_example() {
+    let example = example_for_schema("TransacaoSimples");
+    let transacao: TransacaoSimples = serde_json::from_value(example.clone()).unwrap();
+    assert_round_trip(
+        "TransacaoSimples",
+        &example,
+        &serde_json::to_value(&transacao).unwrap(),
+    );
+}
+
+/// Every `Transacao<Tipo>` schema pairs a transaction type with its
+/// `Detalhe<Tipo>` schema: the model must pick the typed details for that
+/// type and map every documented field (nothing left in `outros`).
+#[test]
+fn transaction_details_are_typed_for_every_documented_kind() {
+    let schemas = spec()["components"]["schemas"].as_object().unwrap();
+    let mut pairs: Vec<(String, String)> = schemas
+        .iter()
+        .filter_map(|(name, schema)| {
+            let suffix = name.strip_prefix("Transacao")?;
+            let detail = schema["properties"]["detalhes"]["$ref"].as_str()?;
+            let detail = detail.rsplit('/').next()?.to_owned();
+            Some((screaming_snake(suffix), detail))
+        })
+        .collect();
+    // Fees have a detail schema but no `TransacaoTarifa` pairing it.
+    pairs.push(("TARIFA".to_owned(), "DetalheTarifa".to_owned()));
+
+    let detail_schemas: BTreeSet<&str> = schemas
+        .keys()
+        .filter(|name| name.starts_with("Detalhe"))
+        .map(String::as_str)
+        .collect();
+    let covered: BTreeSet<&str> = pairs.iter().map(|(_, detail)| detail.as_str()).collect();
+    assert_eq!(
+        covered, detail_schemas,
+        "schemas de detalhe sem tipo de transação"
+    );
+
+    for (tipo, detail) in &pairs {
+        let mut example = example_for_schema("TransacaoCompleta");
+        example["tipoTransacao"] = json!(tipo);
+        example["detalhes"] = example_for_schema(detail);
+        let transacao: TransacaoCompleta = serde_json::from_value(example.clone()).unwrap();
+
+        let (typed, extras) = typed_detail(transacao.detalhes.as_ref().unwrap())
+            .unwrap_or_else(|| panic!("{tipo}: detalhes não tipados"));
+        assert_eq!(typed, detail, "{tipo}");
+        assert!(
+            extras.is_empty(),
+            "{detail}: campos sem correspondência {extras:?}"
+        );
+
+        let back = serde_json::to_value(&transacao).unwrap();
+        assert_eq!(back["detalhes"], example["detalhes"], "{detail}");
+        let mut base = example.clone();
+        base.as_object_mut().unwrap().remove("detalhes");
+        let mut back_base = back.clone();
+        back_base.as_object_mut().unwrap().remove("detalhes");
+        assert_eq!(numeric_fields(&back_base), numeric_fields(&base), "{tipo}");
+    }
+}
+
+#[test]
+fn statement_pages_accept_the_schema_examples() {
+    let example = example_for_schema("ListaTransacoesCompletaPadrao");
+    let pagina: PaginaExtrato = serde_json::from_value(example.clone()).unwrap();
+    let back = serde_json::to_value(&pagina).unwrap();
+    assert_same_keys("ListaTransacoesCompletaPadrao", &back);
+    assert_eq!(pagina.transacoes.len(), 1);
+
+    let example = example_for_schema("ListaTransacoesCompletaScroll");
+    let lote: LoteScroll = serde_json::from_value(example.clone()).unwrap();
+    let back = serde_json::to_value(&lote).unwrap();
+    assert_same_keys("ListaTransacoesCompletaScroll", &back);
+    assert_eq!(lote.has_more, Some(true));
+    assert_eq!(
+        lote.scroll_id.as_deref(),
+        Some("550e8400-e29b-41d4-a716-446655440000")
+    );
 }
 
 /// The portal's examples carried real-looking CPFs, phone numbers and bank
@@ -277,43 +433,150 @@ fn resolve(value: &'static Value) -> &'static Value {
 }
 
 fn example_for_schema(name: &str) -> Value {
-    example(schema(name), 0)
+    example(schema(name), "", 0)
 }
 
-/// Builds an example document from a schema, preferring the documented examples.
-fn example(schema: &'static Value, depth: usize) -> Value {
+/// Builds an example document from a schema, preferring the documented
+/// examples. `name` is the property being built: amounts documented as
+/// strings without an example (`valor...`) get a numeric text.
+fn example(schema: &'static Value, name: &str, depth: usize) -> Value {
     let schema = resolve(schema);
     if let Some(value) = schema.get("example") {
         return value.clone();
     }
+    let mut merged = Map::new();
     if let Some(all_of) = schema.get("allOf").and_then(Value::as_array) {
-        let mut merged = Map::new();
         for part in all_of {
-            if let Value::Object(object) = example(part, depth + 1) {
+            if let Value::Object(object) = example(part, name, depth + 1) {
                 merged.extend(object);
             }
         }
-        return Value::Object(merged);
+    }
+    if let Some(first) = schema
+        .get("oneOf")
+        .and_then(Value::as_array)
+        .and_then(|options| options.first())
+    {
+        return example(first, name, depth + 1);
     }
     if let Some(value) = schema.get("enum").and_then(|e| e.get(0)) {
         return value.clone();
     }
     match schema.get("type").and_then(Value::as_str) {
-        Some("object") | None if schema.get("properties").is_some() && depth < 8 => {
-            let object = schema["properties"]
-                .as_object()
-                .unwrap()
-                .iter()
-                .map(|(key, property)| (key.clone(), example(property, depth + 1)))
-                .collect();
-            Value::Object(object)
+        _ if schema.get("properties").is_some() && depth < 8 => {
+            for (key, property) in schema["properties"].as_object().unwrap() {
+                merged.insert(key.clone(), example(property, key, depth + 1));
+            }
+            Value::Object(merged)
         }
-        Some("array") => json!([example(&schema["items"], depth + 1)]),
+        _ if !merged.is_empty() => Value::Object(merged),
+        Some("array") => json!([example(&schema["items"], name, depth + 1)]),
         Some("integer") => json!(1),
         Some("number") => json!(1.5),
         Some("boolean") => json!(true),
-        _ => json!("texto"),
+        _ => match schema.get("format").and_then(Value::as_str) {
+            Some("date") => json!("2026-01-02"),
+            Some("date-time") => json!("2026-01-02T10:00:00-03:00"),
+            _ if name.starts_with("valor") => json!("10.50"),
+            _ => json!("texto"),
+        },
     }
+}
+
+fn parameters(endpoint: &Endpoint) -> Map<String, Value> {
+    operation(endpoint)["parameters"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| {
+            let p = resolve(p);
+            (p["name"].as_str().unwrap().to_owned(), p.clone())
+        })
+        .collect()
+}
+
+fn parameter_names(endpoint: &Endpoint) -> BTreeSet<String> {
+    parameters(endpoint).keys().cloned().collect()
+}
+
+/// Every documented property is serialized back with the same value.
+fn assert_round_trip(name: &str, example: &Value, back: &Value) {
+    assert_same_keys(name, back);
+    for key in schema(name)["properties"].as_object().unwrap().keys() {
+        assert_eq!(
+            numeric(&back[key]),
+            numeric_text(&example[key]),
+            "{name}.{key}"
+        );
+    }
+}
+
+fn assert_same_keys(name: &str, back: &Value) {
+    let documented: BTreeSet<&String> = resolve(schema(name))["properties"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .collect();
+    let serialized: BTreeSet<&String> = back.as_object().unwrap().keys().collect();
+    assert_eq!(
+        serialized, documented,
+        "campos do schema {name} sem correspondência no modelo"
+    );
+}
+
+/// Top-level fields with numeric text (amounts are strings in the spec and
+/// numbers in our JSON) normalised to numbers.
+fn numeric_fields(value: &Value) -> Value {
+    Value::Object(
+        value
+            .as_object()
+            .unwrap()
+            .iter()
+            .map(|(key, value)| (key.clone(), numeric_text(value)))
+            .collect(),
+    )
+}
+
+fn numeric_text(value: &Value) -> Value {
+    match value {
+        Value::String(text) => text
+            .parse::<f64>()
+            .ok()
+            .filter(|_| {
+                text.chars()
+                    .all(|c| c.is_ascii_digit() || c == '.' || c == '-')
+            })
+            .map_or_else(|| value.clone(), |n| json!(n)),
+        other => numeric(other),
+    }
+}
+
+/// `BoletoCobranca` -> `BOLETO_COBRANCA`.
+fn screaming_snake(camel: &str) -> String {
+    let mut out = String::new();
+    for (i, c) in camel.chars().enumerate() {
+        if c.is_uppercase() && i > 0 {
+            out.push('_');
+        }
+        out.push(c.to_ascii_uppercase());
+    }
+    out
+}
+
+/// Name of the detail schema a typed variant models, and its unmapped fields.
+fn typed_detail(detalhe: &Detalhe) -> Option<(&'static str, &Map<String, Value>)> {
+    Some(match detalhe {
+        Detalhe::Pix(d) => ("DetalhePix", &d.outros),
+        Detalhe::BoletoCobranca(d) => ("DetalheBoletoCobranca", &d.outros),
+        Detalhe::Cashback(d) => ("DetalheCashback", &d.outros),
+        Detalhe::Cheque(d) => ("DetalheCheque", &d.outros),
+        Detalhe::CompraDebito(d) => ("DetalheCompraDebito", &d.outros),
+        Detalhe::DepositoBoleto(d) => ("DetalheDepositoBoleto", &d.outros),
+        Detalhe::Transferencia(d) => ("DetalheTransferencia", &d.outros),
+        Detalhe::Pagamento(d) => ("DetalhePagamento", &d.outros),
+        Detalhe::Tarifa(d) => ("DetalheTarifa", &d.outros),
+        _ => return None,
+    })
 }
 
 fn numeric(value: &Value) -> Value {

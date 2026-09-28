@@ -3,6 +3,8 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use rustls_pki_types::pem::{self, SectionKind};
 use secrecy::{ExposeSecret, SecretSlice};
 
@@ -197,7 +199,7 @@ fn encode(kind: SectionKind, der: &[u8]) -> String {
         SectionKind::EcPrivateKey => "EC PRIVATE KEY",
         _ => "PRIVATE KEY",
     };
-    let body = base64(der);
+    let body = BASE64.encode(der);
     let mut out = format!("-----BEGIN {label}-----\n");
     for line in body.as_bytes().chunks(64) {
         // Base64 output is always ASCII.
@@ -205,27 +207,6 @@ fn encode(kind: SectionKind, der: &[u8]) -> String {
         out.push('\n');
     }
     let _ = writeln!(out, "-----END {label}-----");
-    out
-}
-
-fn base64(data: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
-    for chunk in data.chunks(3) {
-        let b = [
-            chunk[0],
-            *chunk.get(1).unwrap_or(&0),
-            *chunk.get(2).unwrap_or(&0),
-        ];
-        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
-        for (i, shift) in [18, 12, 6, 0].into_iter().enumerate() {
-            if i <= chunk.len() {
-                out.push(char::from(ALPHABET[((n >> shift) & 63) as usize]));
-            } else {
-                out.push('=');
-            }
-        }
-    }
     out
 }
 
@@ -304,21 +285,5 @@ mod tests {
         let debug = format!("{identity:?}");
         assert!(!debug.contains("BEGIN"));
         assert!(debug.contains("[REDACTED]"));
-    }
-
-    #[test]
-    fn base64_matches_rfc4648_vectors() {
-        let vectors = [
-            ("", ""),
-            ("f", "Zg=="),
-            ("fo", "Zm8="),
-            ("foo", "Zm9v"),
-            ("foob", "Zm9vYg=="),
-            ("fooba", "Zm9vYmE="),
-            ("foobar", "Zm9vYmFy"),
-        ];
-        for (input, expected) in vectors {
-            assert_eq!(base64(input.as_bytes()), expected);
-        }
     }
 }

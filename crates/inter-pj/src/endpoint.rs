@@ -97,7 +97,34 @@ pub mod banking {
         path: "/banking/v2/saldo",
         scopes: &[Scope::ExtratoRead],
     };
+
+    /// `GET /banking/v2/extrato` — statement of a period.
+    pub const EXTRATO: Endpoint = Endpoint {
+        method: Method::Get,
+        path: "/banking/v2/extrato",
+        scopes: &[Scope::ExtratoRead],
+    };
+
+    /// `GET /banking/v2/extrato/completo` — enriched statement, paginated.
+    pub const EXTRATO_COMPLETO: Endpoint = Endpoint {
+        method: Method::Get,
+        path: "/banking/v2/extrato/completo",
+        scopes: &[Scope::ExtratoRead],
+    };
+
+    /// `GET /banking/v2/extrato/exportar` — statement as a PDF document.
+    pub const EXTRATO_EXPORTAR: Endpoint = Endpoint {
+        method: Method::Get,
+        path: "/banking/v2/extrato/exportar",
+        scopes: &[Scope::ExtratoRead],
+    };
 }
 
 /// Every operation implemented by this crate.
-pub const ALL: &[Endpoint] = &[TOKEN, banking::SALDO];
+pub const ALL: &[Endpoint] = &[
+    TOKEN,
+    banking::SALDO,
+    banking::EXTRATO,
+    banking::EXTRATO_COMPLETO,
+    banking::EXTRATO_EXPORTAR,
+];

@@ -343,6 +343,20 @@ impl ApiRequest {
         self.query.push((name, value));
         self
     }
+
+    pub(crate) fn queries(
+        mut self,
+        pairs: impl IntoIterator<Item = (&'static str, String)>,
+    ) -> Self {
+        self.query.extend(pairs);
+        self
+    }
+
+    /// Overrides when the request may be repeated.
+    pub(crate) fn retry(mut self, mode: RetryMode) -> Self {
+        self.retry = mode;
+        self
+    }
 }
 
 #[derive(Deserialize)]
