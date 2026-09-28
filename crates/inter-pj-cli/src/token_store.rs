@@ -2,11 +2,13 @@
 //! the current user, written atomically.
 
 use std::fs;
-use std::io::{self, Write};
+use std::io;
 use std::path::{Path, PathBuf};
 
 use inter_pj::{AccessToken, TokenStore};
 use serde::{Deserialize, Serialize};
+
+use crate::files::write_private;
 
 const FORMAT_VERSION: u32 = 1;
 
@@ -112,26 +114,6 @@ impl TokenStore for FileTokenStore {
         }
         result
     }
-}
-
-/// Writes a file that only the current user can read (mode 600 on Unix).
-pub(crate) fn write_private(path: &Path, contents: &[u8]) -> io::Result<()> {
-    let mut options = fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let mut file = options.open(path)?;
-    #[cfg(unix)]
-    {
-        // `mode` only applies to new files; fix permissions of existing ones.
-        use std::os::unix::fs::PermissionsExt;
-        file.set_permissions(fs::Permissions::from_mode(0o600))?;
-    }
-    file.write_all(contents)?;
-    file.sync_all()
 }
 
 #[cfg(test)]

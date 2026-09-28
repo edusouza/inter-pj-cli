@@ -60,7 +60,8 @@ async fn token(context: &Context, args: &TokenArgs) -> Result<(), CliError> {
             "escopos": token.scopes().to_string(),
             "expiraEm": expira_em.to_rfc3339(),
         })),
-        Formato::Texto => {
+        // `commands::run` refuses csv for this command.
+        Formato::Texto | Formato::Csv => {
             let minutos = (expira_em - Utc::now()).num_minutes().max(0);
             let rows = [
                 ("Perfil", settings.perfil.value.clone()),

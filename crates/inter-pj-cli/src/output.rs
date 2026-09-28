@@ -77,6 +77,20 @@ pub(crate) fn print(text: &str) -> Result<(), CliError> {
     }
 }
 
+/// Prints `text` as is (e.g. CSV, which carries its own line endings).
+pub(crate) fn print_raw(text: &str) -> Result<(), CliError> {
+    let mut stdout = io::stdout().lock();
+    match stdout
+        .write_all(text.as_bytes())
+        .and_then(|()| stdout.flush())
+    {
+        Err(err) if err.kind() != io::ErrorKind::BrokenPipe => {
+            Err(CliError::io("falha ao escrever na saída padrão", err))
+        }
+        _ => Ok(()),
+    }
+}
+
 /// Prints `value` as pretty JSON.
 pub(crate) fn print_json<T: Serialize>(value: &T) -> Result<(), CliError> {
     let json = serde_json::to_string_pretty(value)

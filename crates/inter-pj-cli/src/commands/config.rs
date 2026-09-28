@@ -14,8 +14,8 @@ use crate::cli::{ConfigCommand, Formato, InitArgs, VerificarArgs};
 use crate::config::{ConfigFile, LoadedConfig, Setting, Settings, TEMPLATE};
 use crate::doctor::{self, Aspas};
 use crate::error::CliError;
+use crate::files::write_private;
 use crate::output;
-use crate::token_store::write_private;
 
 pub(super) fn run(context: &Context, command: &ConfigCommand) -> Result<(), CliError> {
     match command {
@@ -63,7 +63,8 @@ fn caminho(context: &Context) -> Result<(), CliError> {
             "configuracaoExiste": config.exists(),
             "cache": context.cache_dir(),
         })),
-        Formato::Texto => output::print(&output::key_values_left(&[
+        // `commands::run` refuses csv for this command.
+        Formato::Texto | Formato::Csv => output::print(&output::key_values_left(&[
             ("Configuração", format!("{}{status}", config.display())),
             ("Cache", context.cache_dir().display().to_string()),
         ])),
@@ -84,7 +85,8 @@ fn mostrar(context: &Context) -> Result<(), CliError> {
                 .collect();
             output::print_json(&object)
         }
-        Formato::Texto => {
+        // `commands::run` refuses csv for this command.
+        Formato::Texto | Formato::Csv => {
             let lines: Vec<(&str, String)> = rows
                 .iter()
                 .map(|row| {
@@ -542,7 +544,7 @@ fn relatorio(
             "erros": erros,
             "avisos": avisos,
         }))?,
-        Formato::Texto => {
+        Formato::Texto | Formato::Csv => {
             let mut texto = format!("Arquivo: {}\n\n", path.display());
             for achado in achados {
                 let _ = writeln!(
