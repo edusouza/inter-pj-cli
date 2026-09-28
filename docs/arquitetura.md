@@ -6,6 +6,7 @@
 ┌──────────────────────── crates/inter-pj-cli (binário `inter-pj`) ────────────────────────┐
 │ cli.rs        definição dos comandos (clap) e ajuda em português                         │
 │ config.rs     arquivo TOML, perfis, precedência flag > env > arquivo, origem dos valores │
+│ doctor.rs     diagnóstico do texto do arquivo: caminhos do Windows entre aspas duplas    │
 │ commands/     saldo, auth, config                                                         │
 │ token_store   cache de tokens em arquivo (600, gravação atômica)                          │
 │ output.rs     R$ no formato brasileiro, tabelas, JSON                                     │
@@ -57,6 +58,8 @@ Valores usam `rust_decimal::Decimal`. A API envia números JSON (e às vezes str
 ### Configuração explícita
 
 Não há ambiente padrão: sandbox ou produção precisa ser escolhido. A resolução guarda a origem de cada valor (flag, variável, arquivo), exibida por `config mostrar` para facilitar diagnósticos, e lista de uma vez tudo o que falta.
+
+O `config verificar` junta os diagnósticos: lê o texto do arquivo antes do parser, para apontar a linha e a correção de cada caminho com barra invertida entre aspas duplas. Depois confere a sintaxe e o perfil resolvido, inclusive se o certificado e a chave são aceitos pela biblioteca TLS. Com `--corrigir`, ele reescreve só essas linhas, mantendo o recuo, os comentários e o fim de linha, e guarda o original em `config.toml.bak`.
 
 ### Erros e códigos de saída
 
