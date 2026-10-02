@@ -213,7 +213,7 @@ mod tests {
 
     #[test]
     fn other_keys_are_reported_only_when_the_file_does_not_load() {
-        assert!(aspas_duplas("client_id = \"a\\tb\"\n").is_empty());
+        assert_eq!(aspas_duplas("client_id = \"a\\tb\"\n"), Vec::new());
         let problemas = aspas_duplas("client_id = \"a\\qb\"\n");
         assert_eq!(problemas.len(), 1);
         assert!(problemas[0].invalida);

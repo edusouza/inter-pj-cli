@@ -747,7 +747,7 @@ mod tests {
         // Paths go between single quotes, where a Windows backslash is kept.
         assert!(TEMPLATE.contains("\ncertificado = ''\n"), "{TEMPLATE}");
         assert!(TEMPLATE.contains("\nchave_privada = ''\n"), "{TEMPLATE}");
-        assert!(crate::doctor::aspas_duplas(TEMPLATE).is_empty());
+        assert_eq!(crate::doctor::aspas_duplas(TEMPLATE), Vec::new());
     }
 
     #[test]
