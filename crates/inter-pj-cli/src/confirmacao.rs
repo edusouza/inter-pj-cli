@@ -131,10 +131,10 @@ pub(crate) mod testes {
             matches!(&err, CliError::Usage(message) if message.contains("--sim")),
             "{err}"
         );
-        assert!(terminal.perguntas.is_empty());
+        assert_eq!(terminal.perguntas, Vec::<String>::new());
 
         let mut terminal = TerminalFalso::default();
         assert!(confirmar(&mut terminal, true, "Enviar?").is_ok());
-        assert!(terminal.perguntas.is_empty());
+        assert_eq!(terminal.perguntas, Vec::<String>::new());
     }
 }

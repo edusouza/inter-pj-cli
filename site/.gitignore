@@ -1,0 +1,12 @@
+# Gerados por `cargo run -p sitegen` a partir do repositório.
+/conteudo/changelog.md
+/conteudo/referencia/comandos.md
+/conteudo/referencia/seguranca.md
+/conteudo/por-dentro/arquitetura.md
+/conteudo/por-dentro/biblioteca.md
+/conteudo/por-dentro/contribuir.md
+/conteudo/por-dentro/roadmap.md
+
+# Saída e cache do Zensical.
+/_build/
+/.cache/
