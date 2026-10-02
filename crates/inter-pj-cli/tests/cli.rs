@@ -5,6 +5,7 @@
 mod common;
 
 use std::fs;
+use std::path::PathBuf;
 
 use common::{CLIENT_ID, CLIENT_SECRET, TOKEN, TestEnv, saldo_ok, stderr_of, stdout_of};
 use predicates::prelude::*;
@@ -155,7 +156,7 @@ async fn sem_cache_pede_token_a_cada_execucao() {
 
     env.cmd().args(["saldo", "--sem-cache"]).assert().success();
     env.cmd().args(["saldo", "--sem-cache"]).assert().success();
-    assert!(env.cache_files().is_empty());
+    assert_eq!(env.cache_files(), Vec::<PathBuf>::new());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -172,7 +173,7 @@ async fn auth_limpar_remove_o_cache() {
         .assert()
         .success()
         .stdout(predicate::str::contains("removidos"));
-    assert!(env.cache_files().is_empty());
+    assert_eq!(env.cache_files(), Vec::<PathBuf>::new());
     env.cmd()
         .args(["auth", "limpar"])
         .assert()

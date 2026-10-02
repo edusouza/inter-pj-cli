@@ -25,6 +25,11 @@ Pix: envio e consulta, com trilhos de segurança.
 - Valores em reais aceitos como `150,00`, `1.500,00` ou `150.00`, recusando formas ambíguas (`1.500`).
 - Códigos de saída 7 (operação cancelada na confirmação) e 8 (tempo de espera esgotado em `pix consultar --aguardar`).
 - Biblioteca: `Banking::enviar_pix` (com `x-id-idempotente`; repetido automaticamente só quando certamente não foi processado) e `Banking::consultar_pix`; `documento::Documento`, `pix::ChavePix`, `pix::BrCode`, `IdIdempotente` e `Error::InvalidInput`.
+- Biblioteca: `documento::Documento` valida CPF e CNPJ (inclusive o CNPJ alfanumérico), `pix::ChavePix` reconhece e normaliza chaves Pix (CPF, CNPJ, e-mail, celular `+55` e chave aleatória) e `pix::BrCode` decodifica o Pix copia e cola, conferindo o CRC16 (#20).
+- Biblioteca: `Banking::enviar_pix` (por chave, dados bancários ou copia e cola, com `x-id-idempotente`) e `Banking::consultar_pix` (status e histórico), com validação local do pagamento e repetição automática só quando o envio certamente não foi processado (#20, #21).
+- Site de documentação no GitHub Pages (`https://edusouza.github.io/inter-pj-cli/`), construído com o Zensical a partir de `site/`, para quem usa a CLI e para quem a desenvolve: primeiros passos, guias, a referência de comandos, a segurança, a arquitetura e como contribuir. A referência de comandos é gerada da ajuda do binário e as demais páginas derivadas (changelog, segurança, arquitetura, roadmap, contribuição e biblioteca) são cópias dos arquivos do repositório, com os links reescritos.
+- O crate `sitegen`, que gera essas páginas e confere os comandos `inter-pj ...` citados nas páginas escritas à mão: um comando que não existe mais reprova a construção do site.
+- O workflow `pages.yml`: constrói o site em modo estrito nos pull requests e o publica a partir da `main`.
 
 ## [0.2.0] - 2026-09-23
 
