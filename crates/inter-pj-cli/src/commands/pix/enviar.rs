@@ -433,7 +433,14 @@ fn render(solicitacao: &SolicitacaoPix, id: &IdIdempotente) -> String {
         linhas.push(("Data da operação", data_br(data)));
     }
     linhas.push(("Chave de idempotência", id.to_string()));
-    format!("{titulo}\n{}", output::key_values_left(&linhas))
+    let mut texto = format!("{titulo}\n{}", output::key_values_left(&linhas));
+    if let Some(codigo) = &solicitacao.codigo_solicitacao {
+        let _ = write!(
+            texto,
+            "\n\nAcompanhe com: inter-pj pix consultar {codigo} --aguardar"
+        );
+    }
+    texto
 }
 
 /// `2026-09-23` -> `23/09/2026`; other formats as received.
@@ -800,7 +807,9 @@ Pix enviado.
 Código da solicitação  c42f0787-02cb-4b31-827e-459ec9d7ece1
 Data do pagamento      01/10/2026
 Data da operação       23/09/2026
-Chave de idempotência  123e4567-e89b-42d3-a456-426614174000"
+Chave de idempotência  123e4567-e89b-42d3-a456-426614174000
+
+Acompanhe com: inter-pj pix consultar c42f0787-02cb-4b31-827e-459ec9d7ece1 --aguardar"
         );
         assert!(
             render(&solicitacao("AGENDADO"), &id()).starts_with("Pix agendado para 01/10/2026.")
