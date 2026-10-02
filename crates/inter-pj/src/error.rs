@@ -14,6 +14,10 @@ pub enum Error {
     /// The client configuration is invalid (environment, base URL, account...).
     #[error("{0}")]
     Config(String),
+    /// A value given to an operation is invalid (amount, description...);
+    /// nothing was sent to the API.
+    #[error(transparent)]
+    InvalidInput(Box<dyn StdError + Send + Sync>),
     /// The mTLS certificate or private key could not be used.
     #[error(transparent)]
     Identity(#[from] IdentityError),

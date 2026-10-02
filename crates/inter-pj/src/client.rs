@@ -181,6 +181,9 @@ impl InterClient {
                     if let Some(conta) = &self.inner.conta_corrente {
                         builder = builder.header("x-conta-corrente", conta.clone());
                     }
+                    for (name, value) in &request.headers {
+                        builder = builder.header(*name, value.as_str());
+                    }
                     if !request.query.is_empty() {
                         builder = builder.query(&request.query);
                     }
@@ -319,6 +322,7 @@ pub(crate) struct ApiRequest {
     endpoint: Endpoint,
     path_params: Vec<(&'static str, String)>,
     query: Vec<(&'static str, String)>,
+    headers: Vec<(&'static str, String)>,
     body: Option<serde_json::Value>,
     retry: RetryMode,
 }
@@ -330,6 +334,7 @@ impl ApiRequest {
             endpoint,
             path_params: Vec::new(),
             query: Vec::new(),
+            headers: Vec::new(),
             body: None,
             retry: if endpoint.method == Method::Get {
                 RetryMode::Idempotent
@@ -337,6 +342,24 @@ impl ApiRequest {
                 RetryMode::Never
             },
         }
+    }
+
+    /// Value of a `{name}` placeholder of the path, percent-encoded when sent.
+    pub(crate) fn path_param(mut self, name: &'static str, value: String) -> Self {
+        self.path_params.push((name, value));
+        self
+    }
+
+    /// Extra header, besides authorization and `x-conta-corrente`.
+    pub(crate) fn header(mut self, name: &'static str, value: String) -> Self {
+        self.headers.push((name, value));
+        self
+    }
+
+    /// JSON body.
+    pub(crate) fn json(mut self, body: serde_json::Value) -> Self {
+        self.body = Some(body);
+        self
     }
 
     pub(crate) fn query(mut self, name: &'static str, value: String) -> Self {

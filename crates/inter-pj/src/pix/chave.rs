@@ -1,6 +1,8 @@
 use std::fmt;
 use std::str::FromStr;
 
+use serde::{Serialize, Serializer};
+
 use crate::documento::{Documento, DocumentoError};
 
 /// Longest e-mail accepted as a Pix key by the DICT (Banco Central).
@@ -103,6 +105,13 @@ impl FromStr for ChavePix {
 impl fmt::Display for ChavePix {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
+    }
+}
+
+/// Serialized as the API expects it (see [`as_str`](ChavePix::as_str)).
+impl Serialize for ChavePix {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
     }
 }
 
