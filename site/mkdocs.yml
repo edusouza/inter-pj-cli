@@ -1,0 +1,96 @@
+# Site de documentação, publicado no GitHub Pages pelo workflow pages.yml.
+#
+# Construído com o Zensical, que lê este arquivo no formato do MkDocs. Por isso ele só usa o
+# que o Material for MkDocs também entende: se o Zensical não servir, o Material constrói o
+# mesmo site sem mudar nada aqui (veja "Este site" em por-dentro/desenvolvimento.md).
+#
+# Parte das páginas é gerada e não fica no repositório (site/.gitignore). Da raiz:
+#
+#   cargo build -p inter-pj-cli    # a referência de comandos vem da ajuda do binário
+#   cargo run -p sitegen           # gera as páginas e confere os comandos citados nas outras
+#
+# Depois, dentro de site/:
+#
+#   zensical serve                 # prévia em http://localhost:8000
+#   zensical build --strict        # o que a CI roda
+
+site_name: inter-pj
+site_description: >-
+  CLI não oficial, em Rust, para a conta PJ do Inter Empresas: saldo, extrato e, a cada
+  versão, mais das APIs do banco, pela linha de comando.
+site_url: https://edusouza.github.io/inter-pj-cli/
+repo_url: https://github.com/edusouza/inter-pj-cli
+repo_name: edusouza/inter-pj-cli
+copyright: >-
+  Código sob as licenças MIT ou Apache-2.0. Projeto não oficial, sem vínculo com o Banco Inter.
+
+docs_dir: conteudo
+site_dir: _build
+
+theme:
+  name: material
+  language: pt-BR
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - navigation.instant
+    - search.highlight
+    - content.code.copy
+    - content.tabs.link
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Mudar para o tema escuro
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Mudar para o tema claro
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+nav:
+  - Início: index.md
+  - Primeiros passos:
+      - Instalação: comecar/instalacao.md
+      - Criar a integração no Inter: comecar/integracao.md
+      - Configurar: comecar/configurar.md
+      - Os primeiros comandos: comecar/primeiros-comandos.md
+  - Guias:
+      - Saldo e extrato: guias/saldo-e-extrato.md
+      - Formatos de saída: guias/formatos-de-saida.md
+      - Perfis e ambientes: guias/perfis-e-ambientes.md
+      - Automação e scripts: guias/automacao.md
+      - Quando algo dá errado: guias/problemas.md
+  - Referência:
+      - Comandos: referencia/comandos.md
+      - Configuração: referencia/configuracao.md
+      - Códigos de saída: referencia/codigos-de-saida.md
+      - Segurança e privacidade: referencia/seguranca.md
+      - Glossário: referencia/glossario.md
+  - Por dentro:
+      - Arquitetura: por-dentro/arquitetura.md
+      - A biblioteca Rust: por-dentro/biblioteca.md
+      - Desenvolvimento: por-dentro/desenvolvimento.md
+      - Como contribuir: por-dentro/contribuir.md
+      - Roadmap: por-dentro/roadmap.md
+  - Changelog: changelog.md
