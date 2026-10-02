@@ -3,6 +3,8 @@
 
 mod common;
 
+use std::fmt::Write as _;
+
 use common::{CLIENT_SECRET, TOKEN, TestEnv, stderr_of, stdout_of};
 use predicates::prelude::*;
 use serde_json::{Value, json};
@@ -28,6 +30,39 @@ fn resposta(tipo: &str) -> ResponseTemplate {
         "dataPagamento": "2026-10-01",
         "dataOperacao": "2026-09-23"
     }))
+}
+
+fn tlv(campos: &[(&str, &str)]) -> String {
+    let mut texto = String::new();
+    for (id, valor) in campos {
+        let _ = write!(texto, "{id}{:02}{valor}", valor.chars().count());
+    }
+    texto
+}
+
+/// A static copia e cola code paying `fornecedor@exemplo.com`.
+fn copia_e_cola(valor: Option<&str>) -> String {
+    let conta = tlv(&[("00", "br.gov.bcb.pix"), ("01", "fornecedor@exemplo.com")]);
+    let mut campos = vec![
+        ("00", "01"),
+        ("26", conta.as_str()),
+        ("52", "0000"),
+        ("53", "986"),
+    ];
+    if let Some(valor) = valor {
+        campos.push(("54", valor));
+    }
+    campos.extend([
+        ("58", "BR"),
+        ("59", "Fornecedor Exemplo"),
+        ("60", "SAO PAULO"),
+        ("62", "0505NF123"),
+    ]);
+    let mut codigo = tlv(&campos);
+    codigo.push_str("6304");
+    let crc = inter_pj::pix::crc16(codigo.as_bytes());
+    let _ = write!(codigo, "{crc:04X}");
+    codigo
 }
 
 /// The API must not be called at all.
@@ -382,4 +417,179 @@ async fn secrets_never_reach_the_output() {
     let output = format!("{}{}", stdout_of(&assert), stderr_of(&assert));
     assert!(!output.contains(CLIENT_SECRET), "{output}");
     assert!(!output.contains(TOKEN), "{output}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn copia_e_cola_pays_the_amount_of_the_code() {
+    let env = TestEnv::new().await;
+    env.write_config("");
+    let codigo = copia_e_cola(Some("150.00"));
+    mount_pix(
+        &env,
+        json!({"valor": 150, "destinatario": {"tipo": "PIX_COPIA_E_COLA", "pixCopiaECola": codigo}}),
+        resposta("PROCESSADO"),
+    )
+    .await;
+
+    env.cmd()
+        .args(["pix", "enviar", "--copia-e-cola", &codigo, "--sim"])
+        .assert()
+        .success()
+        .stdout(predicate::str::starts_with("Pix enviado."))
+        .stderr(
+            predicate::str::contains("Recebedor              Fornecedor Exemplo (SAO PAULO)")
+                .and(predicate::str::contains("fornecedor@exemplo.com (e-mail)"))
+                .and(predicate::str::contains("Identificador          NF123"))
+                .and(predicate::str::contains(
+                    "R$ 150,00 (cento e cinquenta reais)",
+                )),
+        );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn copia_e_cola_without_amount_takes_valor() {
+    let env = TestEnv::new().await;
+    env.write_config("");
+    let codigo = copia_e_cola(None);
+    mount_pix(
+        &env,
+        json!({"valor": 9.9, "destinatario": {"tipo": "PIX_COPIA_E_COLA", "pixCopiaECola": codigo}}),
+        resposta("PROCESSADO"),
+    )
+    .await;
+
+    env.cmd()
+        .args([
+            "pix",
+            "enviar",
+            "--copia-e-cola",
+            &codigo,
+            "--valor",
+            "9,90",
+            "--sim",
+        ])
+        .assert()
+        .success();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn wrong_amounts_and_corrupted_codes_are_refused() {
+    let env = TestEnv::new().await;
+    env.write_config("");
+    nothing_is_sent(&env).await;
+    let com_valor = copia_e_cola(Some("150.00"));
+    let sem_valor = copia_e_cola(None);
+    let corrompido = com_valor.replacen("150.00", "950.00", 1);
+
+    for (args, mensagem) in [
+        (
+            vec!["--copia-e-cola", com_valor.as_str(), "--valor", "15"],
+            "fixa o valor em R$ 150,00",
+        ),
+        (
+            vec!["--copia-e-cola", sem_valor.as_str()],
+            "não traz o valor",
+        ),
+        (
+            vec!["--copia-e-cola", corrompido.as_str()],
+            "copie o código novamente",
+        ),
+        (
+            vec![
+                "--copia-e-cola",
+                com_valor.as_str(),
+                "--chave",
+                "fornecedor@exemplo.com",
+            ],
+            "--chave",
+        ),
+    ] {
+        env.cmd()
+            .args(["pix", "enviar"])
+            .args(&args)
+            .arg("--sim")
+            .assert()
+            .code(2)
+            .stderr(predicate::str::contains(mensagem));
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn bank_details_are_sent_for_receivers_without_a_key() {
+    let env = TestEnv::new().await;
+    env.write_config("");
+    mount_pix(
+        &env,
+        json!({
+            "valor": 10,
+            "destinatario": {
+                "tipo": "DADOS_BANCARIOS",
+                "nome": "Fornecedor Exemplo",
+                "cpfCnpj": "12345678000195",
+                "instituicaoFinanceira": {"ispb": "00000000"},
+                "agencia": "0001",
+                "contaCorrente": "12345678",
+                "tipoConta": "CONTA_PAGAMENTO"
+            }
+        }),
+        resposta("PROCESSADO"),
+    )
+    .await;
+
+    env.cmd()
+        .args(["pix", "enviar", "--valor", "10", "--sim"])
+        .args([
+            "--ispb",
+            "00000000",
+            "--agencia",
+            "0001",
+            "--conta",
+            "1234567-8",
+        ])
+        .args([
+            "--tipo-conta",
+            "pagamento",
+            "--documento",
+            "12.345.678/0001-95",
+        ])
+        .args(["--nome", "Fornecedor Exemplo"])
+        .assert()
+        .success()
+        .stderr(
+            predicate::str::contains("CPF/CNPJ               12.345.678/0001-95").and(
+                predicate::str::contains("0001 / 12345678 (conta de pagamento)"),
+            ),
+        );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn bank_details_must_be_complete() {
+    let env = TestEnv::new().await;
+    env.write_config("");
+    nothing_is_sent(&env).await;
+
+    env.cmd()
+        .args(["pix", "enviar", "--valor", "10", "--sim"])
+        .args([
+            "--ispb",
+            "00000000",
+            "--agencia",
+            "0001",
+            "--conta",
+            "1234567",
+        ])
+        .args([
+            "--tipo-conta",
+            "corrente",
+            "--documento",
+            "12.345.678/0001-95",
+        ])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("--nome"));
+    env.cmd()
+        .args(["pix", "enviar", "--valor", "10", "--sim"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("--chave"));
 }
