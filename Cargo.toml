@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/inter-pj", "crates/inter-pj-cli"]
+members = ["crates/inter-pj", "crates/inter-pj-cli", "crates/sitegen"]
 
 [workspace.package]
 version = "0.2.0"

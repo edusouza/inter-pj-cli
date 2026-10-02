@@ -6,6 +6,12 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+### Adicionado
+
+- Site de documentação no GitHub Pages (`https://edusouza.github.io/inter-pj-cli/`), construído com o Zensical a partir de `site/`, para quem usa a CLI e para quem a desenvolve: primeiros passos, guias, a referência de comandos, a segurança, a arquitetura e como contribuir. A referência de comandos é gerada da ajuda do binário e as demais páginas derivadas (changelog, segurança, arquitetura, roadmap, contribuição e biblioteca) são cópias dos arquivos do repositório, com os links reescritos.
+- O crate `sitegen`, que gera essas páginas e confere os comandos `inter-pj ...` citados nas páginas escritas à mão: um comando que não existe mais reprova a construção do site.
+- O workflow `pages.yml`: constrói o site em modo estrito nos pull requests e o publica a partir da `main`.
+
 ## [0.2.0] - 2026-09-23
 
 Extrato: consulta, extrato enriquecido, PDF e exportação.
