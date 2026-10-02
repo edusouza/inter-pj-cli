@@ -1,0 +1,16 @@
+[package]
+name = "sitegen"
+description = "Gera as páginas derivadas do site de documentação (GitHub Pages) e confere os comandos citados nelas"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish.workspace = true
+
+# No dependencies on purpose: the generator reads text and runs the built binary,
+# and every crate added here is one more to audit (deny.toml).
+
+[lints]
+workspace = true
