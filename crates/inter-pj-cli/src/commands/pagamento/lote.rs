@@ -632,7 +632,7 @@ Lote a enviar
             ]
         );
         let (_dir, arquivo) = ler(CSV);
-        assert!(repetidos(&arquivo.pagamentos).is_empty());
+        assert_eq!(repetidos(&arquivo.pagamentos), Vec::<String>::new());
     }
 
     #[test]
@@ -731,7 +731,13 @@ PIX"
         let chave = dir.path().join("chave.key");
         fs::write(&certificado, cert.pem()).unwrap();
         fs::write(&chave, signing_key.serialize_pem()).unwrap();
-        fs::write(dir.path().join("lote.csv"), CSV).unwrap();
+        // The command takes today from the clock: the scheduling of the file
+        // goes to tomorrow, never to a day already past.
+        let amanha = (crate::commands::hoje() + chrono::Days::new(1))
+            .format("%Y-%m-%d")
+            .to_string();
+        let csv = CSV.replace("2026-10-10;2026-10-09", &format!("{amanha};{amanha}"));
+        fs::write(dir.path().join("lote.csv"), csv).unwrap();
         let config = dir.path().join("config.toml");
         fs::write(
             &config,
