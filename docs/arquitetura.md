@@ -124,7 +124,9 @@ O `config verificar` junta os diagnósticos: lê o texto do arquivo antes do par
 
 ### Erros e códigos de saída
 
-A biblioteca expõe erros tipados (`Error::{Config, Identity, Auth, Api, Transport, Decode}`) com a categoria HTTP (`ApiErrorKind`). A CLI traduz cada categoria para um código de saída estável (ver README), útil em scripts.
+A biblioteca expõe erros tipados (`Error::{Config, InvalidInput, Identity, Auth, Api, Transport, TokenTransport, Decode}`) com a categoria HTTP (`ApiErrorKind`). A CLI traduz cada categoria para um código de saída estável (ver README), útil em scripts.
+
+Um envio cujo resultado ficou incerto tem o seu próprio código, 9, e não o da categoria: um script precisa distinguir "pode ter sido feito" de "não foi feito" (um `429` ou uma conexão recusada, 6), que pode repetir. Quem decide é a biblioteca, que sabe em que fase a requisição falhou: `Error::may_have_been_processed` é verdadeiro só depois que a requisição da operação foi enviada (tempo esgotado ou conexão caída, `5xx`, sucesso ilegível). A falha do pedido do token (`TokenTransport`, ou `Decode` em `POST /oauth/v2/token`) vem antes da operação, e nada foi enviado; a regra é a mesma que decide as repetições automáticas (`retry.rs`). A CLI não olha `reqwest` nem status HTTP para isso.
 
 ### Idioma
 

@@ -18,7 +18,7 @@ use crate::cli::{
 };
 use crate::commands::{Context, hoje, simulacao};
 use crate::confirmacao::{Terminal, confirmar, descrever_ambiente, verificar_limite};
-use crate::error::{CliError, resultado_incerto};
+use crate::error::CliError;
 use crate::output::{self, data_hora_br};
 use crate::tabela::{Celula, Coluna, Tabela};
 use crate::valor::por_extenso;
@@ -93,7 +93,7 @@ async fn enviar(
     );
     confirmar(terminal, args.sim, &pergunta)?;
     let solicitacao = client.banking().enviar_lote(&lote).await.map_err(|err| {
-        if resultado_incerto(&err) {
+        if err.may_have_been_processed() {
             CliError::PagamentoIncerto {
                 source: err,
                 situacao: "o lote pode ter sido recebido e pago",
@@ -101,6 +101,8 @@ async fn enviar(
                 // listings of each kind.
                 consulta: "inter-pj pagamento boleto listar e inter-pj pagamento darf listar"
                     .to_owned(),
+                // Both listings ask for the scope of payments by barcode.
+                escopos: "pagamento-boleto.read",
             }
         } else {
             err.into()
