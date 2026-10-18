@@ -9,6 +9,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 ### Adicionado
 
 - `inter-pj pix enviar --chave`: Pix por chave com resumo antes do envio (valor por extenso, ambiente de produção em destaque), confirmação `[s/N]`, `--sim` para scripts, `--simular` (mostra a requisição sem enviar), `--data` para agendar, chave de idempotência exibida e `--id-idempotente` para repetir com segurança, `limite_por_operacao` no perfil e aviso quando o resultado do envio é incerto (#19, #20).
+- `inter-pj pix enviar --copia-e-cola`: o código é decodificado e conferido localmente, e o resumo mostra recebedor, cidade, chave ou cobrança, identificador e mensagem; o valor do código é usado quando `--valor` não é informado, e um valor diferente é recusado em códigos estáticos (#20).
+- `inter-pj pix enviar` por dados bancários: `--ispb`, `--agencia`, `--conta`, `--tipo-conta`, `--documento` (CPF/CNPJ conferido) e `--nome` (#20).
 - Valores em reais aceitos como `150,00`, `1.500,00` ou `150.00`, recusando formas ambíguas (`1.500`).
 - Código de saída 7: operação cancelada na confirmação.
 - Biblioteca: `documento::Documento` valida CPF e CNPJ (inclusive o CNPJ alfanumérico), `pix::ChavePix` reconhece e normaliza chaves Pix (CPF, CNPJ, e-mail, celular `+55` e chave aleatória) e `pix::BrCode` decodifica o Pix copia e cola, conferindo o CRC16 (#20).
