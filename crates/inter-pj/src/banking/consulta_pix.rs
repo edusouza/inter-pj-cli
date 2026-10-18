@@ -34,7 +34,11 @@ pub struct TransacaoPix {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recebedor: Option<RecebedorPix>,
     /// Why the payment failed, when it did.
-    #[serde(default, deserialize_with = "lenient::vec")]
+    #[serde(
+        default,
+        deserialize_with = "lenient::vec",
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub erros: Vec<ErroPix>,
     /// End-to-end identifier of the Pix in the Brazilian instant payment system.
     #[serde(

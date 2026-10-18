@@ -593,3 +593,180 @@ async fn bank_details_must_be_complete() {
         .code(2)
         .stderr(predicate::str::contains("--chave"));
 }
+
+// --- pix consultar ------------------------------------------------------------
+
+fn consulta(status: &str) -> Value {
+    json!({
+        "transacaoPix": {
+            "status": status,
+            "valor": 150,
+            "chave": "fornecedor@exemplo.com",
+            "codigoSolicitacao": CODIGO,
+            "recebedor": {"nome": "Fornecedor Exemplo", "cpfCnpj": "***.456.789-**"}
+        },
+        "historico": [
+            {"status": "CRIADO", "dataHoraEvento": "2026-09-23T12:00:00"},
+            {"status": status, "dataHoraEvento": "2026-09-23T12:00:01"}
+        ]
+    })
+}
+
+async fn mount_consulta(env: &TestEnv, status: &str, vezes: Option<u64>) {
+    let mock = Mock::given(method("GET"))
+        .and(path(format!("{PIX}/{CODIGO}")))
+        .and(header("authorization", format!("Bearer {TOKEN}").as_str()))
+        .respond_with(ResponseTemplate::new(200).set_body_json(consulta(status)));
+    match vezes {
+        Some(vezes) => {
+            mock.up_to_n_times(vezes)
+                .expect(vezes)
+                .mount(&env.server)
+                .await;
+        }
+        None => mock.mount(&env.server).await,
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn consultar_shows_status_and_history() {
+    let env = TestEnv::new().await;
+    env.write_config("");
+    env.mount_token("pagamento-pix.read", Some(1)).await;
+    mount_consulta(&env, "PAGO", Some(2)).await;
+
+    let assert = env
+        .cmd()
+        .args(["pix", "consultar", CODIGO])
+        .assert()
+        .success();
+    let stdout = stdout_of(&assert);
+    for linha in [
+        "Status                 pago",
+        "Valor                  R$ 150,00",
+        "Recebedor              Fornecedor Exemplo (***.456.789-**)",
+        "Histórico\n  23/09/2026 12:00:00  criado\n  23/09/2026 12:00:01  pago",
+    ] {
+        assert!(stdout.contains(linha), "{linha}\n{stdout}");
+    }
+
+    let assert = env
+        .cmd()
+        .args(["pix", "consultar", CODIGO, "--json"])
+        .assert()
+        .success();
+    let json: Value = serde_json::from_str(&stdout_of(&assert)).unwrap();
+    assert_eq!(json, consulta("PAGO"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn aguardar_stops_at_a_final_status() {
+    let env = TestEnv::new().await;
+    env.write_config("");
+    env.mount_token("pagamento-pix.read", None).await;
+    mount_consulta(&env, "AGUARDANDO_APROVACAO", Some(1)).await;
+    mount_consulta(&env, "PAGO", Some(1)).await;
+
+    env.cmd()
+        .args(["pix", "consultar", CODIGO, "--aguardar", "--timeout", "3s"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Status                 pago"))
+        .stderr(predicate::str::contains(
+            "aguardando: aguardando aprovação no Internet Banking",
+        ));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn aguardar_gives_up_after_the_timeout() {
+    let env = TestEnv::new().await;
+    env.write_config("");
+    env.mount_token("pagamento-pix.read", None).await;
+    mount_consulta(&env, "AGUARDANDO_APROVACAO", None).await;
+
+    env.cmd()
+        .args(["pix", "consultar", CODIGO, "--aguardar", "--timeout", "1s"])
+        .assert()
+        .code(8)
+        .stdout(predicate::str::contains(
+            "Status                 aguardando aprovação no Internet Banking",
+        ))
+        .stderr(
+            predicate::str::contains("tempo de espera esgotado (1 s)")
+                .and(predicate::str::contains("aumente o --timeout")),
+        );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn aguardar_reports_payments_that_were_not_made() {
+    let env = TestEnv::new().await;
+    env.write_config("");
+    env.mount_token("pagamento-pix.read", None).await;
+    mount_consulta(&env, "CANCELADO_SEM_SALDO", None).await;
+
+    env.cmd()
+        .args(["pix", "consultar", CODIGO, "--aguardar"])
+        .assert()
+        .code(5)
+        .stderr(predicate::str::contains(
+            "o Pix terminou sem ser pago: cancelado por falta de saldo",
+        ));
+
+    // Without --aguardar the query itself succeeded.
+    env.cmd()
+        .args(["pix", "consultar", CODIGO])
+        .assert()
+        .success();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn request_codes_are_validated_and_unknown_ones_reported() {
+    let env = TestEnv::new().await;
+    env.write_config("");
+    nothing_is_sent(&env).await;
+    env.cmd()
+        .args(["pix", "consultar", "../saldo"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("UUID"));
+
+    let env = TestEnv::new().await;
+    env.write_config("");
+    env.mount_token("pagamento-pix.read", None).await;
+    Mock::given(method("GET"))
+        .and(path(format!("{PIX}/{CODIGO}")))
+        .respond_with(ResponseTemplate::new(404).set_body_json(json!({
+            "title": "Não Encontrado.",
+            "status": "404",
+            "detail": "Entidade não encontrada."
+        })))
+        .expect(1)
+        .mount(&env.server)
+        .await;
+    env.cmd()
+        .args(["pix", "consultar", CODIGO])
+        .assert()
+        .code(5)
+        .stderr(predicate::str::contains("Entidade não encontrada"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn sending_points_to_the_query() {
+    let env = TestEnv::new().await;
+    env.write_config("");
+    mount_pix(
+        &env,
+        json!({"valor": 150, "destinatario": {"tipo": "CHAVE", "chave": "fornecedor@exemplo.com"}}),
+        resposta("APROVACAO"),
+    )
+    .await;
+
+    env.cmd()
+        .args(ENVIAR)
+        .arg("--sim")
+        .assert()
+        .success()
+        .stdout(predicate::str::ends_with(format!(
+            "Acompanhe com: inter-pj pix consultar {CODIGO} --aguardar\n"
+        )));
+}
