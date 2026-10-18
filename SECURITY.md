@@ -19,7 +19,7 @@ Outras proteções:
 - Erros de parse do arquivo de configuração indicam apenas a linha, sem reproduzir o conteúdo (que pode conter o segredo).
 - Operações que movimentam dinheiro (`pix enviar`) validam tudo localmente e mostram um resumo antes de enviar. Só enviam com confirmação explícita: `s`/`sim` digitado em um terminal (respostas vindas de um *pipe* não valem) ou `--sim`.
 - Essas operações têm `--simular`, idempotência (`x-id-idempotente`, com repetição segura por `--id-idempotente`) e um `limite_por_operacao` por perfil, que vale mesmo com `--sim`.
-- Um envio nunca é repetido automaticamente depois de um erro após o qual ele pode ter sido processado (tempo esgotado, `5xx`).
+- Um envio nunca é repetido automaticamente depois de um erro após o qual ele pode ter sido processado (tempo esgotado, `5xx`), e esse resultado incerto sai com um código próprio (9), para que scripts parem em vez de repetir. A dica de conferência roda na mesma conta do envio (leva `-p`, `--config`, `--ambiente` e as demais opções que escolheram a conta na linha de comando), e as datas de agendamento seguem o calendário do banco (Brasília), qualquer que seja o fuso da máquina.
 - Textos de terceiros exibidos na confirmação (nome e cidade de um copia e cola, por exemplo) passam por um filtro de caracteres de controle, para que sequências de escape não alterem o que o terminal mostra.
 
 ## Política do repositório: nenhum dado pessoal

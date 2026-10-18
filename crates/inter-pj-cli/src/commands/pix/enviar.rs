@@ -2,7 +2,7 @@
 
 use std::fmt::Write as _;
 
-use chrono::{DateTime, FixedOffset, NaiveDate, Utc};
+use chrono::NaiveDate;
 use inter_pj::banking::{
     DadosBancarios, Destinatario, IdIdempotente, InstituicaoFinanceira, PagamentoPix,
     SolicitacaoPix, TipoConta, TipoRetornoPix,
@@ -14,10 +14,10 @@ use rust_decimal::Decimal;
 use serde_json::json;
 
 use crate::cli::{Formato, PixEnviarArgs};
-use crate::commands::{Context, simulacao};
+use crate::commands::{Context, hoje, simulacao};
 use crate::config::Settings;
 use crate::confirmacao::{Terminal, confirmar, descrever_ambiente, verificar_limite};
-use crate::error::{CliError, resultado_incerto};
+use crate::error::CliError;
 use crate::output;
 use crate::valor::por_extenso;
 
@@ -26,7 +26,7 @@ pub(super) async fn run(
     args: &PixEnviarArgs,
     terminal: &mut dyn Terminal,
 ) -> Result<(), CliError> {
-    let pagamento = pagamento(args, hoje_brasilia(Utc::now()))?;
+    let pagamento = pagamento(args, hoje())?;
     let settings = context.settings()?;
     verificar_limite(pagamento.valor, &settings)?;
     // Configuration problems show up before the confirmation, not after it.
@@ -52,7 +52,7 @@ pub(super) async fn run(
         .enviar_pix(&pagamento, &id)
         .await
         .map_err(|err| {
-            if resultado_incerto(&err) {
+            if err.may_have_been_processed() {
                 CliError::ResultadoIncerto {
                     source: err,
                     id_idempotente: id.to_string(),
@@ -70,15 +70,6 @@ pub(super) async fn run(
         // `commands::run` refuses csv for this command.
         Formato::Texto | Formato::Csv => output::print(&render(&solicitacao, &id)),
     }
-}
-
-/// Today in the bank's calendar: Brasília, UTC−3, without daylight saving
-/// time since 2019. A machine in UTC, or in another time zone, near
-/// midnight would otherwise take a scheduling for tomorrow as a payment
-/// for today, and the API pays at once a payment without a date.
-fn hoje_brasilia(agora: DateTime<Utc>) -> NaiveDate {
-    let brasilia = FixedOffset::west_opt(3 * 3600).expect("fuso fixo de Brasília");
-    agora.with_timezone(&brasilia).date_naive()
 }
 
 /// The payment described by the arguments, validated.
@@ -432,21 +423,10 @@ mod tests {
     }
 
     #[test]
-    fn today_is_the_bank_calendar_day() {
-        let em = |texto: &str| hoje_brasilia(texto.parse().unwrap());
-        let dia = |ano, mes, dia| NaiveDate::from_ymd_opt(ano, mes, dia).unwrap();
-        // 22:30 in Brasília, already the next day in UTC.
-        assert_eq!(em("2026-10-10T01:30:00Z"), dia(2026, 10, 9));
-        assert_eq!(em("2026-10-10T02:59:59Z"), dia(2026, 10, 9));
-        assert_eq!(em("2026-10-10T03:00:00Z"), dia(2026, 10, 10));
-        assert_eq!(em("2026-12-31T23:59:59Z"), dia(2026, 12, 31));
-    }
-
-    #[test]
     fn scheduling_for_tomorrow_in_brasilia_keeps_the_date_at_night_in_utc() {
         // 22:00 in Brasília on 09/10 is 01:00 on 10/10 in UTC: the machine's
         // day is already the 10th, the bank's is still the 9th.
-        let hoje = hoje_brasilia("2026-10-10T01:00:00Z".parse().unwrap());
+        let hoje = crate::commands::hoje_em("2026-10-10T01:00:00Z".parse().unwrap());
         let amanha = NaiveDate::from_ymd_opt(2026, 10, 10).unwrap();
         let pagamento = pagamento(
             &args(&[
@@ -980,7 +960,8 @@ Acompanhe com: inter-pj pix consultar c42f0787-02cb-4b31-827e-459ec9d7ece1 --agu
             );
         }
 
-        // A refused connection never reached the API.
+        // A refused connection never reached the API: here, the token
+        // request is refused, and nothing else is sent.
         let server = MockServer::start().await;
         let cenario = cenario_em(
             server,
@@ -995,7 +976,7 @@ Acompanhe com: inter-pj pix consultar c42f0787-02cb-4b31-827e-459ec9d7ece1 --agu
         .await
         .unwrap_err();
         assert!(
-            matches!(err, CliError::Inter(InterError::Transport(_))),
+            matches!(err, CliError::Inter(InterError::TokenTransport(_))),
             "{err:?}"
         );
     }

@@ -8,10 +8,11 @@ use inter_pj::boleto::{CodigoBarras, Segmento, TipoCodigo};
 use inter_pj::{Environment, endpoint};
 
 use super::{data_br, descrever_status};
+use crate::chamada::{argumento, chamada};
 use crate::cli::{BoletoPagarArgs, Formato};
 use crate::commands::{Context, hoje, simulacao};
 use crate::confirmacao::{Terminal, confirmar, descrever_ambiente, verificar_limite};
-use crate::error::{CliError, resultado_incerto};
+use crate::error::CliError;
 use crate::output;
 use crate::valor::por_extenso;
 
@@ -48,13 +49,15 @@ pub(super) async fn run(
         .pagar_boleto(&pagamento)
         .await
         .map_err(|err| {
-            if resultado_incerto(&err) {
+            if err.may_have_been_processed() {
                 CliError::PagamentoIncerto {
                     source: err,
                     consulta: format!(
-                        "inter-pj pagamento boleto listar --codigo {}",
+                        "{} pagamento boleto listar --codigo {}",
+                        chamada(),
                         pagamento.codigo.codigo_barras()
                     ),
+                    escopos: "pagamento-boleto.read",
                 }
             } else {
                 err.into()
@@ -234,14 +237,18 @@ fn render(solicitacao: &SolicitacaoPagamento) -> String {
         let _ = write!(texto, "\n{}", output::key_values_left(&linhas));
     }
     if let Some(codigo) = &solicitacao.codigo_transacao {
+        // A code of the API goes into a command to paste: quoted.
+        let codigo = argumento(codigo);
         let _ = write!(
             texto,
-            "\n\nAcompanhe com: inter-pj pagamento boleto listar --codigo-transacao {codigo}"
+            "\n\nAcompanhe com: {} pagamento boleto listar --codigo-transacao {codigo}",
+            chamada()
         );
         if solicitacao.status_pagamento == Some(StatusPagamento::Agendado) {
             let _ = write!(
                 texto,
-                "\nPara cancelar: inter-pj pagamento boleto cancelar {codigo}"
+                "\nPara cancelar: {} pagamento boleto cancelar {codigo}",
+                chamada()
             );
         }
     }
@@ -321,6 +328,18 @@ mod tests {
 
         let agendado = pagamento(&args(&[BOLETO, "--data", "2026-10-09"]), hoje()).unwrap();
         assert_eq!(agendado.data_pagamento, Some(dia(2026, 10, 9)));
+    }
+
+    #[test]
+    fn scheduling_for_tomorrow_in_brasilia_keeps_the_date_at_night_in_utc() {
+        // 22:00 in Brasília on 09/10 is 01:00 on 10/10 in UTC: the machine's
+        // day is already the 10th, the bank's is still the 9th.
+        let hoje = crate::commands::hoje_em("2026-10-10T01:00:00Z".parse().unwrap());
+        let agendado = pagamento(&args(&[BOLETO, "--data", "2026-10-10"]), hoje).unwrap();
+        assert_eq!(agendado.data_pagamento, Some(dia(2026, 10, 10)));
+        // The bank's today is not in the past, and it means now.
+        let agora = pagamento(&args(&[BOLETO, "--data", "2026-10-09"]), hoje).unwrap();
+        assert_eq!(agora.data_pagamento, None);
     }
 
     #[test]
@@ -659,7 +678,8 @@ Para cancelar: inter-pj pagamento boleto cancelar 3414f226-36fb-4d87-811e-cfd999
             assert_eq!(hints.contains("pagar duas vezes"), incerto, "{hints}");
         }
 
-        // A refused connection never reached the API.
+        // A refused connection never reached the API: here, the token
+        // request is refused, and nothing else is sent.
         let cenario = cenario_em(
             MockServer::start().await,
             Some("http://127.0.0.1:1"),
@@ -673,7 +693,7 @@ Para cancelar: inter-pj pagamento boleto cancelar 3414f226-36fb-4d87-811e-cfd999
         .await
         .unwrap_err();
         assert!(
-            matches!(err, CliError::Inter(InterError::Transport(_))),
+            matches!(err, CliError::Inter(InterError::TokenTransport(_))),
             "{err:?}"
         );
     }
