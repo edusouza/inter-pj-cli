@@ -5,12 +5,15 @@ use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::OnceLock;
 
+use chrono::NaiveDate;
 use inter_pj::banking::{
-    Detalhe, LoteScroll, PaginaExtrato, Saldo, TipoOperacao, TipoTransacao, TransacaoCompleta,
-    TransacaoSimples,
+    ConsultaPix, DadosBancarios, Destinatario, Detalhe, IdIdempotente, InstituicaoFinanceira,
+    LoteScroll, MAX_DESCRICAO, PagamentoPix, PaginaExtrato, Saldo, SolicitacaoPix, StatusPix,
+    TipoConta, TipoOperacao, TipoRetornoPix, TipoTransacao, TransacaoCompleta, TransacaoSimples,
 };
 use inter_pj::endpoint::{self, Endpoint};
 use inter_pj::{Environment, Scope};
+use rust_decimal::Decimal;
 use serde_json::{Map, Value, json};
 
 /// Prefix of the Forum API, which is not part of the account features (issue #60).
@@ -310,6 +313,184 @@ fn statement_pages_accept_the_schema_examples() {
     );
 }
 
+/// The bodies sent by `enviar_pix` reproduce the three examples of
+/// `PagamentoPixRequestBody`, one per kind of receiver.
+#[test]
+fn pix_payment_bodies_reproduce_the_spec_examples() {
+    let examples = &schema("PagamentoPixRequestBody")["example"];
+    let pagamento = |destinatario, descricao: &str| PagamentoPix {
+        valor: Decimal::new(123, 2),
+        data_pagamento: NaiveDate::from_ymd_opt(2022, 10, 10),
+        descricao: Some(descricao.to_owned()),
+        destinatario,
+    };
+    let mut por_dados = examples["dadosBancarios"].clone();
+    // The sanitized example has an all-zeros CPF, which is not a valid one.
+    por_dados["destinatario"]["cpfCnpj"] = json!("12345678909");
+    let cases = [
+        (
+            &examples["chavePix"],
+            pagamento(
+                Destinatario::Chave {
+                    chave: "chavepix@teste.com".parse().unwrap(),
+                },
+                "Pix com chave Pix teste",
+            ),
+        ),
+        (
+            &por_dados,
+            pagamento(
+                Destinatario::DadosBancarios(DadosBancarios {
+                    nome: "Teste dados bancários".to_owned(),
+                    cpf_cnpj: "12345678909".parse().unwrap(),
+                    instituicao_financeira: InstituicaoFinanceira {
+                        ispb: "00416968".to_owned(),
+                    },
+                    agencia: "0019".to_owned(),
+                    conta_corrente: "0000000".to_owned(),
+                    tipo_conta: TipoConta::ContaCorrente,
+                }),
+                "Pix dados bancários teste",
+            ),
+        ),
+        (
+            &examples["pixCopiaECola"],
+            pagamento(
+                Destinatario::PixCopiaECola {
+                    pix_copia_e_cola: "<Código Copia E Cola>".to_owned(),
+                },
+                "Pix com código Copia e Cola",
+            ),
+        ),
+    ];
+    for (example, pagamento) in cases {
+        assert!(pagamento.validar().is_ok(), "{pagamento:?}");
+        assert_eq!(&serde_json::to_value(&pagamento).unwrap(), example);
+        let tipo = example["destinatario"]["tipo"].as_str().unwrap();
+        let destinatario = &schema("PagamentoPixRequestBody")["properties"]["destinatario"];
+        let reference = &destinatario["discriminator"]["mapping"][tipo];
+        let name = reference.as_str().unwrap().rsplit('/').next().unwrap();
+        assert_eq!(
+            keys(&example["destinatario"]),
+            property_names(name),
+            "{name}"
+        );
+    }
+    assert_eq!(
+        keys(&examples["chavePix"]),
+        property_names("PagamentoPixRequestBody")
+    );
+}
+
+#[test]
+fn pix_payment_enums_and_limits_match_the_spec() {
+    let ours: BTreeSet<&str> = TipoConta::TODOS.iter().map(|t| t.as_str()).collect();
+    assert_eq!(ours, enum_values("TipoConta"));
+
+    let mapping: BTreeSet<&str> =
+        schema("PagamentoPixRequestBody")["properties"]["destinatario"]["discriminator"]["mapping"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+    assert_eq!(mapping, enum_values("TipoDestinatario"));
+
+    assert_eq!(
+        schema("PagamentoPixRequestBody")["properties"]["descricao"]["maxLength"],
+        json!(MAX_DESCRICAO)
+    );
+    let ours: BTreeSet<&str> = TipoRetornoPix::DOCUMENTADOS
+        .iter()
+        .map(TipoRetornoPix::as_str)
+        .collect();
+    assert_eq!(ours, enum_values("TipoRetornoPagamentoPixEnum"));
+}
+
+#[test]
+fn pix_endpoints_document_the_idempotency_key_and_request_code() {
+    let incluir = parameters(&endpoint::banking::PIX_INCLUIR);
+    assert!(incluir.contains_key("x-conta-corrente"));
+    let pattern = incluir["x-id-idempotente"]["schema"]["pattern"]
+        .as_str()
+        .unwrap();
+    assert_eq!(
+        pattern,
+        "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+    );
+    let id = IdIdempotente::novo();
+    let groups: Vec<&str> = id.as_str().split('-').collect();
+    assert_eq!(
+        groups.iter().map(|g| g.len()).collect::<Vec<_>>(),
+        [8, 4, 4, 4, 12]
+    );
+    assert!(
+        groups.iter().all(|g| g
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))),
+        "{id}"
+    );
+
+    let consultar = parameters(&endpoint::banking::PIX_CONSULTAR);
+    assert_eq!(consultar["codigoSolicitacao"]["in"], json!("path"));
+    assert!(consultar.contains_key("x-conta-corrente"));
+}
+
+#[test]
+fn pix_payment_answers_accept_the_spec_examples() {
+    let content = &operation(&endpoint::banking::PIX_INCLUIR)["responses"]["200"]["content"]["application/json"];
+    let examples = content["examples"].as_object().unwrap();
+    assert_eq!(examples.len(), 2);
+    for example in examples.values() {
+        let value = &resolve(example)["value"];
+        let solicitacao: SolicitacaoPix = serde_json::from_value(value.clone()).unwrap();
+        assert!(
+            !matches!(
+                solicitacao.tipo_retorno,
+                Some(TipoRetornoPix::Outro(_)) | None
+            ),
+            "{value}"
+        );
+        let back = serde_json::to_value(&solicitacao).unwrap();
+        assert_eq!(&back, value);
+        assert_same_keys("PagamentoPixResponse", &back);
+    }
+}
+
+#[test]
+fn pix_query_model_maps_every_documented_field() {
+    let example = example_for_schema("ConsultaPixAsyncResponse");
+    let consulta: ConsultaPix = serde_json::from_value(example.clone()).unwrap();
+    let back = serde_json::to_value(&consulta).unwrap();
+    assert_same_keys("ConsultaPixAsyncResponse", &back);
+    let transacao = &back["transacaoPix"];
+    assert_same_keys("PixAsyncResponse", transacao);
+    assert_same_keys("DadosConta", &transacao["recebedor"]);
+    assert_same_keys("ErroPagamento", &transacao["erros"][0]);
+    assert_same_keys("HistoricoResponse", &back["historico"][0]);
+    assert_eq!(
+        numeric(&transacao["valor"]),
+        numeric(&example["transacaoPix"]["valor"])
+    );
+}
+
+#[test]
+fn pix_statuses_match_the_documented_list() {
+    let ours: BTreeSet<&str> = StatusPix::DOCUMENTADOS
+        .iter()
+        .map(StatusPix::as_str)
+        .collect();
+    for name in ["StatusPix", "StatusHistoricoPix"] {
+        let documented: BTreeSet<&str> = schema(name)["description"]
+            .as_str()
+            .unwrap()
+            .lines()
+            .filter_map(|line| line.trim().strip_prefix("* `")?.strip_suffix('`'))
+            .collect();
+        assert_eq!(ours, documented, "{name}");
+    }
+}
+
 /// The portal's examples carried real-looking CPFs, phone numbers and bank
 /// accounts; `spec/sanitizar.py` replaces them with synthetic values. This
 /// test keeps it that way when the specification is updated.
@@ -470,7 +651,8 @@ fn example(schema: &'static Value, name: &str, depth: usize) -> Value {
             Value::Object(merged)
         }
         _ if !merged.is_empty() => Value::Object(merged),
-        Some("array") => json!([example(&schema["items"], name, depth + 1)]),
+        // `items` alone also means an array (`ConsultaPixAsyncResponse.historico`).
+        _ if schema.get("items").is_some() => json!([example(&schema["items"], name, depth + 1)]),
         Some("integer") => json!(1),
         Some("number") => json!(1.5),
         Some("boolean") => json!(true),
@@ -492,6 +674,35 @@ fn parameters(endpoint: &Endpoint) -> Map<String, Value> {
             let p = resolve(p);
             (p["name"].as_str().unwrap().to_owned(), p.clone())
         })
+        .collect()
+}
+
+/// Properties of a schema, including the ones inherited through `allOf`.
+fn property_names(name: &str) -> BTreeSet<String> {
+    fn collect(schema: &'static Value, names: &mut BTreeSet<String>) {
+        let schema = resolve(schema);
+        for part in schema["allOf"].as_array().into_iter().flatten() {
+            collect(part, names);
+        }
+        if let Some(properties) = schema["properties"].as_object() {
+            names.extend(properties.keys().cloned());
+        }
+    }
+    let mut names = BTreeSet::new();
+    collect(schema(name), &mut names);
+    names
+}
+
+fn keys(value: &Value) -> BTreeSet<String> {
+    value.as_object().unwrap().keys().cloned().collect()
+}
+
+fn enum_values(name: &str) -> BTreeSet<&'static str> {
+    schema(name)["enum"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
         .collect()
 }
 

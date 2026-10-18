@@ -56,3 +56,8 @@ pub use identity::{ClientIdentity, IdentityError};
 pub use problem::{Problem, Violacao};
 pub use retry::RetryPolicy;
 pub use scope::{Scope, ScopeSet, UnknownScopeError};
+
+/// Compiles the examples of the README as doctests.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+struct ReadmeDoctests;
