@@ -40,8 +40,9 @@ Resultado do período  R$ 1.249,90
 | **0.1.0** | Autenticação OAuth2 com mTLS e cache de token · `saldo` · `auth token`/`auth limpar` · `config init`/`caminho`/`mostrar` |
 | **0.1.1** | `config verificar [--corrigir]`: confere o arquivo de configuração e o perfil e corrige caminhos do Windows entre aspas duplas |
 | **0.2.0** | `extrato` · `extrato completo` (detalhes, filtros, todas as páginas e modo scroll) · `extrato pdf` · saída CSV · retentativas automáticas |
+| **0.3.0** | `pix enviar` (chave, copia e cola ou dados bancários) com resumo, confirmação, simulação, idempotência e limite por operação · `pix consultar` (com `--aguardar`) |
 
-O plano completo — Pix, pagamentos, cobranças (boleto com Pix), Pix Cobrança, webhooks e Pix Automático — está em [`docs/roadmap.md`](docs/roadmap.md) e é acompanhado pelas [issues do projeto](https://github.com/edusouza/inter-pj-cli/issues).
+O plano completo — pagamentos, cobranças (boleto com Pix), Pix Cobrança, webhooks e Pix Automático — está em [`docs/roadmap.md`](docs/roadmap.md) e é acompanhado pelas [issues do projeto](https://github.com/edusouza/inter-pj-cli/issues).
 
 ## Instalação
 
@@ -50,7 +51,7 @@ O plano completo — Pix, pagamentos, cobranças (boleto com Pix), Pix Cobrança
 **Com Cargo** (Rust 1.88 ou superior):
 
 ```console
-$ cargo install --locked --git https://github.com/edusouza/inter-pj-cli --tag v0.2.0 inter-pj-cli
+$ cargo install --locked --git https://github.com/edusouza/inter-pj-cli --tag v0.3.0 inter-pj-cli
 ```
 
 ## Configuração
@@ -83,6 +84,7 @@ certificado = '~/inter/certificado.crt'
 chave_privada = '~/inter/chave.key'
 # conta_corrente = "<numero>"     # só se a integração tiver mais de uma conta
 # escopos = ["extrato.read"]      # opcional: escopos pedidos em todo token
+# limite_por_operacao = "1.000,00" # opcional: valor máximo de cada Pix
 ```
 
 Escreva os caminhos entre **aspas simples**, principalmente no Windows (`certificado = 'C:\inter\certificado.crt'`). Entre aspas duplas, a barra invertida começa um escape do TOML. `"C:\Users\..."` impede a leitura do arquivo (`\U` pede 8 dígitos hexadecimais). Já `"C:\novo\teste.crt"` é lido, mas com uma quebra de linha e uma tabulação no lugar de `\n` e `\t`. Caminhos relativos são relativos ao arquivo de configuração, e `~/` é a sua pasta pessoal.
@@ -193,6 +195,57 @@ $ inter-pj extrato pdf --inicio 2026-08-01 --fim 2026-08-31 --saida - | lpr
 - `extrato completo` traz os detalhes de cada transação (pagador/recebedor do Pix, dados do boleto, do pagamento...). `--todas-paginas` percorre todas as páginas e, acima de 10.000 transações, passa para o modo *scroll* da API (um por conta, expira após 6 minutos sem uso).
 - `extrato pdf` grava o arquivo com permissão `600` e nunca substitui um arquivo existente sem `--sobrescrever`.
 
+### Pix
+
+```console
+$ inter-pj pix enviar --chave fornecedor@exemplo.com --valor 150,00 --descricao "NF 123"
+Pix a enviar
+  Ambiente               sandbox (dados fictícios)
+  Chave Pix              fornecedor@exemplo.com (e-mail)
+  Valor                  R$ 150,00 (cento e cinquenta reais)
+  Quando                 agora
+  Descrição              NF 123
+  Chave de idempotência  9b2f6c1e-5d0a-4c1b-8f3e-2a7d4e6b8c90
+Enviar o Pix? [s/N] s
+Pix enviado.
+Código da solicitação  c42f0787-02cb-4b31-827e-459ec9d7ece1
+Data do pagamento      23/09/2026
+Data da operação       23/09/2026
+Chave de idempotência  9b2f6c1e-5d0a-4c1b-8f3e-2a7d4e6b8c90
+
+Acompanhe com: inter-pj pix consultar c42f0787-02cb-4b31-827e-459ec9d7ece1 --aguardar
+
+$ inter-pj pix enviar --chave +5511912345678 --valor 1.500,00 --data 2026-10-01   # agendado
+$ inter-pj pix enviar --chave 12.345.678/0001-95 --valor 99,90 --simular          # mostra a requisição, não envia
+$ inter-pj pix enviar --chave fornecedor@exemplo.com --valor 150 --sim --json     # sem perguntar (scripts)
+
+$ inter-pj pix enviar --copia-e-cola '00020126...6304ABCD'                         # valor e recebedor vêm do código
+$ inter-pj pix enviar --valor 250,00 --ispb 00000000 --agencia 0001 --conta 123456-7 \
+    --tipo-conta corrente --documento 12.345.678/0001-95 --nome "Fornecedor Exemplo"  # dados bancários
+```
+
+O destino é uma chave (`--chave`), um código copia e cola (`--copia-e-cola`) ou dados bancários (`--ispb`, `--agencia`, `--conta`, `--tipo-conta` — `corrente`, `poupanca`, `salario` ou `pagamento` —, `--documento` e `--nome`). O código copia e cola é decodificado localmente, com o CRC conferido: o resumo mostra recebedor, cidade, chave ou URL da cobrança, identificador e mensagem. Se o código fixa o valor, `--valor` é dispensável e um valor diferente é recusado; códigos dinâmicos (cobranças) aceitam outro valor, e o resumo mostra os dois. Textos vindos do código passam por um filtro de caracteres de controle, para que não alterem o que o terminal mostra.
+
+Trilhos de segurança de todo envio:
+
+- **Resumo e confirmação**: antes de enviar, a CLI mostra destino, valor (também por extenso), data e ambiente (produção em destaque) e pergunta `[s/N]`; o padrão é não. `--sim` confirma sem perguntar. Respostas vindas de um *pipe* não valem: sem terminal e sem `--sim`, a CLI recusa (código 2).
+- **Validação local**: chave Pix (CPF/CNPJ com dígitos verificadores, e-mail, celular `+55DD9NNNNNNNN`, chave aleatória), valor maior que zero com até 2 casas, descrição de até 140 caracteres e data de agendamento. O valor aceita `150,00`, `1.500,00` e `150.00`; formas ambíguas como `1.500` são recusadas.
+- **`--simular`**: valida e mostra a requisição (sem segredos), sem enviar nada.
+- **Idempotência**: cada envio leva uma chave (`x-id-idempotente`), mostrada no resumo. Se a resposta se perder (tempo esgotado, erro 5xx), o Pix pode ter sido feito: confira o extrato e, para repetir sem risco de pagar duas vezes, use `--id-idempotente <chave>`.
+- **Limite por operação**: com `limite_por_operacao` no perfil, valores acima dele são recusados, mesmo com `--sim`.
+- **Aprovação**: conforme a configuração da conta, o Pix aguarda aprovação no Internet Banking (Aprovar > Gestão de Aprovações); a CLI avisa quando for o caso.
+
+A integração precisa do escopo `pagamento-pix.write`.
+
+Para acompanhar um Pix enviado (últimos 90 dias), use o código da solicitação:
+
+```console
+$ inter-pj pix consultar c42f0787-02cb-4b31-827e-459ec9d7ece1                        # status, recebedor, erros e histórico
+$ inter-pj pix consultar c42f0787-02cb-4b31-827e-459ec9d7ece1 --aguardar --timeout 5m # até um status final
+```
+
+Com `--aguardar`, a CLI consulta a cada 6 segundos (dentro do limite de requisições da API) até o Pix ser pago, agendado ou terminar sem pagamento, e sai com o código 0 (pago ou agendado), 5 (terminou sem ser pago: reprovado, expirado, cancelado, falha...) ou 8 (o tempo acabou antes de um status final; padrão: 60 s). A consulta precisa do escopo `pagamento-pix.read`.
+
 ### Formatos de saída
 
 | Formato | Para quê |
@@ -205,7 +258,7 @@ Para o Excel em português, use `--formato csv --separador ';'`: ponto e vírgul
 
 ### Retentativas
 
-Consultas que falham por limite de requisições (`429`), instabilidade do servidor (`500`, `502`, `503`, `504`) ou falha de conexão são repetidas automaticamente, com espera crescente (1 s, 2 s, ...) e respeitando o cabeçalho `Retry-After`. O padrão é de 3 tentativas; ajuste com `--tentativas N` (ou `INTER_TENTATIVAS`) ou desative com `--sem-retentativa`. Com `-v`, cada nova tentativa aparece em `stderr`. Operações que movimentam dinheiro (nas próximas versões) nunca são repetidas automaticamente.
+Consultas que falham por limite de requisições (`429`), instabilidade do servidor (`500`, `502`, `503`, `504`) ou falha de conexão são repetidas automaticamente, com espera crescente (1 s, 2 s, ...) e respeitando o cabeçalho `Retry-After`. O padrão é de 3 tentativas; ajuste com `--tentativas N` (ou `INTER_TENTATIVAS`) ou desative com `--sem-retentativa`. Com `-v`, cada nova tentativa aparece em `stderr`. O envio de Pix só é repetido quando certamente não foi processado (`429` ou conexão recusada), sempre com a mesma chave de idempotência.
 
 ### Tokens e rate limit
 
@@ -228,8 +281,10 @@ $ curl --cert certificado.crt --key chave.key \
 | 2 | uso incorreto (argumentos inválidos) |
 | 3 | configuração ausente ou inválida (inclui certificado/chave) |
 | 4 | falha de autenticação ou acesso negado (credenciais, escopos, 401/403) |
-| 5 | requisição rejeitada pela API (400, 404, 409, 422) |
+| 5 | requisição rejeitada pela API (400, 404, 409, 422); com `pix consultar --aguardar`, Pix que terminou sem ser pago |
 | 6 | serviço indisponível, limite de requisições (429), erro 5xx ou falha de rede |
+| 7 | operação cancelada na confirmação (nada foi enviado) |
+| 8 | `pix consultar --aguardar`: tempo esgotado antes de um status final |
 
 Mensagens de erro vão para `stderr`, em português, com a explicação da API e dicas. Com `-v`/`-vv` a CLI mostra detalhes das requisições (método, caminho, status e tempo) — nunca tokens, segredos ou corpos de resposta.
 

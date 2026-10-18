@@ -36,10 +36,12 @@ pub mod auth;
 pub mod banking;
 mod client;
 mod credentials;
+pub mod documento;
 pub mod endpoint;
 mod environment;
 mod error;
 mod identity;
+pub mod pix;
 pub mod problem;
 mod retry;
 mod scope;
@@ -54,3 +56,8 @@ pub use identity::{ClientIdentity, IdentityError};
 pub use problem::{Problem, Violacao};
 pub use retry::RetryPolicy;
 pub use scope::{Scope, ScopeSet, UnknownScopeError};
+
+/// Compiles the examples of the README as doctests.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+struct ReadmeDoctests;

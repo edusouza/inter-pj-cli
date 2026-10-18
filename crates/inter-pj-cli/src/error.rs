@@ -13,6 +13,8 @@ pub(crate) mod exit {
     pub(crate) const AUTH: u8 = 4;
     pub(crate) const REJECTED: u8 = 5;
     pub(crate) const UNAVAILABLE: u8 = 6;
+    pub(crate) const CANCELLED: u8 = 7;
+    pub(crate) const WAIT_TIMEOUT: u8 = 8;
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -33,6 +35,23 @@ pub(crate) enum CliError {
     /// Error returned by the Inter client.
     #[error(transparent)]
     Inter(#[from] InterError),
+    /// A payment whose outcome is unknown (timeout, `5xx`): it may have been
+    /// made.
+    #[error("{source}")]
+    ResultadoIncerto {
+        source: InterError,
+        /// Key that repeats the payment without paying twice.
+        id_idempotente: String,
+    },
+    /// The user did not confirm the operation.
+    #[error("operação cancelada: nada foi enviado")]
+    Cancelado,
+    /// `pix consultar --aguardar`: the payment ended without being paid.
+    #[error("o Pix terminou sem ser pago: {status}")]
+    PixNaoPago { status: String },
+    /// `pix consultar --aguardar`: no final status before the time limit.
+    #[error("tempo de espera esgotado ({segundos} s): o Pix ainda está {status}")]
+    TempoEsgotado { status: String, segundos: u64 },
     /// Local I/O failure.
     #[error("{context}: {source}")]
     Io {
@@ -62,7 +81,11 @@ impl CliError {
             Self::Usage(_) | Self::Periodo { .. } => exit::USAGE,
             Self::Config(_) | Self::ConfigFile { .. } => exit::CONFIG,
             Self::Io { .. } => exit::UNEXPECTED,
-            Self::Inter(err) => match err {
+            Self::Cancelado => exit::CANCELLED,
+            Self::PixNaoPago { .. } => exit::REJECTED,
+            Self::TempoEsgotado { .. } => exit::WAIT_TIMEOUT,
+            Self::Inter(err) | Self::ResultadoIncerto { source: err, .. } => match err {
+                InterError::InvalidInput(_) => exit::USAGE,
                 InterError::Config(_) | InterError::Identity(_) => exit::CONFIG,
                 InterError::Auth(_) => exit::AUTH,
                 InterError::Api(api) => match api.kind() {
@@ -80,15 +103,27 @@ impl CliError {
     }
 
     /// Suggestions shown after the error message.
-    pub(crate) fn hints(&self) -> Vec<&'static str> {
+    pub(crate) fn hints(&self) -> Vec<String> {
         let err = match self {
             Self::Inter(err) => err,
             Self::Periodo {
                 dica: Some(dica), ..
-            } => return vec![dica],
+            } => return vec![(*dica).to_owned()],
+            Self::TempoEsgotado { .. } => {
+                return vec!["consulte de novo mais tarde, ou aumente o --timeout".to_owned()];
+            }
+            Self::ResultadoIncerto { id_idempotente, .. } => {
+                return vec![
+                    "o pagamento pode ter sido feito: confira o extrato antes de tentar de novo"
+                        .to_owned(),
+                    format!(
+                        "para repetir sem risco de pagar duas vezes, use a mesma chave: --id-idempotente {id_idempotente}"
+                    ),
+                ];
+            }
             _ => return Vec::new(),
         };
-        match err {
+        let hints: Vec<&str> = match err {
             InterError::Api(api) if problem_type(api) == Some("SCROLL_ALREADY_ACTIVE") => vec![
                 "já existe uma leitura do extrato em modo scroll para esta conta (outra execução?); ela expira após 6 minutos sem uso",
             ],
@@ -118,7 +153,8 @@ impl CliError {
                 "confira a conexão/proxy e se o certificado (.crt) e a chave (.key) da integração estão válidos",
             ],
             _ => Vec::new(),
-        }
+        };
+        hints.into_iter().map(str::to_owned).collect()
     }
 }
 
