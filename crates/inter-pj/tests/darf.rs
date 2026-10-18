@@ -204,13 +204,9 @@ async fn lists_darfs_with_the_filters() {
         codigo_solicitacao: Some(format!(" {} ", SOLICITACAO.to_uppercase())),
         ..FiltroDarf::default()
     };
-    assert!(
-        client
-            .banking()
-            .darfs(&por_codigo)
-            .await
-            .unwrap()
-            .is_empty()
+    assert_eq!(
+        client.banking().darfs(&por_codigo).await.unwrap(),
+        Vec::new()
     );
 }
 

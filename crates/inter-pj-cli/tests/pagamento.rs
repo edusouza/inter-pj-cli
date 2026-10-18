@@ -278,7 +278,7 @@ async fn cancelamento_recusado_pela_api() {
         "{stderr}"
     );
     assert!(stderr.contains("O pagamento já foi realizado."), "{stderr}");
-    assert!(stdout_of(&assert).is_empty());
+    assert_eq!(stdout_of(&assert), "");
 }
 
 #[tokio::test(flavor = "multi_thread")]
