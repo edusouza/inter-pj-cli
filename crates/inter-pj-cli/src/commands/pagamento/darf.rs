@@ -14,7 +14,7 @@ use crate::arquivo::{self, CAMPOS_DARF, Campos};
 use crate::cli::{DarfCommand, DarfListarArgs, DarfPagarArgs, Formato, PeriodoArgs};
 use crate::commands::{Context, hoje, intervalo, simulacao};
 use crate::confirmacao::{Terminal, confirmar, descrever_ambiente, verificar_limite};
-use crate::error::{CliError, resultado_incerto};
+use crate::error::CliError;
 use crate::output;
 use crate::tabela::{Celula, Coluna, Tabela};
 use crate::valor::por_extenso;
@@ -60,13 +60,15 @@ async fn pagar(
     };
     confirmar(terminal, args.sim, "Confirmar o pagamento do DARF?")?;
     let solicitacao = client.banking().pagar_darf(&darf).await.map_err(|err| {
-        if resultado_incerto(&err) {
+        if err.may_have_been_processed() {
             CliError::PagamentoIncerto {
                 source: err,
                 consulta: format!(
                     "inter-pj pagamento darf listar --codigo-receita {}",
                     darf.codigo_receita
                 ),
+                // The API lists DARFs under the scope of payments by barcode.
+                escopos: "pagamento-boleto.read",
             }
         } else {
             err.into()

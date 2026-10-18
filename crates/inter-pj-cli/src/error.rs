@@ -15,6 +15,9 @@ pub(crate) mod exit {
     pub(crate) const UNAVAILABLE: u8 = 6;
     pub(crate) const CANCELLED: u8 = 7;
     pub(crate) const WAIT_TIMEOUT: u8 = 8;
+    /// The operation may have been processed (timeout, `5xx`, an
+    /// unreadable success): check before any new attempt.
+    pub(crate) const UNCERTAIN: u8 = 9;
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -50,6 +53,9 @@ pub(crate) enum CliError {
         source: InterError,
         /// Command that finds the payment, to run before trying again.
         consulta: String,
+        /// Scopes that command needs, which the payment did not: the
+        /// reading of the payments.
+        escopos: &'static str,
     },
     /// The user did not confirm the operation.
     #[error("operação cancelada: nada foi enviado")]
@@ -92,9 +98,11 @@ impl CliError {
             Self::Cancelado => exit::CANCELLED,
             Self::PixNaoPago { .. } => exit::REJECTED,
             Self::TempoEsgotado { .. } => exit::WAIT_TIMEOUT,
-            Self::Inter(err)
-            | Self::ResultadoIncerto { source: err, .. }
-            | Self::PagamentoIncerto { source: err, .. } => match err {
+            // Built only when the request may have been processed: a script
+            // must not repeat them blindly, unlike a `429` or a refused
+            // connection (6).
+            Self::ResultadoIncerto { .. } | Self::PagamentoIncerto { .. } => exit::UNCERTAIN,
+            Self::Inter(err) => match err {
                 InterError::InvalidInput(_) => exit::USAGE,
                 InterError::Config(_) | InterError::Identity(_) => exit::CONFIG,
                 InterError::Auth(_) => exit::AUTH,
@@ -103,10 +111,9 @@ impl CliError {
                     ApiErrorKind::RateLimited
                     | ApiErrorKind::Unavailable
                     | ApiErrorKind::Server => exit::UNAVAILABLE,
-                    _ if api.status >= 500 => exit::UNAVAILABLE,
                     _ => exit::REJECTED,
                 },
-                InterError::Transport(_) => exit::UNAVAILABLE,
+                InterError::Transport(_) | InterError::TokenTransport(_) => exit::UNAVAILABLE,
                 _ => exit::UNEXPECTED,
             },
         }
@@ -131,11 +138,16 @@ impl CliError {
                     ),
                 ];
             }
-            Self::PagamentoIncerto { consulta, .. } => {
+            Self::PagamentoIncerto {
+                consulta, escopos, ..
+            } => {
                 return vec![
                     "o pagamento pode ter sido feito, e esta API não tem chave de idempotência: repetir o comando pode pagar duas vezes"
                         .to_owned(),
                     format!("confira antes de tentar de novo: {consulta}"),
+                    format!(
+                        "a consulta precisa da permissão de leitura dos pagamentos ({escopos}), e uma lista vazia logo depois do erro não prova que nada foi pago: espere alguns minutos e confira também o extrato e os agendamentos no Internet Banking"
+                    ),
                 ];
             }
             _ => return Vec::new(),
@@ -166,24 +178,12 @@ impl CliError {
                 ],
                 _ => Vec::new(),
             },
-            InterError::Transport(_) => vec![
+            InterError::Transport(_) | InterError::TokenTransport(_) => vec![
                 "confira a conexão/proxy e se o certificado (.crt) e a chave (.key) da integração estão válidos",
             ],
             _ => Vec::new(),
         };
         hints.into_iter().map(str::to_owned).collect()
-    }
-}
-
-/// Whether a payment may have been made despite the error: the request
-/// may have reached the API (timeout, dropped connection, `5xx`, an
-/// unreadable success). A refused connection never reached it.
-pub(crate) fn resultado_incerto(err: &InterError) -> bool {
-    match err {
-        InterError::Transport(source) => !source.is_connect(),
-        InterError::Api(api) => api.status >= 500,
-        InterError::Decode { .. } => true,
-        _ => false,
     }
 }
 
@@ -206,5 +206,31 @@ pub(crate) fn report(err: &CliError) {
     }
     for hint in err.hints() {
         eprintln!("dica: {hint}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_uncertain_outcome_exits_with_9_whatever_the_cause() {
+        let ilegivel = || InterError::Decode {
+            operation: "POST /banking/v2/pagamento".to_owned(),
+            message: "formato inesperado".to_owned(),
+        };
+        let pagamento = CliError::PagamentoIncerto {
+            source: ilegivel(),
+            consulta: "inter-pj pagamento boleto listar --codigo 0".to_owned(),
+            escopos: "pagamento-boleto.read",
+        };
+        assert_eq!(pagamento.exit_code(), exit::UNCERTAIN);
+        let pix = CliError::ResultadoIncerto {
+            source: ilegivel(),
+            id_idempotente: "9b2f6c1e-5d0a-4c1b-8f3e-2a7d4e6b8c90".to_owned(),
+        };
+        assert_eq!(pix.exit_code(), exit::UNCERTAIN);
+        // Outside an uncertain outcome, the error keeps its category.
+        assert_eq!(CliError::Inter(ilegivel()).exit_code(), exit::UNEXPECTED);
     }
 }

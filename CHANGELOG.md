@@ -20,6 +20,9 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ### Corrigido
 
+- Automação: um envio cujo resultado ficou incerto (tempo esgotado, erro 5xx, resposta ilegível depois do envio) sai com o novo código 9, e não mais com 6 ou 1, para que um script distinga "pode ter sido feito, confira" de "não foi feito, pode repetir" (um `429` ou uma conexão recusada continuam com 6). Vale para `pagamento boleto pagar` e para `pix enviar`. Quem decide é a biblioteca, pela fase em que a requisição falhou: uma falha ao pedir o token de acesso (tempo esgotado, resposta ilegível) não é mais tomada por um pagamento incerto, porque nada foi enviado; ela tem a sua própria variante, `Error::TokenTransport`, e o novo `Error::may_have_been_processed` diz se a operação pode ter sido processada (#335, #338).
+- Os comandos que a saída de `pagamento boleto pagar` sugere (`Acompanhe com: ...`, `Para cancelar: ...`, `confira antes de tentar de novo: ...`) levam as opções globais que escolheram a conta na linha de comando: `-p`, `--config`, `--ambiente`, as credenciais e `--conta-corrente`. Sem elas, conferir um pagamento incerto feito com `-p filial` olharia o perfil padrão, não acharia nada e convidaria a pagar de novo. As que vêm de variáveis de ambiente continuam no shell por si. A dica diz também que a consulta precisa do escopo `pagamento-boleto.read` e que uma lista vazia logo depois do erro não prova que nada foi pago (#336).
+- As datas seguem o calendário do banco: "hoje" é o dia em Brasília, qualquer que seja o fuso da máquina, em `pagamento boleto pagar` (agendamento, data passada, aviso de vencimento), nos períodos padrão das listagens e em `pix enviar`. Num servidor em UTC perto da meia-noite, um agendamento para amanhã era tomado por um pagamento de hoje e pago na hora (#337).
 - A saída em texto neutraliza caracteres de controle vindos da API (nomes, descrições, mensagens de erro): sequências de escape e quebras de linha não chegam mais ao terminal, onde poderiam reescrever a tela ou simular linhas do extrato e das consultas. JSON e CSV continuam com o texto original.
 
 ## [0.3.0] - 2026-09-23
@@ -41,6 +44,11 @@ Pix: envio e consulta, com trilhos de segurança.
 - Valores em reais aceitos como `150,00`, `1.500,00` ou `150.00`, recusando formas ambíguas (`1.500`).
 - Códigos de saída 7 (operação cancelada na confirmação) e 8 (tempo de espera esgotado em `pix consultar --aguardar`).
 - Biblioteca: `Banking::enviar_pix` (com `x-id-idempotente`; repetido automaticamente só quando certamente não foi processado) e `Banking::consultar_pix`; `documento::Documento`, `pix::ChavePix`, `pix::BrCode`, `IdIdempotente` e `Error::InvalidInput`.
+- Biblioteca: `documento::Documento` valida CPF e CNPJ (inclusive o CNPJ alfanumérico), `pix::ChavePix` reconhece e normaliza chaves Pix (CPF, CNPJ, e-mail, celular `+55` e chave aleatória) e `pix::BrCode` decodifica o Pix copia e cola, conferindo o CRC16 (#20).
+- Biblioteca: `Banking::enviar_pix` (por chave, dados bancários ou copia e cola, com `x-id-idempotente`) e `Banking::consultar_pix` (status e histórico), com validação local do pagamento e repetição automática só quando o envio certamente não foi processado (#20, #21).
+- Site de documentação no GitHub Pages (`https://edusouza.github.io/inter-pj-cli/`), construído com o Zensical a partir de `site/`, para quem usa a CLI e para quem a desenvolve: primeiros passos, guias, a referência de comandos, a segurança, a arquitetura e como contribuir. A referência de comandos é gerada da ajuda do binário e as demais páginas derivadas (changelog, segurança, arquitetura, roadmap, contribuição e biblioteca) são cópias dos arquivos do repositório, com os links reescritos.
+- O crate `sitegen`, que gera essas páginas e confere os comandos `inter-pj ...` citados nas páginas escritas à mão: um comando que não existe mais reprova a construção do site.
+- O workflow `pages.yml`: constrói o site em modo estrito nos pull requests e o publica a partir da `main`.
 
 ## [0.2.0] - 2026-09-23
 
