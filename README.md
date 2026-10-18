@@ -7,6 +7,8 @@ CLI em Rust para acessar a sua **conta PJ do Inter Empresas** pela linha de coma
 
 > **Projeto não oficial.** Não tem vínculo com o Banco Inter. Use por sua conta e risco e comece pelo ambiente **sandbox**.
 
+**Documentação:** <https://edusouza.github.io/inter-pj-cli/> (instalação, guias, referência de comandos e arquitetura).
+
 ```console
 $ inter-pj saldo
 Saldo disponível          R$ 2.850,55
@@ -302,6 +304,7 @@ O projeto é um workspace Cargo:
 | --- | --- |
 | [`crates/inter-pj`](crates/inter-pj) | biblioteca: cliente HTTP, OAuth2/mTLS, cache de token, modelos das APIs |
 | [`crates/inter-pj-cli`](crates/inter-pj-cli) | binário `inter-pj`: comandos, configuração, formatação |
+| [`crates/sitegen`](crates/sitegen) | gerador do site de documentação; não faz parte do pacote da CLI |
 
 ```console
 $ cargo test --workspace          # unitários, integração (mock), mTLS real, contrato e E2E
@@ -309,7 +312,7 @@ $ cargo clippy --workspace --all-targets -- -D warnings
 $ cargo fmt --all --check
 ```
 
-Os testes rodam offline, sem credenciais: um servidor mock simula a API, os certificados são gerados a cada execução e os contratos são verificados contra a [especificação OpenAPI](spec/). Arquitetura em [`docs/arquitetura.md`](docs/arquitetura.md); fluxo de contribuição em [`CONTRIBUTING.md`](CONTRIBUTING.md).
+Os testes rodam offline, sem credenciais: um servidor mock simula a API, os certificados são gerados a cada execução e os contratos são verificados contra a [especificação OpenAPI](spec/). Arquitetura em [`docs/arquitetura.md`](docs/arquitetura.md); fluxo de contribuição em [`CONTRIBUTING.md`](CONTRIBUTING.md). O site de documentação, em [`site/`](site), é construído com o [Zensical](https://zensical.org) e publicado no GitHub Pages; a seção "Este site" de [`desenvolvimento.md`](site/conteudo/por-dentro/desenvolvimento.md) explica como.
 
 ## Licença
 
