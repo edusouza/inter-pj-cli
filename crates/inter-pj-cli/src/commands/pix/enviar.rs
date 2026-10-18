@@ -2,7 +2,7 @@
 
 use std::fmt::Write as _;
 
-use chrono::{Local, NaiveDate};
+use chrono::{DateTime, FixedOffset, NaiveDate, Utc};
 use inter_pj::banking::{
     Destinatario, IdIdempotente, PagamentoPix, SolicitacaoPix, TipoRetornoPix,
 };
@@ -24,7 +24,7 @@ pub(super) async fn run(
     args: &PixEnviarArgs,
     terminal: &mut dyn Terminal,
 ) -> Result<(), CliError> {
-    let pagamento = pagamento(args, Local::now().date_naive())?;
+    let pagamento = pagamento(args, hoje_brasilia(Utc::now()))?;
     let settings = context.settings()?;
     verificar_limite(&pagamento, &settings)?;
     // Configuration problems show up before the confirmation, not after it.
@@ -67,6 +67,15 @@ pub(super) async fn run(
         // `commands::run` refuses csv for this command.
         Formato::Texto | Formato::Csv => output::print(&render(&solicitacao, &id)),
     }
+}
+
+/// Today in the bank's calendar: Brasília, UTC−3, without daylight saving
+/// time since 2019. A machine in UTC, or in another time zone, near
+/// midnight would otherwise take a scheduling for tomorrow as a payment
+/// for today, and the API pays at once a payment without a date.
+fn hoje_brasilia(agora: DateTime<Utc>) -> NaiveDate {
+    let brasilia = FixedOffset::west_opt(3 * 3600).expect("fuso fixo de Brasília");
+    agora.with_timezone(&brasilia).date_naive()
 }
 
 /// The payment described by the arguments, validated.
@@ -324,6 +333,38 @@ mod tests {
 
     fn id() -> IdIdempotente {
         ID.parse().unwrap()
+    }
+
+    #[test]
+    fn today_is_the_bank_calendar_day() {
+        let em = |texto: &str| hoje_brasilia(texto.parse().unwrap());
+        let dia = |ano, mes, dia| NaiveDate::from_ymd_opt(ano, mes, dia).unwrap();
+        // 22:30 in Brasília, already the next day in UTC.
+        assert_eq!(em("2026-10-10T01:30:00Z"), dia(2026, 10, 9));
+        assert_eq!(em("2026-10-10T02:59:59Z"), dia(2026, 10, 9));
+        assert_eq!(em("2026-10-10T03:00:00Z"), dia(2026, 10, 10));
+        assert_eq!(em("2026-12-31T23:59:59Z"), dia(2026, 12, 31));
+    }
+
+    #[test]
+    fn scheduling_for_tomorrow_in_brasilia_keeps_the_date_at_night_in_utc() {
+        // 22:00 in Brasília on 09/10 is 01:00 on 10/10 in UTC: the machine's
+        // day is already the 10th, the bank's is still the 9th.
+        let hoje = hoje_brasilia("2026-10-10T01:00:00Z".parse().unwrap());
+        let amanha = NaiveDate::from_ymd_opt(2026, 10, 10).unwrap();
+        let pagamento = pagamento(
+            &args(&[
+                "--chave",
+                "fornecedor@exemplo.com",
+                "--valor",
+                "5.000,00",
+                "--data",
+                "2026-10-10",
+            ]),
+            hoje,
+        )
+        .unwrap();
+        assert_eq!(pagamento.data_pagamento, Some(amanha));
     }
 
     #[test]
