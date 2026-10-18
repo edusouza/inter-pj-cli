@@ -272,7 +272,7 @@ mod tests {
         let transacao = consulta.transacao_pix.unwrap();
         assert_eq!(transacao.status, Some(StatusPix::Pago));
         assert_eq!(transacao.valor, Some("150.1".parse().unwrap()));
-        assert!(transacao.erros.is_empty());
+        assert_eq!(transacao.erros, Vec::new());
         assert_eq!(
             transacao.recebedor.unwrap().nome.as_deref(),
             Some("Fornecedor Exemplo")
@@ -304,7 +304,7 @@ mod tests {
             transacao.erros[0].descricao_erro.as_deref(),
             Some("Saldo insuficiente")
         );
-        assert!(consulta.historico.is_empty());
+        assert_eq!(consulta.historico, Vec::new());
     }
 
     #[test]
