@@ -372,13 +372,9 @@ async fn lists_payments_with_the_filters() {
         codigo_transacao: Some(TRANSACAO.to_uppercase()),
         ..FiltroPagamentos::default()
     };
-    assert!(
-        client
-            .banking()
-            .pagamentos(&por_codigo)
-            .await
-            .unwrap()
-            .is_empty()
+    assert_eq!(
+        client.banking().pagamentos(&por_codigo).await.unwrap(),
+        Vec::new()
     );
 }
 
