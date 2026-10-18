@@ -29,8 +29,10 @@ use std::process::ExitCode;
 use clap::FromArgMatches;
 
 fn main() -> ExitCode {
-    let matches = cli::command().get_matches();
-    let cli = cli::Cli::from_arg_matches(&matches).unwrap_or_else(|err| err.exit());
+    let matches = cli::command()
+        .try_get_matches()
+        .unwrap_or_else(|err| sair(err));
+    let cli = cli::Cli::from_arg_matches(&matches).unwrap_or_else(|err| sair(err));
     chamada::definir(&cli.global, &matches);
     logging::init(cli.global.verbose);
 
@@ -47,4 +49,9 @@ fn main() -> ExitCode {
             ExitCode::from(err.exit_code())
         }
     }
+}
+
+/// Ends on an error of the parser, as clap would, in Portuguese.
+fn sair(err: clap::Error) -> ! {
+    err.apply::<cli::Portugues>().exit()
 }
