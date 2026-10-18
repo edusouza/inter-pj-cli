@@ -378,7 +378,7 @@ mod tests {
 
     #[test]
     fn builds_the_query_of_the_filters() {
-        assert!(FiltroPagamentos::default().query().is_empty());
+        assert_eq!(FiltroPagamentos::default().query(), Vec::new());
         let filtro = FiltroPagamentos {
             periodo: Some((data(2026, 9, 1), data(2026, 9, 30))),
             filtrar_por: Some(DataDoPagamento::Vencimento),
