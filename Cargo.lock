@@ -845,7 +845,7 @@ dependencies = [
 
 [[package]]
 name = "inter-pj"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "aws-lc-rs",
  "base64 0.23.1",
@@ -870,7 +870,7 @@ dependencies = [
 
 [[package]]
 name = "inter-pj-cli"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "assert_cmd",
  "base64 0.23.1",
@@ -1528,9 +1528,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.45"
+version = "0.23.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
+checksum = "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"
 dependencies = [
  "aws-lc-rs",
  "once_cell",
@@ -1767,7 +1767,7 @@ checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
 
 [[package]]
 name = "sitegen"
-version = "0.2.0"
+version = "0.3.0"
 
 [[package]]
 name = "slab"

@@ -6,9 +6,11 @@
 ┌──────────────────────── crates/inter-pj-cli (binário `inter-pj`) ────────────────────────┐
 │ cli.rs        definição dos comandos (clap) e ajuda em português                         │
 │ config.rs     arquivo TOML, perfis, precedência flag > env > arquivo, origem dos valores │
-│ doctor.rs     diagnóstico do texto do arquivo: caminhos do Windows entre aspas duplas    │
-│ commands/     saldo, extrato (simples, completo, pdf), auth, config                       │
+│ doctor.rs     diagnóstico do texto do arquivo: caminhos do Windows entre aspas duplas     │
+│ commands/     saldo, extrato (simples, completo, pdf), pix enviar/consultar, auth, config │
 │ token_store   cache de tokens em arquivo (600, gravação atômica)                          │
+│ confirmacao   resumo + [s/N] antes de mover dinheiro (só com stdin em terminal)           │
+│ valor.rs      valores em reais digitados (150,00 / 1.500,00) e por extenso                │
 │ tabela.rs     tabelas em texto alinhado e CSV (RFC 4180, modo Excel pt-BR)                │
 │ output.rs     R$ no formato brasileiro, JSON, escrita em stdout                           │
 │ files.rs      gravação de arquivos sensíveis com permissão 600                            │
@@ -23,7 +25,9 @@
 │ identity.rs   certificado + chave PEM validados                                           │
 │ scope.rs      os 36 escopos documentados                                                  │
 │ problem.rs    parser tolerante de erros (RFC 7807 e variações)                            │
-│ banking/      saldo, extrato, extrato completo (paginação e scroll), PDF, Periodo         │
+│ banking/      saldo, extrato (paginação e scroll), PDF, envio e consulta de Pix           │
+│ documento.rs  CPF e CNPJ (inclusive o alfanumérico) com dígitos verificadores             │
+│ pix/          chave Pix (formatos do DICT) e leitura do copia e cola (BR Code, CRC16)     │
 └───────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -52,9 +56,28 @@ Os endpoints ficam em um só lugar (`endpoint.rs`) e são usados tanto para mont
 
 ### Retentativas só quando repetir é seguro
 
-Cada requisição tem um modo de repetição. Consultas (`GET`) e o pedido de token são repetidas em `429`, `500`, `502`, `503`, `504`, falhas de conexão e tempo esgotado. As requisições do modo *scroll* do extrato mudam estado no servidor (avançam o cursor): repeti-las depois de um `504` poderia pular um lote inteiro, então elas só são repetidas quando certamente não foram processadas (`429` ou conexão recusada). Operações com efeitos (pagamentos, Pix) nunca são repetidas. Falhas de TLS (certificado recusado, CA desconhecida) também não, porque repetir não resolve.
+Cada requisição tem um modo de repetição. Consultas (`GET`) e o pedido de token são repetidas em `429`, `500`, `502`, `503`, `504`, falhas de conexão e tempo esgotado. As requisições do modo *scroll* do extrato mudam estado no servidor (avançam o cursor): repeti-las depois de um `504` poderia pular um lote inteiro, então elas só são repetidas quando certamente não foram processadas (`429` ou conexão recusada). O envio de Pix também só é repetido nesses dois casos, e sempre com a mesma chave de idempotência; depois de um `5xx` ou de tempo esgotado o resultado é incerto e a decisão fica com quem chamou. Outras operações com efeitos (pagamentos) nunca são repetidas. Falhas de TLS (certificado recusado, CA desconhecida) também não, porque repetir não resolve.
 
 A espera cresce exponencialmente a partir de 1 s, com *jitter* (entre metade e o total do intervalo) e teto de 60 s; um `Retry-After` maior que o teto faz a CLI desistir na hora, com a dica de aguardar.
+
+### Pix: validação local e idempotência
+
+Tudo o que pode ser conferido antes de mover dinheiro é conferido localmente, sem chamar a API:
+
+- chaves Pix são reconhecidas e normalizadas como o DICT as guarda (CPF/CNPJ só com dígitos, e-mail em minúsculas, celular `+55DD9NNNNNNNN`, chave aleatória em minúsculas); um celular digitado sem `+55` gera um erro próprio, em vez de ser lido como CPF inválido;
+- CPF e CNPJ têm os dígitos verificadores conferidos, inclusive o CNPJ alfanumérico (letras valem o código ASCII menos 48);
+- o Pix copia e cola (BR Code) é decodificado e tem o CRC16 conferido, para mostrar recebedor e valor antes de pagar;
+- `PagamentoPix::validar` recusa valores não positivos ou com mais de 2 casas decimais, descrição com mais de 140 caracteres e dados bancários malformados, e `enviar_pix` chama a validação antes de enviar.
+
+Cada envio leva um `x-id-idempotente` (UUID v4 gerado com o gerador aleatório do aws-lc-rs, já presente pelo TLS). Com a mesma chave, a API não paga duas vezes: quando a resposta se perde (tempo esgotado, conexão caída), o mesmo pagamento pode ser reenviado com segurança. O destinatário é um enum marcado por `tipo` (`CHAVE`, `DADOS_BANCARIOS`, `PIX_COPIA_E_COLA`), como o discriminador da especificação; o teste de contrato reproduz, campo a campo, os três exemplos de requisição da documentação.
+
+### Confirmação antes de mover dinheiro
+
+Comandos que movimentam dinheiro validam tudo localmente, mostram um resumo em `stderr` (destino, valor em reais e por extenso, data, ambiente e chave de idempotência) e só enviam depois de um `s` ou `sim`. A resposta só é lida quando o `stdin` é um terminal: `yes | inter-pj pix enviar ...` não paga nada, e scripts precisam dizer `--sim` explicitamente. O limite por operação do perfil vale mesmo com `--sim`.
+
+A pergunta passa pelo trait `Terminal`. Os testes rodam o comando de verdade contra a API simulada com um terminal falso, para provar que uma resposta negativa não faz nenhuma requisição. Os testes E2E do binário cobrem `--simular`, a falta de terminal e o limite.
+
+Quando o envio falha depois de possivelmente ter chegado à API (tempo esgotado, `5xx`, resposta ilegível), o erro vem com a chave de idempotência e a instrução para repetir com `--id-idempotente`, sem risco de pagar duas vezes.
 
 ### Extrato completo: paginação e scroll
 
