@@ -3,14 +3,13 @@
 use std::fmt::Write as _;
 use std::time::{Duration, Instant};
 
-use chrono::{DateTime, NaiveDateTime};
 use inter_pj::InterClient;
 use inter_pj::banking::{ConsultaPix, StatusPix};
 
 use crate::cli::{Formato, PixConsultarArgs};
 use crate::commands::Context;
 use crate::error::CliError;
-use crate::output;
+use crate::output::{self, data_hora_br};
 
 /// Between two queries with `--aguardar`: 10 per minute, within the rate
 /// limit of both environments (20/min in production, 10/min in sandbox).
@@ -32,6 +31,7 @@ pub(super) async fn run(context: &Context, args: &PixConsultarArgs) -> Result<()
         Some(Desfecho::Concluido) => Ok(()),
         Some(Desfecho::NaoPago) => Err(CliError::PixNaoPago { status }),
         None => Err(CliError::TempoEsgotado {
+            oque: "o Pix",
             status,
             segundos: args.timeout.as_secs(),
         }),
@@ -221,19 +221,6 @@ fn render(consulta: &ConsultaPix) -> String {
         }
     }
     texto
-}
-
-/// `2026-09-23T12:00:00(.fff)(±hh:mm)` -> `23/09/2026 12:00:00`; other
-/// formats as received.
-fn data_hora_br(raw: &str) -> String {
-    const FORMATO: &str = "%d/%m/%Y %H:%M:%S";
-    if let Ok(data) = DateTime::parse_from_rfc3339(raw) {
-        return data.format(FORMATO).to_string();
-    }
-    ["%Y-%m-%dT%H:%M:%S%.f", "%Y-%m-%d %H:%M:%S%.f"]
-        .iter()
-        .find_map(|formato| NaiveDateTime::parse_from_str(raw, formato).ok())
-        .map_or_else(|| raw.to_owned(), |data| data.format(FORMATO).to_string())
 }
 
 #[cfg(test)]
