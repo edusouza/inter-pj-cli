@@ -25,6 +25,14 @@ pub(crate) enum CliError {
     /// Invalid usage detected after argument parsing.
     #[error("{0}")]
     Usage(String),
+    /// `pagamento lote enviar`: the same payment more than once in the
+    /// file, which `--permitir-repetidos` allows.
+    #[error("pagamentos repetidos em {arquivo}:\n  {}", .repetidos.join("\n  "))]
+    PagamentosRepetidos {
+        arquivo: String,
+        /// Where each payment repeats, and why it matters.
+        repetidos: Vec<String>,
+    },
     /// Invalid statement period.
     #[error("{erro}")]
     Periodo {
@@ -65,9 +73,9 @@ pub(crate) enum CliError {
     /// `pix consultar --aguardar`: the payment ended without being paid.
     #[error("o Pix terminou sem ser pago: {status}")]
     PixNaoPago { status: String },
-    /// `pagamento lote consultar --aguardar`: some payments of the batch
-    /// were not made.
-    #[error("o lote foi processado com erro: {detalhe}")]
+    /// `pagamento lote consultar --aguardar`, or `enviar`: some payments of
+    /// the batch were not made, or the API says it had errors.
+    #[error("o lote foi processado, mas {detalhe}")]
     LoteComErro { detalhe: String },
     /// `--aguardar`: no final status before the time limit.
     #[error("tempo de espera esgotado ({segundos} s): {oque} ainda está {status}")]
@@ -103,7 +111,7 @@ impl CliError {
 
     pub(crate) fn exit_code(&self) -> u8 {
         match self {
-            Self::Usage(_) | Self::Periodo { .. } => exit::USAGE,
+            Self::Usage(_) | Self::PagamentosRepetidos { .. } | Self::Periodo { .. } => exit::USAGE,
             Self::Config(_) | Self::ConfigFile { .. } => exit::CONFIG,
             Self::Io { .. } => exit::UNEXPECTED,
             Self::Cancelado => exit::CANCELLED,
@@ -137,6 +145,11 @@ impl CliError {
             Self::Periodo {
                 dica: Some(dica), ..
             } => return vec![(*dica).to_owned()],
+            Self::PagamentosRepetidos { .. } => {
+                return vec![
+                    "se forem mesmo pagamentos distintos, use --permitir-repetidos".to_owned(),
+                ];
+            }
             Self::TempoEsgotado { .. } => {
                 return vec!["consulte de novo mais tarde, ou aumente o --timeout".to_owned()];
             }

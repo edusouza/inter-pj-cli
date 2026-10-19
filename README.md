@@ -357,7 +357,7 @@ Tipo    Status                 Valor  Código                                Det
 boleto  pago               R$ 666,53  3414f226-36fb-4d87-811e-cfd99911d845
 boleto  pago                R$ 65,33  8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f
 DARF    erro no pagamento   R$ 47,14                                        Saldo insuficiente
-erro: o lote foi processado com erro: 1 de 3 pagamentos não foi feito
+erro: o lote foi processado, mas 1 de 3 pagamentos não foi feito
 ```
 
 O arquivo usa os nomes de campo da API. Em JSON, é um objeto com `pagamentos` e, opcionalmente, `meuIdentificador` (`--identificador` o substitui), ou só a lista de pagamentos; em CSV, uma coluna por campo, com cabeçalho, e células vazias para os campos ausentes. Cada pagamento tem `tipoPagamento` e os campos do seu tipo:
@@ -365,11 +365,11 @@ O arquivo usa os nomes de campo da API. Em JSON, é um objeto com `pagamentos` e
 - `BOLETO` (boletos, contas e tributos com código de barras): `codBarraLinhaDigitavel` e, quando o código não os traz ou para pagar outro valor, `valorPagar` e `dataVencimento`; opcionalmente `dataPagamento` (agendamento) e `cpfCnpjBeneficiario`, como em `pagamento boleto pagar`;
 - `DARF`: os campos do arquivo de `pagamento darf pagar`.
 
-Antes de enviar, a CLI confere o lote inteiro com as validações de cada tipo (dígitos verificadores, datas, valores, CPF/CNPJ) e recusa campos desconhecidos ou de outro tipo; havendo problemas, lista todos, com a linha (CSV) ou a posição (JSON) e o campo, e não envia nada. O resumo mostra o total por tipo e por extenso, cada pagamento, e avisa sobre vencimentos passados, valores diferentes dos do código e pagamentos repetidos no arquivo. Os trilhos de segurança são os dos outros pagamentos: confirmação `[s/N]` ou `--sim`, `--simular` e o limite por operação do perfil, que vale para cada pagamento do lote (um lote não é recusado pelo total, e sim pelo pagamento que passa do limite).
+Antes de enviar, a CLI confere o lote inteiro com as validações de cada tipo (dígitos verificadores, datas, valores, CPF/CNPJ) e recusa campos desconhecidos ou de outro tipo; havendo problemas, lista todos, com a linha (CSV) ou a posição (JSON) e o campo, e não envia nada. O resumo mostra o total por tipo e por extenso, cada pagamento, e avisa sobre vencimentos passados e valores diferentes dos do código. Pagamentos repetidos no arquivo (o mesmo código, ou o mesmo DARF) são recusados antes de qualquer requisição, porque com `--sim` um aviso não impediria o pagamento em dobro; se forem mesmo pagamentos distintos, use `--permitir-repetidos`. Os trilhos de segurança são os dos outros pagamentos: confirmação `[s/N]` ou `--sim`, `--simular` e o limite por operação do perfil, que vale para cada pagamento do lote (um lote não é recusado pelo total, e sim pelo pagamento que passa do limite).
 
 O CSV aceita `,` ou `;` como separador (detectado pelo cabeçalho), UTF-8 com ou sem BOM e valores como `65,33`, como o Excel em português salva. Ao abrir um CSV, porém, o Excel converte o que parece número ou data: números longos viram notação científica e perdem dígitos (`1,36094E+16`), códigos perdem os zeros à esquerda (`0220` vira `220`) e datas mudam de formato (`30/10/2026`). Para editar no Excel, importe o arquivo (Dados > De Texto/CSV) sem detectar os tipos de dados, ou formate as colunas como texto antes de digitar; linhas digitáveis e CPF/CNPJ com pontuação, como no modelo, já ficam como texto. Se algo chegar estragado, a conferência recusa o arquivo e diz o que aconteceu, sem enviar nada.
 
-O lote é processado depois do envio: `pagamento lote consultar` mostra o status do lote e de cada pagamento, e com `--aguardar` consulta a cada 6 segundos até o fim do processamento, saindo com o código 0 (processado sem erro), 5 (algum pagamento não foi feito) ou 8 (o tempo acabou; padrão: 5 min). Como nos outros pagamentos, não há chave de idempotência: se o resultado do envio ficar incerto, confira `pagamento boleto listar` e `pagamento darf listar` antes de enviar de novo. O envio precisa do escopo `pagamento-lote.write`, e a consulta, de `pagamento-lote.read`.
+O lote é processado depois do envio: `pagamento lote consultar` mostra o status do lote e de cada pagamento, e com `--aguardar` consulta a cada 6 segundos até o lote ser processado e nenhum pagamento estar pendente. O código de saída olha cada pagamento, e não só o status do lote: 0 quando todos foram pagos ou agendados (os agendados, com um aviso: saem da conta na data do agendamento); 5 quando algum não foi feito (erro, recusado, cancelado, expirado) ou tem um status que a CLI não conhece; 8 quando o tempo acabou (padrão: 5 min) com o lote em processamento ou com pagamentos aguardando aprovação no Internet Banking. Uma consulta que falha durante a espera (`429`, `5xx`, rede) não a interrompe: a CLI tenta de novo no próximo intervalo e, no fim do prazo, mostra o último status que conhece. Como nos outros pagamentos, não há chave de idempotência: se o resultado do envio ficar incerto (código 9), confira `pagamento boleto listar` e `pagamento darf listar` antes de enviar de novo; os comandos sugeridos levam as opções que escolheram a conta (`-p`, `--config`, `--ambiente`...). O envio precisa do escopo `pagamento-lote.write`, e a consulta, de `pagamento-lote.read`.
 
 ### Formatos de saída
 
@@ -406,10 +406,10 @@ $ curl --cert certificado.crt --key chave.key \
 | 2 | uso incorreto (argumentos inválidos) |
 | 3 | configuração ausente ou inválida (inclui certificado/chave) |
 | 4 | falha de autenticação ou acesso negado (credenciais, escopos, 401/403) |
-| 5 | requisição rejeitada pela API (400, 404, 409, 422); com `--aguardar`, Pix que terminou sem ser pago ou lote processado com erro |
+| 5 | requisição rejeitada pela API (400, 404, 409, 422); com `--aguardar`, Pix que terminou sem ser pago ou lote com algum pagamento que não foi feito |
 | 6 | serviço indisponível, limite de requisições (429), erro 5xx ou falha de rede, numa operação que certamente não foi feita (uma consulta, ou um envio que a API não recebeu) |
 | 7 | operação cancelada na confirmação (nada foi enviado) |
-| 8 | `pix consultar` ou `pagamento lote consultar` com `--aguardar`: tempo esgotado antes de um status final |
+| 8 | `pix consultar` ou `pagamento lote consultar` com `--aguardar`: tempo esgotado antes de um status final (num lote, também com pagamentos aguardando aprovação) |
 | 9 | resultado incerto: um envio pode ter sido feito (tempo esgotado, erro 5xx ou resposta ilegível depois do envio). Confira com o comando da dica antes de tentar de novo; um script não deve repetir o comando às cegas |
 
 Mensagens de erro vão para `stderr`, em português, com a explicação da API e dicas. Com `-v`/`-vv` a CLI mostra detalhes das requisições (método, caminho, status e tempo) — nunca tokens, segredos ou corpos de resposta.
