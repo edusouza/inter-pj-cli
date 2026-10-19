@@ -140,6 +140,35 @@ pub mod banking {
         scopes: &[Scope::PagamentoBoletoWrite],
     };
 
+    /// `POST /banking/v2/pagamento/darf` — pays a DARF without a barcode.
+    pub const PAGAMENTO_DARF_INCLUIR: Endpoint = Endpoint {
+        method: Method::Post,
+        path: "/banking/v2/pagamento/darf",
+        scopes: &[Scope::PagamentoDarfWrite],
+    };
+
+    /// `GET /banking/v2/pagamento/darf` — DARF payments. The API asks for the
+    /// scope of payments by barcode.
+    pub const PAGAMENTO_DARF_BUSCAR: Endpoint = Endpoint {
+        method: Method::Get,
+        path: "/banking/v2/pagamento/darf",
+        scopes: &[Scope::PagamentoBoletoRead],
+    };
+
+    /// `POST /banking/v2/pagamento/lote` — sends a batch of payments by barcode and DARFs.
+    pub const PAGAMENTO_LOTE_INCLUIR: Endpoint = Endpoint {
+        method: Method::Post,
+        path: "/banking/v2/pagamento/lote",
+        scopes: &[Scope::PagamentoLoteWrite],
+    };
+
+    /// `GET /banking/v2/pagamento/lote/{idLote}` — a batch and the status of its payments.
+    pub const PAGAMENTO_LOTE_CONSULTAR: Endpoint = Endpoint {
+        method: Method::Get,
+        path: "/banking/v2/pagamento/lote/{idLote}",
+        scopes: &[Scope::PagamentoLoteRead],
+    };
+
     /// `POST /banking/v2/pix` — sends a Pix (key, bank details or copia e cola).
     pub const PIX_INCLUIR: Endpoint = Endpoint {
         method: Method::Post,
@@ -167,4 +196,8 @@ pub const ALL: &[Endpoint] = &[
     banking::PAGAMENTO_INCLUIR,
     banking::PAGAMENTO_BUSCAR,
     banking::PAGAMENTO_CANCELAR,
+    banking::PAGAMENTO_DARF_INCLUIR,
+    banking::PAGAMENTO_DARF_BUSCAR,
+    banking::PAGAMENTO_LOTE_INCLUIR,
+    banking::PAGAMENTO_LOTE_CONSULTAR,
 ];
