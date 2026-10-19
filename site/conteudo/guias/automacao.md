@@ -40,6 +40,10 @@ case "$codigo" in
 esac
 ```
 
+Num comando que move dinheiro, trate o 9 à parte: o envio pode ter sido feito, e repeti-lo às cegas
+pode pagar duas vezes. Confira antes com o comando da dica; um 6 (`429` ou conexão recusada) não
+pagou nada e pode ser repetido.
+
 Os códigos estão na [tabela de códigos de saída](../referencia/codigos-de-saida.md).
 
 ## Num cron ou num CI

@@ -2,21 +2,21 @@
 
 use std::fmt::Write as _;
 
-use chrono::{DateTime, FixedOffset, NaiveDate, Utc};
+use chrono::NaiveDate;
 use inter_pj::banking::{
     DadosBancarios, Destinatario, IdIdempotente, InstituicaoFinanceira, PagamentoPix,
     SolicitacaoPix, TipoConta, TipoRetornoPix,
 };
 use inter_pj::documento::Documento;
 use inter_pj::pix::{BrCode, ChavePix};
-use inter_pj::{Environment, Error as InterError, endpoint};
+use inter_pj::{Environment, endpoint};
 use rust_decimal::Decimal;
-use serde_json::{Map, json};
+use serde_json::json;
 
 use crate::cli::{Formato, PixEnviarArgs};
-use crate::commands::Context;
+use crate::commands::{Context, hoje, simulacao};
 use crate::config::Settings;
-use crate::confirmacao::{Terminal, confirmar, descrever_ambiente};
+use crate::confirmacao::{Terminal, confirmar, descrever_ambiente, verificar_limite};
 use crate::error::CliError;
 use crate::output;
 use crate::valor::por_extenso;
@@ -26,9 +26,9 @@ pub(super) async fn run(
     args: &PixEnviarArgs,
     terminal: &mut dyn Terminal,
 ) -> Result<(), CliError> {
-    let pagamento = pagamento(args, hoje_brasilia(Utc::now()))?;
+    let pagamento = pagamento(args, hoje())?;
     let settings = context.settings()?;
-    verificar_limite(&pagamento, &settings)?;
+    verificar_limite(pagamento.valor, &settings)?;
     // Configuration problems show up before the confirmation, not after it.
     let client = if args.simular {
         None
@@ -52,7 +52,7 @@ pub(super) async fn run(
         .enviar_pix(&pagamento, &id)
         .await
         .map_err(|err| {
-            if resultado_incerto(&err) {
+            if err.may_have_been_processed() {
                 CliError::ResultadoIncerto {
                     source: err,
                     id_idempotente: id.to_string(),
@@ -70,15 +70,6 @@ pub(super) async fn run(
         // `commands::run` refuses csv for this command.
         Formato::Texto | Formato::Csv => output::print(&render(&solicitacao, &id)),
     }
-}
-
-/// Today in the bank's calendar: Brasília, UTC−3, without daylight saving
-/// time since 2019. A machine in UTC, or in another time zone, near
-/// midnight would otherwise take a scheduling for tomorrow as a payment
-/// for today, and the API pays at once a payment without a date.
-fn hoje_brasilia(agora: DateTime<Utc>) -> NaiveDate {
-    let brasilia = FixedOffset::west_opt(3 * 3600).expect("fuso fixo de Brasília");
-    agora.with_timezone(&brasilia).date_naive()
 }
 
 /// The payment described by the arguments, validated.
@@ -169,20 +160,6 @@ fn valor(args: &PixEnviarArgs) -> Result<Decimal, CliError> {
         (None, None) => Err(CliError::Usage(
             "o código copia e cola não traz o valor: informe --valor".to_owned(),
         )),
-    }
-}
-
-/// Refuses amounts above the profile's `limite_por_operacao`, even with `--sim`.
-fn verificar_limite(pagamento: &PagamentoPix, settings: &Settings) -> Result<(), CliError> {
-    match &settings.limite_por_operacao {
-        Some(limite) if pagamento.valor > limite.value => Err(CliError::Usage(format!(
-            "{} passa do limite por operação do perfil \"{}\" ({}); para enviar, ajuste limite_por_operacao em {}",
-            output::brl(pagamento.valor),
-            settings.perfil.value,
-            output::brl(limite.value),
-            settings.config_path.display()
-        ))),
-        _ => Ok(()),
     }
 }
 
@@ -359,54 +336,13 @@ fn simulacao(
     pagamento: &PagamentoPix,
     id: &IdIdempotente,
 ) -> Result<(), CliError> {
-    let base = settings
-        .effective_base_url()
-        .unwrap_or_else(|| "<URL do ambiente>".to_owned());
-    let url = format!(
-        "{}{}",
-        base.trim_end_matches('/'),
-        endpoint::banking::PIX_INCLUIR.path
-    );
-    let corpo = serde_json::to_value(pagamento)
-        .map_err(|err| CliError::io("falha ao gerar JSON", std::io::Error::other(err)))?;
-    let mut cabecalhos = Map::new();
-    cabecalhos.insert("x-id-idempotente".to_owned(), json!(id.as_str()));
-    if let Some(conta) = &settings.conta_corrente {
-        cabecalhos.insert(
-            "x-conta-corrente".to_owned(),
-            json!(output::mask(&conta.value, 2)),
-        );
-    }
-    match context.formato() {
-        Formato::Json => output::print_json(&json!({
-            "simulacao": true,
-            "metodo": "POST",
-            "url": url,
-            "cabecalhos": cabecalhos,
-            "corpo": corpo,
-        })),
-        Formato::Texto | Formato::Csv => {
-            let mut texto = format!("Simulação: nada foi enviado.\n\nPOST {url}");
-            for (nome, valor) in &cabecalhos {
-                let _ = write!(texto, "\n{nome}: {}", valor.as_str().unwrap_or_default());
-            }
-            let corpo = serde_json::to_string_pretty(&corpo).unwrap_or_default();
-            let _ = write!(texto, "\n\n{corpo}");
-            output::print(&texto)
-        }
-    }
-}
-
-/// Whether the payment may have been made despite the error.
-fn resultado_incerto(err: &InterError) -> bool {
-    match err {
-        // A refused connection never reached the API.
-        InterError::Transport(source) => !source.is_connect(),
-        InterError::Api(api) => api.status >= 500,
-        // A success status with a body that could not be read.
-        InterError::Decode { .. } => true,
-        _ => false,
-    }
+    simulacao::mostrar(
+        context,
+        settings,
+        endpoint::banking::PIX_INCLUIR,
+        &[("x-id-idempotente", id.to_string())],
+        pagamento,
+    )
 }
 
 fn render(solicitacao: &SolicitacaoPix, id: &IdIdempotente) -> String {
@@ -458,6 +394,7 @@ mod tests {
     use std::fs;
 
     use clap::{CommandFactory, FromArgMatches, Parser};
+    use inter_pj::Error as InterError;
     use wiremock::matchers::{any, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -486,21 +423,10 @@ mod tests {
     }
 
     #[test]
-    fn today_is_the_bank_calendar_day() {
-        let em = |texto: &str| hoje_brasilia(texto.parse().unwrap());
-        let dia = |ano, mes, dia| NaiveDate::from_ymd_opt(ano, mes, dia).unwrap();
-        // 22:30 in Brasília, already the next day in UTC.
-        assert_eq!(em("2026-10-10T01:30:00Z"), dia(2026, 10, 9));
-        assert_eq!(em("2026-10-10T02:59:59Z"), dia(2026, 10, 9));
-        assert_eq!(em("2026-10-10T03:00:00Z"), dia(2026, 10, 10));
-        assert_eq!(em("2026-12-31T23:59:59Z"), dia(2026, 12, 31));
-    }
-
-    #[test]
     fn scheduling_for_tomorrow_in_brasilia_keeps_the_date_at_night_in_utc() {
         // 22:00 in Brasília on 09/10 is 01:00 on 10/10 in UTC: the machine's
         // day is already the 10th, the bank's is still the 9th.
-        let hoje = hoje_brasilia("2026-10-10T01:00:00Z".parse().unwrap());
+        let hoje = crate::commands::hoje_em("2026-10-10T01:00:00Z".parse().unwrap());
         let amanha = NaiveDate::from_ymd_opt(2026, 10, 10).unwrap();
         let pagamento = pagamento(
             &args(&[
@@ -1034,7 +960,8 @@ Acompanhe com: inter-pj pix consultar c42f0787-02cb-4b31-827e-459ec9d7ece1 --agu
             );
         }
 
-        // A refused connection never reached the API.
+        // A refused connection never reached the API: here, the token
+        // request is refused, and nothing else is sent.
         let server = MockServer::start().await;
         let cenario = cenario_em(
             server,
@@ -1049,7 +976,7 @@ Acompanhe com: inter-pj pix consultar c42f0787-02cb-4b31-827e-459ec9d7ece1 --agu
         .await
         .unwrap_err();
         assert!(
-            matches!(err, CliError::Inter(InterError::Transport(_))),
+            matches!(err, CliError::Inter(InterError::TokenTransport(_))),
             "{err:?}"
         );
     }

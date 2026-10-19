@@ -84,7 +84,7 @@ certificado = '~/inter/certificado.crt'
 chave_privada = '~/inter/chave.key'
 # conta_corrente = "<numero>"     # só se a integração tiver mais de uma conta
 # escopos = ["extrato.read"]      # opcional: escopos pedidos em todo token
-# limite_por_operacao = "1.000,00" # opcional: valor máximo de cada Pix
+# limite_por_operacao = "1.000,00" # opcional: valor máximo de cada Pix ou pagamento
 ```
 
 Escreva os caminhos entre **aspas simples**, principalmente no Windows (`certificado = 'C:\inter\certificado.crt'`). Entre aspas duplas, a barra invertida começa um escape do TOML. `"C:\Users\..."` impede a leitura do arquivo (`\U` pede 8 dígitos hexadecimais). Já `"C:\novo\teste.crt"` é lido, mas com uma quebra de linha e uma tabulação no lugar de `\n` e `\t`. Caminhos relativos são relativos ao arquivo de configuração, e `~/` é a sua pasta pessoal.
@@ -229,9 +229,9 @@ O destino é uma chave (`--chave`), um código copia e cola (`--copia-e-cola`) o
 Trilhos de segurança de todo envio:
 
 - **Resumo e confirmação**: antes de enviar, a CLI mostra destino, valor (também por extenso), data e ambiente (produção em destaque) e pergunta `[s/N]`; o padrão é não. `--sim` confirma sem perguntar. Respostas vindas de um *pipe* não valem: sem terminal e sem `--sim`, a CLI recusa (código 2).
-- **Validação local**: chave Pix (CPF/CNPJ com dígitos verificadores, e-mail, celular `+55DD9NNNNNNNN`, chave aleatória), valor maior que zero com até 2 casas, descrição de até 140 caracteres e data de agendamento. O valor aceita `150,00`, `1.500,00` e `150.00`; formas ambíguas como `1.500` são recusadas.
+- **Validação local**: chave Pix (CPF/CNPJ com dígitos verificadores, e-mail, celular `+55DD9NNNNNNNN`, chave aleatória), valor maior que zero com até 2 casas, descrição de até 140 caracteres e data de agendamento. As datas seguem o calendário do banco: "hoje" é o dia em Brasília, qualquer que seja o fuso da máquina, para que um agendamento para amanhã, pedido de um servidor em UTC perto da meia-noite, não seja pago hoje. O valor aceita `150,00`, `1.500,00` e `150.00`; formas ambíguas como `1.500` são recusadas.
 - **`--simular`**: valida e mostra a requisição (sem segredos), sem enviar nada.
-- **Idempotência**: cada envio leva uma chave (`x-id-idempotente`), mostrada no resumo. Se a resposta se perder (tempo esgotado, erro 5xx), o Pix pode ter sido feito: confira o extrato e, para repetir sem risco de pagar duas vezes, use `--id-idempotente <chave>`.
+- **Idempotência**: cada envio leva uma chave (`x-id-idempotente`), mostrada no resumo. Se a resposta se perder (tempo esgotado, erro 5xx), o Pix pode ter sido feito, e a CLI sai com o código 9: confira o extrato e, para repetir sem risco de pagar duas vezes, use `--id-idempotente <chave>`. Num script que repete envios que falharam, gere a chave antes (por exemplo, com `uuidgen`) e passe a mesma `--id-idempotente` em todas as tentativas; e nunca repita às cegas um comando que saiu com 9.
 - **Limite por operação**: com `limite_por_operacao` no perfil, valores acima dele são recusados, mesmo com `--sim`.
 - **Aprovação**: conforme a configuração da conta, o Pix aguarda aprovação no Internet Banking (Aprovar > Gestão de Aprovações); a CLI avisa quando for o caso.
 
@@ -249,6 +249,29 @@ Com `--aguardar`, a CLI consulta a cada 6 segundos (dentro do limite de requisi�
 ### Pagamentos
 
 Boletos, contas de consumo e tributos com código de barras:
+
+```console
+$ inter-pj pagamento boleto pagar '07797.77705 11678.471159 90071.126347 1 15950000003010'
+Pagamento a enviar
+  Ambiente         sandbox (dados fictícios)
+  Tipo             boleto do banco 077
+  Linha digitável  07797.77705 11678.471159 90071.126347 1 15950000003010
+  Valor            R$ 30,10 (trinta reais e dez centavos)
+  Vencimento       10/10/2026
+  Quando           agora
+Confirmar o pagamento? [s/N] s
+Pagamento realizado.
+Código da transação  3414f226-36fb-4d87-811e-cfd99911d845
+
+Acompanhe com: inter-pj pagamento boleto listar --codigo-transacao 3414f226-36fb-4d87-811e-cfd99911d845
+
+$ inter-pj pagamento boleto pagar 82670000000653301602023123106000000002830894 --vencimento 2026-10-10   # conta de água
+$ inter-pj pagamento boleto pagar '<linha digitável>' --valor 31,20 --data 2026-10-09 --beneficiario 12.345.678/0001-95
+```
+
+O código — linha digitável (47 dígitos nos boletos, 48 nas contas e tributos) ou código de barras (44) — tem todos os dígitos verificadores conferidos localmente. Valor e vencimento vêm do próprio código quando ele os traz; contas de consumo e tributos não trazem o vencimento, então precisam de `--vencimento` (a data impressa no documento). O resumo mostra o valor por extenso e, quando `--valor` ou `--vencimento` diferem do código, os dois lados com um aviso (juros, multa ou desconto); também avisa quando o pagamento fica para depois do vencimento. `--data` agenda o pagamento, e `--beneficiario` pede à API que confira o CPF/CNPJ de quem recebe. Os trilhos de segurança são os do Pix: confirmação `[s/N]` ou `--sim`, `--simular` e o limite por operação do perfil.
+
+Esta API não tem chave de idempotência. Se o resultado ficar incerto (tempo esgotado, erro 5xx ou resposta ilegível depois do envio), o pagamento pode ter sido feito e repetir o comando pode pagar duas vezes: a CLI sai com o código 9 e mostra o `pagamento boleto listar --codigo ...` que confere isso antes de uma nova tentativa, com as opções que escolheram a conta (`-p`, `--config`, `--ambiente`...). Essa consulta precisa do escopo `pagamento-boleto.read`, e uma lista vazia logo depois do erro não prova que nada foi pago: espere alguns minutos e confira também o extrato. Um script não deve repetir às cegas um pagamento que saiu com 9; um `429` ou uma conexão recusada, que certamente não pagaram, saem com 6. Uma falha ao pedir o token de acesso também não pagou nada: o pagamento só é enviado depois dele. "Hoje", para `--data` e para o aviso de pagamento vencido, é o dia em Brasília, qualquer que seja o fuso da máquina. Conforme a configuração da conta, o pagamento aguarda aprovação no Internet Banking. O pagamento precisa do escopo `pagamento-boleto.write`; no sandbox, a documentação oferece os códigos `03395988500000666539201493990000372830030102` (boleto vencido) e `82670000000653301602023123106000000002830894` (conta de água).
 
 ```console
 $ inter-pj pagamento boleto listar --inicio 2026-09-01 --fim 2026-09-30
@@ -278,7 +301,7 @@ Para o Excel em português, use `--formato csv --separador ';'`: ponto e vírgul
 
 ### Retentativas
 
-Consultas que falham por limite de requisições (`429`), instabilidade do servidor (`500`, `502`, `503`, `504`) ou falha de conexão são repetidas automaticamente, com espera crescente (1 s, 2 s, ...) e respeitando o cabeçalho `Retry-After`. O padrão é de 3 tentativas; ajuste com `--tentativas N` (ou `INTER_TENTATIVAS`) ou desative com `--sem-retentativa`. Com `-v`, cada nova tentativa aparece em `stderr`. O envio de Pix só é repetido quando certamente não foi processado (`429` ou conexão recusada), sempre com a mesma chave de idempotência.
+Consultas que falham por limite de requisições (`429`), instabilidade do servidor (`500`, `502`, `503`, `504`) ou falha de conexão são repetidas automaticamente, com espera crescente (1 s, 2 s, ...) e respeitando o cabeçalho `Retry-After`. O padrão é de 3 tentativas; ajuste com `--tentativas N` (ou `INTER_TENTATIVAS`) ou desative com `--sem-retentativa`. Com `-v`, cada nova tentativa aparece em `stderr`. O envio de Pix e os pagamentos só são repetidos quando certamente não foram processados (`429` ou conexão recusada); o Pix, sempre com a mesma chave de idempotência.
 
 ### Tokens e rate limit
 
@@ -302,9 +325,10 @@ $ curl --cert certificado.crt --key chave.key \
 | 3 | configuração ausente ou inválida (inclui certificado/chave) |
 | 4 | falha de autenticação ou acesso negado (credenciais, escopos, 401/403) |
 | 5 | requisição rejeitada pela API (400, 404, 409, 422); com `pix consultar --aguardar`, Pix que terminou sem ser pago |
-| 6 | serviço indisponível, limite de requisições (429), erro 5xx ou falha de rede |
+| 6 | serviço indisponível, limite de requisições (429), erro 5xx ou falha de rede, numa operação que certamente não foi feita (uma consulta, ou um envio que a API não recebeu) |
 | 7 | operação cancelada na confirmação (nada foi enviado) |
 | 8 | `pix consultar --aguardar`: tempo esgotado antes de um status final |
+| 9 | resultado incerto: um envio pode ter sido feito (tempo esgotado, erro 5xx ou resposta ilegível depois do envio). Confira com o comando da dica antes de tentar de novo; um script não deve repetir o comando às cegas |
 
 Mensagens de erro vão para `stderr`, em português, com a explicação da API e dicas. Com `-v`/`-vv` a CLI mostra detalhes das requisições (método, caminho, status e tempo) — nunca tokens, segredos ou corpos de resposta.
 
