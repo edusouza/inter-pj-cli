@@ -6,7 +6,7 @@ use std::fmt::Write as _;
 use chrono::NaiveDate;
 use rust_decimal::Decimal;
 
-use crate::output::brl;
+use crate::output::{brl, limpo};
 
 /// Field separator of the CSV output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -94,7 +94,7 @@ impl Celula {
 
     fn para_texto(&self) -> String {
         match self {
-            Self::Texto(text) => text.clone(),
+            Self::Texto(text) => limpo(text).into_owned(),
             Self::Dinheiro(value) => brl(*value),
             Self::Data(date) => date.format("%d/%m/%Y").to_string(),
             Self::Vazia => String::new(),
@@ -274,6 +274,27 @@ mod tests {
             Celula::Dinheiro(dec("-2.5")),
         ]);
         tabela
+    }
+
+    #[test]
+    fn text_cells_stay_on_one_line_without_control_characters() {
+        let mut tabela = Tabela::new(vec![
+            Coluna::texto("Descrição", "descricao"),
+            Coluna::valor("Valor", "valor"),
+        ]);
+        tabela.linha(vec![
+            Celula::texto(Some("Loja\n01/01/2026  Pix recebido  R$ 9.999,00\u{1b}[1A")),
+            Celula::Dinheiro(dec("1")),
+        ]);
+        let texto = tabela.texto();
+        assert_eq!(texto.lines().count(), 2, "{texto}");
+        assert!(!texto.contains('\u{1b}'), "{texto}");
+        // CSV keeps the text as sent, quoted.
+        assert!(
+            tabela
+                .csv(Separador::Virgula)
+                .contains("\"Loja\n01/01/2026  Pix recebido  R$ 9.999,00\u{1b}[1A\""),
+        );
     }
 
     #[test]

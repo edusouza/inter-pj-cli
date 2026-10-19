@@ -162,9 +162,10 @@ fn problem_type(api: &ApiError) -> Option<&str> {
     api.problem.as_ref()?.type_error.as_deref()
 }
 
-/// Prints the error (and hints) to stderr.
+/// Prints the error (and hints) to stderr. Messages of the API reach the
+/// terminal without control characters.
 pub(crate) fn report(err: &CliError) {
-    eprintln!("erro: {err}");
+    eprintln!("erro: {}", crate::output::sem_controle(&err.to_string()));
     if let CliError::ConfigFile {
         verificar: Some(verificar),
         ..

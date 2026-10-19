@@ -5,7 +5,7 @@ use std::fmt::Write as _;
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
-use chrono::{Days, Local, NaiveDate};
+use chrono::NaiveDate;
 use inter_pj::banking::{
     Detalhe, FiltroExtrato, PaginaExtrato, Periodo, PeriodoError, TipoOperacao, TipoTransacao,
     TransacaoCompleta, TransacaoSimples,
@@ -13,7 +13,7 @@ use inter_pj::banking::{
 use rust_decimal::Decimal;
 use serde_json::json;
 
-use super::Context;
+use super::{Context, hoje, intervalo};
 use crate::cli::{
     ExtratoArgs, ExtratoCommand, ExtratoCompletoArgs, ExtratoPdfArgs, Formato, PeriodoArgs,
 };
@@ -22,8 +22,6 @@ use crate::files::{create_private, write_private};
 use crate::output;
 use crate::tabela::{Celula, Coluna, Tabela};
 
-/// Days in the default period (the last 30 days, today included).
-const DIAS_PADRAO: u64 = 30;
 /// Longest description shown in the text output.
 const LARGURA_DESCRICAO: usize = 60;
 const LARGURA_CONTRAPARTE: usize = 30;
@@ -481,21 +479,6 @@ fn tamanho(bytes: usize) -> String {
 }
 
 // --- shared --------------------------------------------------------------------
-
-fn hoje() -> NaiveDate {
-    Local::now().date_naive()
-}
-
-/// Dates of the query: without `--fim`, today; without `--inicio`, the
-/// [`DIAS_PADRAO`] days that end on `--fim`.
-fn intervalo(periodo: PeriodoArgs, hoje: NaiveDate) -> (NaiveDate, NaiveDate) {
-    let fim = periodo.fim.unwrap_or(hoje);
-    let inicio = periodo.inicio.unwrap_or_else(|| {
-        fim.checked_sub_days(Days::new(DIAS_PADRAO - 1))
-            .unwrap_or(fim)
-    });
-    (inicio, fim)
-}
 
 fn periodos(inicio: NaiveDate, fim: NaiveDate, dividir: bool) -> Result<Vec<Periodo>, CliError> {
     let resultado = if dividir {
