@@ -361,7 +361,7 @@ async fn cobranca_invalida_nao_chama_a_api() {
 }
 
 /// With an unknown outcome, the error says how to check and how to repeat
-/// without creating two charges.
+/// without creating two charges, and exits with 9, like `pix cob criar`.
 #[tokio::test(flavor = "multi_thread")]
 async fn resultado_incerto_orienta_a_repetir_com_o_mesmo_txid() {
     let env = env().await;
@@ -377,7 +377,7 @@ async fn resultado_incerto_orienta_a_repetir_com_o_mesmo_txid() {
         .args(criar())
         .args(["--txid", TXID, "--sim"])
         .assert()
-        .code(6);
+        .code(9);
     let stderr = stderr_of(&assert);
     for dica in [
         format!("dica: confira com: inter-pj pix cobv consultar {TXID}"),

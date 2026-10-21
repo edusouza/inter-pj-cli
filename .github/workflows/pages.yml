@@ -1,0 +1,105 @@
+name: Site
+
+# Constrói o site de documentação (site/, com o Zensical) e o publica no GitHub Pages a partir
+# da main. Nos pull requests ele só é construído, em modo estrito: um link quebrado, ou um
+# comando citado numa página que o inter-pj não tem mais, reprova a mudança em vez de chegar
+# ao site publicado. Veja "Este site" em site/conteudo/por-dentro/desenvolvimento.md.
+#
+# O que dispara o workflow é o que entra no site: as páginas, o gerador, as ajudas do CLI
+# (a referência de comandos vem do binário) e os arquivos que viram páginas.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - "crates/sitegen/**"
+      - "crates/inter-pj-cli/**"
+      - "crates/inter-pj/README.md"
+      - "docs/**"
+      - "CHANGELOG.md"
+      - "CONTRIBUTING.md"
+      - "SECURITY.md"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/pages.yml"
+  pull_request:
+    paths:
+      - "site/**"
+      - "crates/sitegen/**"
+      - "crates/inter-pj-cli/**"
+      - "crates/inter-pj/README.md"
+      - "docs/**"
+      - "CHANGELOG.md"
+      - "CONTRIBUTING.md"
+      - "SECURITY.md"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+# Uma publicação em andamento nunca é cancelada, para o Pages não ficar pela metade; um pull
+# request só se importa com o último push.
+concurrency:
+  group: site-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  construir:
+    name: Construir o site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      # O Python que vem no runner basta; um ambiente virtual evita mexer no do sistema. A
+      # versão do Zensical está fixada em site/requirements.txt.
+      - name: Instalar o Zensical
+        run: |
+          python3 -m venv "$RUNNER_TEMP/zensical"
+          "$RUNNER_TEMP/zensical/bin/pip" install --quiet --requirement site/requirements.txt
+          echo "$RUNNER_TEMP/zensical/bin" >> "$GITHUB_PATH"
+
+      # A referência de comandos é a ajuda do binário, e não uma tabela escrita à mão.
+      - name: Compilar o inter-pj
+        run: cargo build --locked -p inter-pj-cli
+
+      # Escreve as páginas derivadas (nenhuma é commitada) e confere os comandos citados nas
+      # páginas escritas à mão contra o binário.
+      - name: Gerar as páginas derivadas
+        run: cargo run --locked -p sitegen
+
+      - name: Construir
+        working-directory: site
+        run: zensical build --strict
+
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        with:
+          path: site/_build
+
+  publicar:
+    name: Publicar
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: construir
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

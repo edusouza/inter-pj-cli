@@ -212,7 +212,7 @@ async fn connection_failures_are_retried() {
 
     let started = Instant::now();
     let err = client.banking().saldo(None).await.unwrap_err();
-    assert!(matches!(err, Error::Transport(_)), "{err:?}");
+    assert!(matches!(err, Error::TokenTransport(_)), "{err:?}");
     // Two retries, each waiting at least half of the 40 ms delay.
     assert!(
         started.elapsed() >= Duration::from_millis(40),

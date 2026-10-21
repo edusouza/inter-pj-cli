@@ -2,7 +2,7 @@
 
 use std::fmt::Write as _;
 
-use chrono::{DateTime, Local, TimeDelta, TimeZone};
+use chrono::{DateTime, FixedOffset, Local, TimeDelta, TimeZone, Utc};
 use inter_pj::endpoint;
 use inter_pj::pix::{
     CalendarioCobGerado, Cob, CobRevisada, CobSolicitada, Devedor, FiltroCobs, LocCob, StatusCob,
@@ -14,6 +14,7 @@ use super::{
     Filtros, alteravel, antes_e_depois, copia_e_cola_ativa, descrever_status, incerta, paginacao,
     pessoa, tabela_pix,
 };
+use crate::chamada::chamada;
 use crate::cli::{
     Formato, PixCobCommand, PixCobConsultarArgs, PixCobCriarArgs, PixCobListarArgs,
     PixCobRevisarArgs, SimNao,
@@ -77,11 +78,19 @@ async fn criar(
         .criar_cob(&txid, &cob)
         .await
         .map_err(|err| incerta(err, "cob", &txid))?;
+    let consulta = format!("{} pix cob consultar {txid}", chamada());
     let texto = format!(
-        "Cobrança Pix criada.\n\n{}\n\nAcompanhe com: inter-pj pix cob consultar {txid}",
+        "Cobrança Pix criada.\n\n{}\n\nAcompanhe com: {consulta}",
         render_cob(&criada)
     );
-    opcoes.mostrar(context, &settings, &texto, &criada, &copia_e_cola(&criada))
+    opcoes.mostrar_criada(
+        context,
+        &settings,
+        &texto,
+        &criada,
+        &copia_e_cola(&criada),
+        &consulta,
+    )
 }
 
 /// The charge of the options, checked as the API would.
@@ -336,8 +345,34 @@ async fn consultar(context: &Context, args: &PixCobConsultarArgs) -> Result<(), 
         &settings,
         &render_cob(&cob),
         &cob,
-        &copia_e_cola(&cob),
+        &copia_e_cola_em(&cob, Utc::now(), &Local),
     )
+}
+
+/// [`copia_e_cola`], unless the charge expired before `agora`: its status
+/// stays `ATIVA` after the expiration, but the Pix is no longer accepted.
+/// A charge just created is not checked, so that a clock behind the bank's
+/// does not refuse it.
+fn copia_e_cola_em<'a, Tz: TimeZone>(
+    cob: &'a Cob,
+    agora: DateTime<Utc>,
+    fuso: &Tz,
+) -> Result<&'a str, String>
+where
+    Tz::Offset: std::fmt::Display,
+{
+    let expirou = cob
+        .calendario
+        .as_ref()
+        .and_then(expira)
+        .filter(|expira| *expira <= agora);
+    if let (Some(StatusCob::Ativa) | None, Some(expira)) = (&cob.status, expirou) {
+        return Err(format!(
+            "a cobrança expirou em {}: o QR Code não serve mais para pagar",
+            expira.with_timezone(fuso).format("%d/%m/%Y %H:%M:%S")
+        ));
+    }
+    copia_e_cola(cob)
 }
 
 /// The "copia e cola" of a charge that can still be paid, or why there is
@@ -418,26 +453,29 @@ where
         .as_deref()
         .filter(|texto| !texto.is_empty())
     {
-        let _ = write!(texto, "\n\nCopia e cola  {copia_e_cola}");
+        let _ = write!(texto, "\n\nCopia e cola  {}", output::limpo(copia_e_cola));
     }
     texto
 }
 
-/// When the charge expires: its creation plus the expiration, in the local
-/// time zone.
+/// When the charge expires, in `fuso`.
 fn expira_em<Tz: TimeZone>(calendario: &CalendarioCobGerado, fuso: &Tz) -> Option<String>
 where
     Tz::Offset: std::fmt::Display,
 {
-    let criacao = DateTime::parse_from_rfc3339(calendario.criacao.as_deref()?).ok()?;
-    let segundos = i64::try_from(calendario.expiracao?).ok()?;
-    let expira = criacao.checked_add_signed(TimeDelta::try_seconds(segundos)?)?;
     Some(
-        expira
+        expira(calendario)?
             .with_timezone(fuso)
             .format("%d/%m/%Y %H:%M:%S")
             .to_string(),
     )
+}
+
+/// When the charge expires: its creation plus the expiration.
+fn expira(calendario: &CalendarioCobGerado) -> Option<DateTime<FixedOffset>> {
+    let criacao = DateTime::parse_from_rfc3339(calendario.criacao.as_deref()?).ok()?;
+    let segundos = i64::try_from(calendario.expiracao?).ok()?;
+    criacao.checked_add_signed(TimeDelta::try_seconds(segundos)?)
 }
 
 async fn listar(context: &Context, args: &PixCobListarArgs) -> Result<(), CliError> {
@@ -782,6 +820,38 @@ Copia e cola  00020101021226"
         assert!(alteravel(cob("CONCLUIDA").status.as_ref()).is_err());
         assert!(alteravel(cob("REMOVIDA_PELO_PSP").status.as_ref()).is_err());
         assert!(alteravel(cob("ATIVA").status.as_ref()).is_ok());
+    }
+
+    #[test]
+    fn an_expired_charge_has_no_qr_code() {
+        // Created at 20:15:00.358 UTC, for 1 hour.
+        let agora = |texto: &str| DateTime::parse_from_rfc3339(texto).unwrap().to_utc();
+        let ativa = cob("ATIVA");
+        assert_eq!(
+            copia_e_cola_em(&ativa, agora("2026-09-23T21:15:00Z"), &brasilia()),
+            Ok("00020101021226")
+        );
+        assert_eq!(
+            copia_e_cola_em(&ativa, agora("2026-09-23T21:15:01Z"), &brasilia()).unwrap_err(),
+            "a cobrança expirou em 23/09/2026 18:15:00: o QR Code não serve mais para pagar"
+        );
+        // A charge paid says so, not that it expired.
+        assert_eq!(
+            copia_e_cola_em(
+                &cob("CONCLUIDA"),
+                agora("2026-09-25T00:00:00Z"),
+                &brasilia()
+            )
+            .unwrap_err(),
+            "a cobrança está concluída (paga): o QR Code não serve mais para pagar"
+        );
+        // Without the creation or the expiration, there is nothing to check.
+        let mut sem_calendario = cob("ATIVA");
+        sem_calendario.calendario = None;
+        assert_eq!(
+            copia_e_cola_em(&sem_calendario, agora("2030-01-01T00:00:00Z"), &brasilia()),
+            Ok("00020101021226")
+        );
     }
 
     #[test]
