@@ -3,11 +3,17 @@
 
 mod common;
 
-use chrono::NaiveDate;
+use std::io;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use chrono::{NaiveDate, TimeDelta, Utc};
 use common::{client, mount_token};
-use inter_pj::Error;
 use inter_pj::banking::{
     DataDoPagamento, FiltroPagamentos, PagamentoBoleto, PagamentoBoletoError, StatusPagamento,
+};
+use inter_pj::{
+    AccessToken, Credentials, Error, InterClient, RetryPolicy, Scope, ScopeSet, TokenStore,
 };
 use serde_json::json;
 use wiremock::matchers::{any, body_json, method, path, query_param};
@@ -146,6 +152,178 @@ async fn payments_are_retried_only_when_surely_not_processed() {
     assert_eq!(api_status(&err), 503);
 }
 
+/// Payments have no idempotency key: after an error, what matters is
+/// whether the request may have reached the API.
+#[tokio::test]
+async fn tells_whether_a_failed_payment_may_have_been_made() {
+    let ilegivel = || ResponseTemplate::new(200).set_body_string("<html>proxy</html>");
+    let atrasada = || ResponseTemplate::new(200).set_delay(Duration::from_secs(2));
+    for (nome, resposta, processado) in [
+        ("500", ResponseTemplate::new(500), true),
+        ("502", ResponseTemplate::new(502), true),
+        ("503", ResponseTemplate::new(503), true),
+        ("504", ResponseTemplate::new(504), true),
+        ("200 ilegível", ilegivel(), true),
+        ("tempo esgotado", atrasada(), true),
+        ("400", ResponseTemplate::new(400), false),
+        ("403", ResponseTemplate::new(403), false),
+        ("422", ResponseTemplate::new(422), false),
+        ("429", ResponseTemplate::new(429), false),
+    ] {
+        let server = setup("pagamento-boleto.write").await;
+        Mock::given(method("POST"))
+            .and(path(PAGAMENTO))
+            .respond_with(resposta)
+            .expect(1)
+            .mount(&server)
+            .await;
+        let err = sem_retentativa(&server)
+            .banking()
+            .pagar_boleto(&boleto("30.10"))
+            .await
+            .unwrap_err();
+        assert_eq!(err.may_have_been_processed(), processado, "{nome}: {err:?}");
+    }
+}
+
+/// The token is asked for before the payment: when that fails, nothing was
+/// sent, even if the failure looks like one of the payment's (a timeout, an
+/// unreadable answer).
+#[tokio::test]
+async fn a_failed_token_request_sent_no_payment() {
+    let ilegivel = || ResponseTemplate::new(200).set_body_string("<html>proxy</html>");
+    let atrasada = || ResponseTemplate::new(200).set_delay(Duration::from_secs(2));
+    for (nome, resposta) in [("200 ilegível", ilegivel()), ("tempo esgotado", atrasada())] {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/oauth/v2/token"))
+            .respond_with(resposta)
+            .mount(&server)
+            .await;
+        Mock::given(any())
+            .and(path(PAGAMENTO))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(0)
+            .mount(&server)
+            .await;
+        let err = sem_retentativa(&server)
+            .banking()
+            .pagar_boleto(&boleto("30.10"))
+            .await
+            .unwrap_err();
+        assert!(!err.may_have_been_processed(), "{nome}: {err:?}");
+    }
+
+    // Nobody listens: the token request fails to connect.
+    let err = InterClient::builder()
+        .base_url(format!("http://127.0.0.1:{}", porta_fechada()))
+        .credentials(Credentials::new("id", "segredo"))
+        .identity(common::identity())
+        .retry_policy(RetryPolicy::disabled())
+        .build()
+        .unwrap()
+        .banking()
+        .pagar_boleto(&boleto("30.10"))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::TokenTransport(_)), "{err:?}");
+    assert!(!err.may_have_been_processed());
+}
+
+/// A `401` to the payment renews the token; when the renewal fails, the
+/// payment was refused and not sent again.
+#[tokio::test]
+async fn a_failed_renewal_after_a_401_sent_no_payment() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/oauth/v2/token"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(common::token_body("tok", "pagamento-boleto.write")),
+        )
+        .up_to_n_times(1)
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/oauth/v2/token"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("<html>proxy</html>"))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(PAGAMENTO))
+        .respond_with(ResponseTemplate::new(401))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let err = sem_retentativa(&server)
+        .banking()
+        .pagar_boleto(&boleto("30.10"))
+        .await
+        .unwrap_err();
+    assert!(!err.may_have_been_processed(), "{err:?}");
+}
+
+/// With a token at hand, a refused connection is the payment's own, and
+/// it never reached the API.
+#[tokio::test]
+async fn a_refused_connection_sent_no_payment() {
+    let base_url = format!("http://127.0.0.1:{}", porta_fechada());
+    let store = Arc::new(Tokens::default());
+    let client = InterClient::builder()
+        .base_url(base_url)
+        .credentials(Credentials::new("id", "segredo"))
+        .identity(common::identity())
+        .token_store(store.clone())
+        .retry_policy(RetryPolicy::disabled())
+        .build()
+        .unwrap();
+    *store.0.lock().unwrap() = vec![AccessToken::new(
+        "tok",
+        ScopeSet::from(Scope::PagamentoBoletoWrite),
+        Utc::now() + TimeDelta::hours(1),
+    )];
+    let err = client
+        .banking()
+        .pagar_boleto(&boleto("30.10"))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, Error::Transport(source) if source.is_connect()),
+        "{err:?}"
+    );
+    assert!(!err.may_have_been_processed());
+}
+
+fn sem_retentativa(server: &MockServer) -> InterClient {
+    common::builder(server)
+        .retry_policy(RetryPolicy::disabled())
+        .timeout(Duration::from_millis(300))
+        .build()
+        .unwrap()
+}
+
+/// A port nobody listens on.
+fn porta_fechada() -> u16 {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.local_addr().unwrap().port()
+}
+
+#[derive(Debug, Default)]
+struct Tokens(Mutex<Vec<AccessToken>>);
+
+impl TokenStore for Tokens {
+    fn load(&self, _key: &str) -> io::Result<Vec<AccessToken>> {
+        Ok(self.0.lock().unwrap().clone())
+    }
+
+    fn save(&self, _key: &str, tokens: &[AccessToken]) -> io::Result<()> {
+        *self.0.lock().unwrap() = tokens.to_vec();
+        Ok(())
+    }
+}
+
 #[tokio::test]
 async fn lists_payments_with_the_filters() {
     let server = setup("pagamento-boleto.read").await;
@@ -194,13 +372,9 @@ async fn lists_payments_with_the_filters() {
         codigo_transacao: Some(TRANSACAO.to_uppercase()),
         ..FiltroPagamentos::default()
     };
-    assert!(
-        client
-            .banking()
-            .pagamentos(&por_codigo)
-            .await
-            .unwrap()
-            .is_empty()
+    assert_eq!(
+        client.banking().pagamentos(&por_codigo).await.unwrap(),
+        Vec::new()
     );
 }
 

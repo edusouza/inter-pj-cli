@@ -58,6 +58,14 @@ Ao implementar um endpoint novo:
 
 Com uma integração de **sandbox** sua, configure um perfil local (fora do repositório) e rode a CLI normalmente. Nunca cole saídas reais em issues ou PRs sem antes remover dados identificáveis.
 
+## Documentação
+
+O [site de documentação](https://edusouza.github.io/inter-pj-cli/) é construído a partir de `site/` e publicado pelo workflow `pages.yml` a cada mudança na `main`. As páginas escritas à mão ficam em `site/conteudo/`; o CHANGELOG, a arquitetura, o roadmap, esta página, a política de segurança, o README da biblioteca e a ajuda do próprio `inter-pj` viram páginas por meio do crate `sitegen`, e a cópia não é commitada.
+
+- Quando uma mudança altera o que a CLI faz, atualize também as páginas de `site/conteudo/` que falam disso. Os comandos `inter-pj ...` citados nelas são conferidos contra o binário: um comando que deixou de existir reprova o CI.
+- Para ver o site antes de abrir o PR: `cargo build -p inter-pj-cli`, `cargo run -p sitegen` e, dentro de `site/`, `zensical serve` (`zensical build --strict` é o que o CI roda). O passo a passo, e o motivo de cada escolha, estão em [`site/conteudo/por-dentro/desenvolvimento.md`](site/conteudo/por-dentro/desenvolvimento.md).
+- Os exemplos e os dados das páginas seguem a regra número 1: só valores fictícios.
+
 ## Estilo
 
 - Código, comentários e rustdoc em inglês; textos para o usuário (mensagens, ajuda, documentação) em português.
