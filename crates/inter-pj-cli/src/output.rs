@@ -1,13 +1,14 @@
 //! Output helpers: Brazilian formatting and writing to stdout.
 
 use std::borrow::Cow;
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 
 use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, TimeZone};
 use rust_decimal::{Decimal, RoundingStrategy};
 use serde::Serialize;
 
 use crate::error::CliError;
+use crate::tabela::{Separador, Tabela};
 
 /// Formats a monetary value in Brazilian reais: `R$ 1.234,56` / `-R$ 10,00`.
 pub(crate) fn brl(value: Decimal) -> String {
@@ -115,6 +116,18 @@ pub(crate) fn print(text: &str) -> Result<(), CliError> {
             Err(CliError::io("falha ao escrever na saída padrão", err))
         }
         _ => Ok(()),
+    }
+}
+
+/// Prints `tabela` as CSV. A file or a pipe gets the text as sent, for the
+/// spreadsheets and the scripts; a terminal, the text cleaned as in the
+/// text output (a text of the API could carry escape sequences), without
+/// the BOM.
+pub(crate) fn print_csv(tabela: &Tabela, separador: Separador) -> Result<(), CliError> {
+    if io::stdout().is_terminal() {
+        print_raw(&tabela.csv_para_terminal(separador))
+    } else {
+        print_raw(&tabela.csv(separador))
     }
 }
 

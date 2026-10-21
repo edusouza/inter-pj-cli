@@ -211,7 +211,9 @@ async fn server_rejects_client_certificate_from_unknown_ca() {
         .await
         .unwrap_err();
 
-    assert!(matches!(err, Error::Transport(_)), "{err:?}");
+    // The token request comes first, and nothing else is sent.
+    assert!(matches!(err, Error::TokenTransport(_)), "{err:?}");
+    assert!(!err.may_have_been_processed());
     assert_eq!(counters.served.load(Ordering::SeqCst), 0);
     assert_eq!(
         counters.connections.load(Ordering::SeqCst),
@@ -237,7 +239,9 @@ async fn client_rejects_server_certificate_from_untrusted_ca() {
         .await
         .unwrap_err();
 
-    assert!(matches!(err, Error::Transport(_)), "{err:?}");
+    // The token request comes first, and nothing else is sent.
+    assert!(matches!(err, Error::TokenTransport(_)), "{err:?}");
+    assert!(!err.may_have_been_processed());
     assert_eq!(counters.served.load(Ordering::SeqCst), 0);
     assert_eq!(
         counters.connections.load(Ordering::SeqCst),

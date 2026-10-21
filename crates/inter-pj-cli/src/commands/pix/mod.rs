@@ -14,7 +14,7 @@ use rust_decimal::Decimal;
 use super::Context;
 use crate::cli::{Momento, PeriodoPixArgs, PixCommand};
 use crate::confirmacao::Stdio;
-use crate::error::{CliError, resultado_incerto};
+use crate::error::CliError;
 use crate::output::horario_em;
 use crate::tabela::{Celula, Coluna, Tabela};
 
@@ -130,7 +130,7 @@ where
 /// The error of a creation: with an unknown outcome, how to check and
 /// repeat it with the same txid.
 fn incerta(err: InterError, tipo: &'static str, txid: &Txid) -> CliError {
-    if resultado_incerto(&err) {
+    if err.may_have_been_processed() {
         CliError::CobrancaPixIncerta {
             source: err,
             tipo,

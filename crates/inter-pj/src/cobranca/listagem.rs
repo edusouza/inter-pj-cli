@@ -300,7 +300,7 @@ mod tests {
                 ("dataFinal", "2026-09-30".to_owned())
             ]
         );
-        assert!(filtro.ordem().is_empty());
+        assert_eq!(filtro.ordem(), [] as [(&str, std::string::String); 0]);
         filtro.filtrar_data_por = Some(FiltrarDataPor::Pagamento);
         filtro.situacao = Some(SituacaoCobranca::Recebido);
         filtro.pessoa_pagadora = Some(" Cliente Exemplo ".to_owned());
