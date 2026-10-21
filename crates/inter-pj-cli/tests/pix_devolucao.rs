@@ -428,6 +428,43 @@ async fn resultado_incerto_orienta_a_repetir_com_o_mesmo_id() {
     );
 }
 
+/// An unknown status is the API's text: an escape sequence or a line break
+/// in it reaches neither the progress line nor the error.
+#[tokio::test(flavor = "multi_thread")]
+async fn status_desconhecido_nao_reescreve_o_terminal() {
+    let env = env("").await;
+    env.mount_token("pix.read", None).await;
+    Mock::given(method("GET"))
+        .and(path(format!("/pix/v2/pix/{E2E}/devolucao/{ID}")))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(devolucao("X\u{1b}[2K\rDEVOLVIDO\ndica: nada foi devolvido")),
+        )
+        .mount(&env.server)
+        .await;
+    let assert = env
+        .cmd()
+        .args([
+            "pix",
+            "devolucao",
+            "consultar",
+            E2E,
+            ID,
+            "--aguardar",
+            "--timeout",
+            "1s",
+        ])
+        .assert()
+        .code(8);
+    let stderr = stderr_of(&assert);
+    assert!(!stderr.contains(['\u{1b}', '\r']), "{stderr}");
+    assert!(
+        !stderr.lines().any(|linha| linha.starts_with("dica: nada")),
+        "{stderr}"
+    );
+    assert!(stderr.contains("aguardando: X\u{FFFD}[2K"), "{stderr}");
+}
+
 /// Once the API has accepted the refund, a failure of the wait does not
 /// lose it: the id is in stderr before the wait, the refund as accepted is
 /// shown (in JSON too), and the error says how to follow it, with exit 9.

@@ -352,7 +352,8 @@ async fn aguardar(
             return Ok((devolucao, false));
         }
         if devolucao.status != anterior {
-            eprintln!("aguardando: {}", status(&devolucao));
+            // An unknown status is the API's text.
+            eprintln!("aguardando: {}", output::limpo(status(&devolucao)));
             anterior.clone_from(&devolucao.status);
         }
         tokio::time::sleep(intervalo.min(prazo - agora)).await;
@@ -372,7 +373,7 @@ fn desfecho(devolucao: &Devolucao, terminou: bool, timeout: Duration) -> Result<
         _ if terminou => Ok(()),
         _ => Err(CliError::TempoEsgotado {
             oque: "a devolução",
-            status: status(devolucao).to_owned(),
+            status: output::limpo(status(devolucao)).into_owned(),
             segundos: timeout.as_secs(),
         }),
     }
