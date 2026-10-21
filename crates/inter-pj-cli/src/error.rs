@@ -78,6 +78,19 @@ pub(crate) enum CliError {
     /// `cobranca emitir --aguardar`: the API could not issue the charge.
     #[error("a cobrança não foi emitida: {situacao}")]
     CobrancaNaoEmitida { situacao: String },
+    /// `cobranca cancelar`, `editar` or `pagar`, which have no idempotency
+    /// key: the request may have been processed (timeout, `5xx`, an
+    /// unreadable answer after sending).
+    #[error("{source}")]
+    AlteracaoIncerta {
+        source: InterError,
+        /// What may have happened: `a cobrança pode ter sido cancelada`.
+        situacao: &'static str,
+        /// Command that shows the charge, to run before trying again.
+        consulta: String,
+        /// Why the check may not show it yet.
+        demora: Option<&'static str>,
+    },
     /// `cobranca editar`, or `cobranca edicao --aguardar`: the change failed.
     #[error("a alteração da cobrança não foi feita: {motivo}")]
     EdicaoNaoFeita { motivo: String },
@@ -162,6 +175,7 @@ impl CliError {
             Self::ResultadoIncerto { .. }
             | Self::PagamentoIncerto { .. }
             | Self::EmissaoIncerta { .. }
+            | Self::AlteracaoIncerta { .. }
             | Self::EmissaoSemDesfecho {
                 source: Some(_), ..
             } => exit::UNCERTAIN,
@@ -228,6 +242,19 @@ impl CliError {
                     format!("confira antes de tentar de novo: {consulta}"),
                     "a consulta precisa da permissão de leitura das cobranças (boleto-cobranca.read), e uma lista vazia logo depois do erro não prova que nada foi emitido: a emissão termina depois da resposta; espere alguns minutos e confira o valor, o vencimento e o pagador das cobranças encontradas".to_owned(),
                 ];
+            }
+            Self::AlteracaoIncerta {
+                situacao,
+                consulta,
+                demora,
+                ..
+            } => {
+                let mut dicas = vec![
+                    (*situacao).to_owned(),
+                    format!("confira antes de tentar de novo: {consulta}"),
+                ];
+                dicas.extend(demora.map(str::to_owned));
+                return dicas;
             }
             Self::EmissaoSemDesfecho {
                 consulta, source, ..

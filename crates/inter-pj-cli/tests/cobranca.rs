@@ -1254,6 +1254,71 @@ async fn as_sugestoes_das_alteracoes_sao_da_mesma_conta() {
     }
 }
 
+/// `cancelar`, `editar` and `pagar` have no idempotency key: an answer lost
+/// after the request (here, a 503) may hide an operation done, so the
+/// result is uncertain (9), with the command that checks it. A refusal (4xx)
+/// stays 5 and the rate limit, which surely did nothing, 6.
+#[tokio::test(flavor = "multi_thread")]
+async fn alteracao_de_resultado_incerto_sai_com_9() {
+    let operacoes: [(&str, &[&str], &str, &str); 3] = [
+        (
+            "POST",
+            &["cancelar", CODIGO, "--motivo", "Pedido cancelado", "--sim"],
+            "/cancelar",
+            "dica: a cobrança pode ter sido cancelada",
+        ),
+        (
+            "PATCH",
+            &["editar", CODIGO, "--valor", "200,00", "--sim"],
+            "",
+            "dica: a alteração pode ter sido pedida, e repetir o comando pediria outra",
+        ),
+        (
+            "POST",
+            &["pagar", CODIGO, "--com", "pix"],
+            "/pagar",
+            "dica: a cobrança pode ter sido paga",
+        ),
+    ];
+    for (metodo, args, sufixo, situacao) in operacoes {
+        for (status, codigo_de_saida) in [(503, 9), (400, 5), (429, 6)] {
+            let env = env().await;
+            env.mount_token("boleto-cobranca.write boleto-cobranca.read", None)
+                .await;
+            Mock::given(method("GET"))
+                .and(path(format!("/cobranca/v3/cobrancas/{CODIGO}")))
+                .respond_with(ResponseTemplate::new(200).set_body_json(cobranca(true)))
+                .mount(&env.server)
+                .await;
+            Mock::given(method(metodo))
+                .and(path(format!("/cobranca/v3/cobrancas/{CODIGO}{sufixo}")))
+                .respond_with(ResponseTemplate::new(status))
+                .expect(1)
+                .mount(&env.server)
+                .await;
+            let assert = env
+                .cmd()
+                .args(["-vv", "--sem-retentativa", "cobranca"])
+                .args(args)
+                .assert()
+                .code(codigo_de_saida);
+            let stderr = stderr_of(&assert);
+            for segredo in [CLIENT_SECRET, TOKEN] {
+                assert!(!stderr.contains(segredo), "{segredo:?} vazou:\n{stderr}");
+            }
+            let conferir = format!(
+                "dica: confira antes de tentar de novo: inter-pj cobranca consultar {CODIGO}"
+            );
+            if codigo_de_saida == 9 {
+                assert!(stderr.contains(situacao), "{args:?}\n{stderr}");
+                assert!(stderr.contains(&conferir), "{args:?}\n{stderr}");
+            } else {
+                assert!(!stderr.contains(&conferir), "{args:?} {status}\n{stderr}");
+            }
+        }
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn cancelamento_sem_confirmacao_ou_motivo_nao_chama_a_api() {
     let env = env().await;

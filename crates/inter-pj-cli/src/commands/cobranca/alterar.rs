@@ -52,7 +52,11 @@ pub(super) async fn cancelar(
     );
     confirmar(terminal, args.sim, "Cancelar a cobrança?")?;
 
-    client.cobranca().cancelar(codigo, &args.motivo).await?;
+    client
+        .cobranca()
+        .cancelar(codigo, &args.motivo)
+        .await
+        .map_err(|err| incerta(err, "a cobrança pode ter sido cancelada", codigo, None))?;
     match context.formato() {
         Formato::Json => output::print_json(&json!({
             "codigoSolicitacao": codigo,
@@ -113,7 +117,18 @@ async fn editar_com(
     );
     confirmar(terminal, args.sim, "Alterar a cobrança?")?;
 
-    let solicitacao = client.cobranca().editar(codigo, &edicao).await?;
+    let solicitacao = client
+        .cobranca()
+        .editar(codigo, &edicao)
+        .await
+        .map_err(|err| {
+            incerta(
+                err,
+                "a alteração pode ter sido pedida, e repetir o comando pediria outra",
+                codigo,
+                Some("uma alteração feita pode levar até 30 minutos para aparecer na consulta"),
+            )
+        })?;
     let codigo_edicao = solicitacao
         .codigo_edicao
         .as_deref()
@@ -192,7 +207,11 @@ pub(super) async fn pagar(context: &Context, args: &CobrancaPagarArgs) -> Result
         FormaArg::Pix => (PagarCom::Pix, "o Pix"),
     };
     let codigo = args.codigo.trim();
-    client.cobranca().pagar_no_sandbox(codigo, com).await?;
+    client
+        .cobranca()
+        .pagar_no_sandbox(codigo, com)
+        .await
+        .map_err(|err| incerta(err, "a cobrança pode ter sido paga", codigo, None))?;
     match context.formato() {
         Formato::Json => output::print_json(&json!({
             "codigoSolicitacao": codigo,
@@ -205,6 +224,26 @@ pub(super) async fn pagar(context: &Context, args: &CobrancaPagarArgs) -> Result
             chamada(),
             argumento(codigo)
         )),
+    }
+}
+
+/// The error of a request without idempotency key: uncertain (9) when it
+/// may have been processed, with the command that shows the charge.
+fn incerta(
+    err: InterError,
+    situacao: &'static str,
+    codigo: &str,
+    demora: Option<&'static str>,
+) -> CliError {
+    if err.may_have_been_processed() {
+        CliError::AlteracaoIncerta {
+            source: err,
+            situacao,
+            consulta: format!("{} cobranca consultar {}", chamada(), argumento(codigo)),
+            demora,
+        }
+    } else {
+        err.into()
     }
 }
 

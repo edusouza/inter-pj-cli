@@ -8,7 +8,7 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ### Adicionado
 
-- `inter-pj cobranca cancelar <codigo> --motivo TEXTO`: cancela uma cobrança depois de consultá-la, mostrá-la e pedir confirmação; cobranças pagas, canceladas ou expiradas são recusadas sem nenhuma alteração, e, sem terminal nem `--sim`, nenhuma requisição é feita (#30).
+- `inter-pj cobranca cancelar <codigo> --motivo TEXTO`: cancela uma cobrança depois de consultá-la, mostrá-la e pedir confirmação; cobranças pagas, canceladas ou expiradas são recusadas sem nenhuma alteração, e, sem terminal nem `--sim`, nenhuma requisição é feita. Um resultado incerto (tempo esgotado, erro 5xx) sai com o código 9, como em `editar` e `pagar`, com o comando que confere a cobrança (#30).
 - `inter-pj cobranca editar <codigo> [--valor] [--vencimento]`: altera o valor e o vencimento, os únicos campos que a API aceita, mostrando o antes e o depois; com `--aguardar`, acompanha a alteração até o fim, saindo com 5 se ela não foi feita e 8 se o tempo acabou (#30).
 - `inter-pj cobranca edicao <codigo-edicao> [--aguardar]`: mostra em que pé está uma alteração (#30).
 - `inter-pj cobranca pagar <codigo> --com boleto|pix`: paga uma cobrança no sandbox, para testar o fluxo completo; em produção, é recusado antes de qualquer requisição (#32).
