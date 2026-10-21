@@ -786,7 +786,7 @@ $ inter-pj pix cobv pagar cobvexemplo0000000000000000001 --valor 153,00     # ou
 $ inter-pj pix sandbox pagar-qrcode --copia-e-cola '00020101021226...6304ABCD'  # como um cliente pagaria o QR Code
 ```
 
-Sem `--valor`, `pagar` usa o valor da cobrança, e `pagar-qrcode`, o do código, conferido (CRC16) antes do envio. Em produção, quem paga é o cliente: os três comandos são recusados antes de qualquer requisição. Pagar precisa do escopo `pix.write` (e de `cob.read` ou `cobv.read` para buscar o valor), e a API aceita até 10 pagamentos por minuto.
+Sem `--valor`, `pagar` usa o valor da cobrança, e `pagar-qrcode`, o do código, conferido (CRC16) antes do envio. Com `--json`, saem o `endToEndId` e o `valor` pedido, como número: a resposta da API traz só o `endToEndId`. Em produção, quem paga é o cliente: os três comandos são recusados antes de qualquer requisição. Pagar precisa do escopo `pix.write` (e de `cob.read` ou `cobv.read` para buscar o valor), e a API aceita até 10 pagamentos por minuto.
 
 ### Pix recebidos e devoluções
 

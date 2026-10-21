@@ -77,7 +77,7 @@ async fn paga_uma_cobranca_com_vencimento_com_outro_valor() {
         .assert()
         .success();
     let json: Value = serde_json::from_str(&stdout_of(&assert)).unwrap();
-    assert_eq!(json, json!({"endToEndId": E2E, "valor": "160.50"}));
+    assert_eq!(json, json!({"endToEndId": E2E, "valor": 160.5}));
 }
 
 #[tokio::test(flavor = "multi_thread")]

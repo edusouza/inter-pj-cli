@@ -120,7 +120,7 @@ fn mostrar(
     match context.formato() {
         Formato::Json => output::print_json(&json!({
             "endToEndId": e2e,
-            "valor": format!("{valor:.2}"),
+            "valor": output::valor_json(valor),
         })),
         // `commands::run` refuses csv for these commands.
         Formato::Texto | Formato::Csv => {
