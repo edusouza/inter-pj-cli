@@ -141,11 +141,19 @@ impl RetryMode {
         let transient = match self {
             Self::Idempotent => err.is_connect() || err.is_timeout(),
             // A timeout may strike after the server processed the request.
-            Self::WhenNotProcessed => err.is_connect(),
+            Self::WhenNotProcessed => never_sent(err),
             Self::Never => false,
         };
         transient && !is_tls_failure(err)
     }
+}
+
+/// Whether a transport error surely struck before the request reached the
+/// API: the connection could not be established. A timeout, or a connection
+/// dropped after the request was written, may strike after the API processed
+/// it.
+pub(crate) fn never_sent(err: &reqwest::Error) -> bool {
+    err.is_connect()
 }
 
 /// The TLS stack reports handshake failures as `io::ErrorKind::InvalidData`,

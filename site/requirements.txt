@@ -1,0 +1,2 @@
+# Só para construir o site; nada disto entra no binário.
+zensical==0.0.67

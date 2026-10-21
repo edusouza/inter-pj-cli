@@ -211,6 +211,49 @@ async fn arquivo_invalido_nao_chama_a_api() {
     );
 }
 
+/// Mistakes of usage say what to do in Portuguese, exit with 2 and send
+/// nothing: an option of the DARF with the file, no origin, an option
+/// without the others, --sim with --simular.
+#[tokio::test(flavor = "multi_thread")]
+async fn erros_de_uso_em_portugues() {
+    let env = TestEnv::new().await;
+    env.write_config("");
+    nothing_is_sent(&env).await;
+    let arquivo = env.path("darf.json");
+    std::fs::write(&arquivo, corpo().to_string()).unwrap();
+    let arquivo = arquivo.display().to_string();
+    for (args, esperado) in [
+        (
+            vec!["--arquivo", arquivo.as_str(), "--multa", "1", "--sim"],
+            "erro: com --arquivo, o DARF vem todo do arquivo: --multa não vale com ele; ponha o campo valorMulta no arquivo",
+        ),
+        (
+            vec!["--sim"],
+            "erro: informe o DARF por --arquivo ou pelas opções",
+        ),
+        (
+            vec!["--codigo-receita", "0220", "--sim"],
+            "erro: faltam opções do DARF: --contribuinte, --nome-empresa",
+        ),
+        (
+            vec!["--arquivo", arquivo.as_str(), "--sim", "--simular"],
+            "erro: não é possível usar '--sim' com '--simular'",
+        ),
+    ] {
+        let assert = env
+            .cmd()
+            .args(["pagamento", "darf", "pagar"])
+            .args(&args)
+            .assert()
+            .code(2);
+        let stderr = stderr_of(&assert);
+        assert!(stderr.contains(esperado), "{args:?}: {stderr}");
+        for ingles in ["error", "Usage", "required", "provided", "cannot be used"] {
+            assert!(!stderr.contains(ingles), "{args:?}: {stderr}");
+        }
+    }
+}
+
 fn darfs() -> Value {
     json!([{
         "codigoSolicitacao": SOLICITACAO,

@@ -119,6 +119,7 @@ impl InterClient {
         ];
 
         // Asking for a token has no side effects, so it is always safe to retry.
+        // Its failures say that the operation was not sent.
         let response = self
             .send(&operation, RetryMode::Idempotent, || {
                 self.inner
@@ -127,9 +128,10 @@ impl InterClient {
                     .header(ACCEPT, "application/json")
                     .form(&form)
             })
-            .await?;
+            .await
+            .map_err(Error::of_token_request)?;
         let status = response.status();
-        let body = response.bytes().await?;
+        let body = response.bytes().await.map_err(Error::TokenTransport)?;
 
         if !status.is_success() {
             return Err(Error::Auth(Box::new(ApiError::new(
