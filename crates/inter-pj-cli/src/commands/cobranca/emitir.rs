@@ -16,7 +16,7 @@ use crate::arquivo;
 use crate::cli::{CobrancaEmitirArgs, FormaArg, Formato, TaxaOuValor};
 use crate::commands::{Context, hoje, simulacao};
 use crate::confirmacao::{Terminal, confirmar, descrever_ambiente};
-use crate::error::{CliError, resultado_incerto};
+use crate::error::CliError;
 use crate::output;
 use crate::valor::por_extenso;
 
@@ -76,7 +76,7 @@ async fn emitir_com(
     };
     confirmar(terminal, args.sim, "Emitir a cobrança?")?;
     let solicitacao = client.cobranca().emitir(&cobranca).await.map_err(|err| {
-        if resultado_incerto(&err) {
+        if err.may_have_been_processed() {
             CliError::EmissaoIncerta {
                 source: err,
                 consulta: procurar(&cobranca),
