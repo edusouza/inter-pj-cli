@@ -33,6 +33,7 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 ### Alterado
 
 - Os códigos de saída 5 e 8 valem também para `pix devolucao solicitar`, `pix devolucao consultar` e `pix lote-cobv consultar` com `--aguardar` (devolução não realizada ou cobrança do lote negada; tempo esgotado).
+- Os arquivos JSON de `--arquivo` (cobranças, DARF, lotes de pagamentos e de cobranças) recusam um campo repetido no mesmo objeto, com a linha, em vez de ficar com o último em silêncio (#483).
 - Na saída em texto, as tabelas e os blocos de rótulo e valor trocam por `�` também os caracteres que invertem ou escondem texto (controles bidirecionais, de largura zero, o BOM e os separadores de linha e de parágrafo), e o filtro vale para os títulos e os rótulos, que também podem vir da API: um txid ou o nome de uma informação adicional com uma quebra de linha não forja mais uma linha em `pix cob consultar` (#439).
 
 ## [0.5.0] - 2026-09-24

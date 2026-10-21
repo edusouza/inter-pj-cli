@@ -143,6 +143,38 @@ async fn cria_a_partir_de_um_json_com_a_descricao_do_arquivo() {
     assert_eq!(json, json!({"id": 43}));
 }
 
+/// A key twice in the same object is refused: the parser would keep the
+/// last one in silence, here the amount of the second charge.
+#[tokio::test(flavor = "multi_thread")]
+async fn chave_repetida_no_arquivo_e_recusada() {
+    let env = env().await;
+    nothing_is_sent(&env).await;
+    let caminho = env.path("lote.json");
+    std::fs::write(
+        &caminho,
+        r#"{"descricao": "Mensalidades", "cobsv": [
+  {"calendario": {"dataDeVencimento": "2099-10-20"}, "txid": "mensalidade209910cliente0001",
+   "devedor": {"cpf": "12345678909", "nome": "Fulano"}, "valor": {"original": "10.00"}, "chave": "pix@empresa.example"},
+  {"calendario": {"dataDeVencimento": "2099-10-20"}, "txid": "mensalidade209910cliente0002",
+   "devedor": {"cpf": "12345678909", "nome": "Fulano"}, "valor": {"original": "10.00", "original": "1000.00"}, "chave": "pix@empresa.example"}
+]}"#,
+    )
+    .unwrap();
+    let assert = env
+        .cmd()
+        .args(["pix", "lote-cobv", "criar", "42", "--sim", "--arquivo"])
+        .arg(&caminho)
+        .assert()
+        .code(2);
+    assert!(
+        stderr_of(&assert).contains(
+            "lote.json: o campo \"original\" aparece duas vezes no mesmo objeto, na linha 5"
+        ),
+        "{}",
+        stderr_of(&assert)
+    );
+}
+
 /// #38's acceptance criterion: a file with an invalid charge is refused
 /// whole, with the line and the field of each problem.
 #[tokio::test(flavor = "multi_thread")]
