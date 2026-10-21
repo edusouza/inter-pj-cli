@@ -84,6 +84,11 @@ pub(crate) enum CliError {
     /// `pix consultar --aguardar`: the payment ended without being paid.
     #[error("o Pix terminou sem ser pago: {status}")]
     PixNaoPago { status: String },
+    /// `--qrcode` or `--qrcode-png` of a charge without a usable Pix: still
+    /// being issued, issued without a Pix key, or a "copia e cola" that does
+    /// not check. The query worked, but what was asked cannot be made.
+    #[error("{0}")]
+    SemQrCode(String),
     /// `pagamento lote consultar --aguardar`, or `enviar`: some payments of
     /// the batch were not made, or the API says it had errors.
     #[error("o lote foi processado, mas {detalhe}")]
@@ -128,7 +133,8 @@ impl CliError {
             Self::Cancelado => exit::CANCELLED,
             Self::PixNaoPago { .. }
             | Self::LoteComErro { .. }
-            | Self::CobrancaNaoEmitida { .. } => exit::REJECTED,
+            | Self::CobrancaNaoEmitida { .. }
+            | Self::SemQrCode(_) => exit::REJECTED,
             Self::TempoEsgotado { .. } => exit::WAIT_TIMEOUT,
             // Built only when the request may have been processed: a script
             // must not repeat them blindly, unlike a `429` or a refused

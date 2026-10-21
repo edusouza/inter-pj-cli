@@ -197,33 +197,52 @@ async fn png_pode_ir_para_a_saida_padrao() {
     assert!(assert.get_output().stdout.starts_with(b"\x89PNG\r\n\x1a\n"));
 }
 
+/// Without a Pix that makes a QR Code, `--qrcode` and `--qrcode-png` fail
+/// alike (5), before showing the charge or writing the image: a script
+/// must not read the charge and miss the QR Code.
 #[tokio::test(flavor = "multi_thread")]
 async fn cobranca_sem_pix_nao_tem_qr_code() {
-    let env = env().await;
-    mount_cobranca(&env, cobranca(false), 2).await;
-    let assert = env
-        .cmd()
-        .args(["cobranca", "consultar", CODIGO, "--qrcode"])
-        .assert()
-        .success();
-    assert!(
-        stderr_of(&assert).contains("aviso: a cobrança não tem Pix copia e cola"),
-        "{}",
-        stderr_of(&assert)
-    );
-    let arquivo = env.path("pix.png");
-    let assert = env
-        .cmd()
-        .args(["cobranca", "consultar", CODIGO, "--qrcode-png"])
-        .arg(&arquivo)
-        .assert()
-        .code(2);
-    assert!(
-        stderr_of(&assert).contains("a cobrança não tem Pix copia e cola"),
-        "{}",
-        stderr_of(&assert)
-    );
-    assert!(!arquivo.exists());
+    let mut em_processamento = cobranca(false);
+    em_processamento["cobranca"]["situacao"] = json!("EM_PROCESSAMENTO");
+    let mut crc_errado = cobranca(true);
+    crc_errado["pix"]["pixCopiaECola"] = json!(COPIA_E_COLA.replace("1D3D", "1D3E"));
+    for (corpo, motivo) in [
+        (
+            cobranca(false),
+            "a cobrança não tem Pix copia e cola: a conta não tinha chave Pix",
+        ),
+        (
+            em_processamento,
+            "a cobrança não tem Pix copia e cola: a cobrança ainda está sendo emitida",
+        ),
+        (crc_errado, "Pix copia e cola inválido"),
+    ] {
+        let env = env().await;
+        mount_cobranca(&env, corpo, 4).await;
+        let arquivo = env.path("pix.png");
+        let arquivo = arquivo.to_str().unwrap();
+        for extra in [
+            &["--qrcode"][..],
+            &["--qrcode-png", arquivo],
+            &["--qrcode-png", arquivo, "--json"],
+            &["--qrcode-png", "-"],
+        ] {
+            let assert = env
+                .cmd()
+                .args(["cobranca", "consultar", CODIGO])
+                .args(extra)
+                .assert()
+                .code(5);
+            assert_eq!(stdout_of(&assert), "", "{extra:?}");
+            let stderr = stderr_of(&assert);
+            assert!(
+                stderr.contains(&format!("erro: {motivo}")),
+                "{extra:?}\n{stderr}"
+            );
+            assert!(!stderr.contains("aviso"), "{extra:?}\n{stderr}");
+        }
+        assert!(!env.path("pix.png").exists());
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -662,6 +681,67 @@ async fn emite_o_modelo_e_aguarda_o_boleto_e_o_pix() {
         stderr_of(&assert)
     );
     assert!(fs::read(&png).unwrap().starts_with(b"\x89PNG\r\n\x1a\n"));
+}
+
+/// A charge issued without a Pix (the account had no Pix key) has no QR
+/// Code: after the issue, that is a warning, and not an error a script
+/// would read as "not issued" and issue the charge again.
+#[tokio::test(flavor = "multi_thread")]
+async fn emitida_sem_pix_avisa_e_termina_bem() {
+    let env = env().await;
+    let modelo = stdout_of(&env.cmd().args(["cobranca", "modelo"]).assert().success());
+    let arquivo = env.path("cobranca.json");
+    fs::write(&arquivo, &modelo).unwrap();
+    env.mount_token("boleto-cobranca.write boleto-cobranca.read", None)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/cobranca/v3/cobrancas"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"codigoSolicitacao": CODIGO})),
+        )
+        .expect(2)
+        .mount(&env.server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/cobranca/v3/cobrancas/{CODIGO}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(cobranca(false)))
+        .expect(2)
+        .mount(&env.server)
+        .await;
+
+    let png = env.path("pix.png");
+    let assert = env
+        .cmd()
+        .args(["cobranca", "emitir", "--arquivo"])
+        .arg(&arquivo)
+        .args(["--sim", "--aguardar", "--qrcode-png"])
+        .arg(&png)
+        .assert()
+        .success();
+    assert!(stdout_of(&assert).starts_with("Cobrança NF-123"));
+    let stderr = stderr_of(&assert);
+    assert!(
+        stderr.contains(
+            "aviso: a cobrança foi emitida, mas sem o QR Code: a cobrança não tem Pix copia e cola"
+        ),
+        "{stderr}"
+    );
+    assert!(!png.exists());
+
+    // With the image on the standard output, the charge goes to stderr.
+    let assert = env
+        .cmd()
+        .args(["cobranca", "emitir", "--arquivo"])
+        .arg(&arquivo)
+        .args(["--sim", "--aguardar", "--qrcode-png", "-"])
+        .assert()
+        .success();
+    assert_eq!(stdout_of(&assert), "");
+    assert!(
+        stderr_of(&assert).contains("Cobrança NF-123"),
+        "{}",
+        stderr_of(&assert)
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

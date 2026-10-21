@@ -10,7 +10,7 @@ use inter_pj::cobranca::{
 };
 use inter_pj::{Environment, Error as InterError, InterClient, endpoint};
 
-use super::consultar::{OpcoesQr, mostrar};
+use super::consultar::{OpcoesQr, mostrar, mostrar_emitida};
 use super::{descrever_situacao, percentual};
 use crate::arquivo;
 use crate::cli::{CobrancaEmitirArgs, FormaArg, Formato, TaxaOuValor};
@@ -115,7 +115,7 @@ async fn emitir_com(
         Some(situacao @ SituacaoCobranca::FalhaEmissao) => CliError::CobrancaNaoEmitida {
             situacao: descrever_situacao(situacao),
         },
-        _ => return mostrar(context, &settings, &detalhe, &opcoes),
+        _ => return mostrar_emitida(context, &settings, &detalhe, &opcoes),
     };
     // No QR Code yet, and nothing for an image on the standard output.
     if !opcoes.png_no_stdout() {
