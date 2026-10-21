@@ -17,14 +17,14 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 - `inter-pj cobranca modelo`: imprime um arquivo de exemplo para `cobranca emitir --arquivo`, com dados fictícios e vencimento em 30 dias (#28).
 - `inter-pj cobranca listar`: cobranças de um período por vencimento (padrão), emissão ou pagamento, com filtros de situação, pagador, CPF/CNPJ, seu número e tipo, ordem e todas as páginas (ou `--pagina`), em texto com totais, JSON ou CSV com os nomes da API (#29).
 - `inter-pj cobranca sumario`: quantidade e valor das cobranças do período por situação, com total, em texto, JSON ou CSV (#29).
-- `inter-pj cobranca consultar <codigo>`: situação, valores, encargos, pagador, boleto (linha digitável formatada e código de barras) e Pix de uma cobrança, em texto ou JSON; `--qrcode` desenha o QR Code do Pix no terminal (preto no branco em qualquer tema; sem cores com `NO_COLOR` ou saída redirecionada) e `--qrcode-png` o grava em PNG, depois de conferir o CRC do copia e cola (#29, #31).
+- `inter-pj cobranca consultar <codigo>`: situação, valores, encargos, pagador, boleto (linha digitável formatada e código de barras) e Pix de uma cobrança, em texto ou JSON; `--qrcode` desenha o QR Code do Pix no terminal (preto no branco em qualquer tema; sem cores com `NO_COLOR` ou saída redirecionada) e `--qrcode-png` o grava em PNG, depois de conferir o CRC do copia e cola; sem um Pix que dê o QR Code, os dois terminam com o código 5, sem mostrar a cobrança (#29, #31).
 - `inter-pj cobranca pdf <codigo> [--saida ARQUIVO|-] [--sobrescrever]`: PDF da cobrança com o boleto e o QR Code, gravado com permissão 600 (#29).
 - Biblioteca: `InterClient::cobranca`, com `Cobranca::emitir` (cobrança com boleto e Pix, conferida localmente: seu número, valor, pagador com CPF/CNPJ, UF e CEP, desconto, multa, mora, mensagem, formas de recebimento e nota fiscal, cuja chave de acesso confere número e série; o tipo de pessoa vem do documento) e `Cobranca::consultar` (situação, valores, encargos, boleto, Pix e nota fiscal) (#28).
 - Biblioteca: `Cobranca::listar` e `listar_todas` (período por vencimento, emissão ou pagamento, situação, pagador, seu número, tipo e ordenação, com páginas de até 1.000), `sumario` (quantidade e valor por situação), `pdf`, `cancelar` (com motivo), `editar` (vencimento e valor) com `consultar_edicao`, e `pagar_no_sandbox`, recusado fora do sandbox sem nenhuma requisição (#29, #30, #32).
 
 ### Alterado
 
-- Os códigos de saída 5 e 8 valem também para `cobranca emitir`, `cobranca editar` e `cobranca edicao` com `--aguardar` (cobrança não emitida ou alteração não feita; tempo esgotado).
+- Os códigos de saída 5 e 8 valem também para `cobranca emitir`, `cobranca editar` e `cobranca edicao` com `--aguardar` (cobrança não emitida ou alteração não feita; tempo esgotado), e o 9, para uma consulta de `cobranca emitir --aguardar` que falha de um jeito que esperar não resolve. Em `cobranca emitir`, os erros 8 e 9 trazem o código da cobrança solicitada e o comando que a acompanha; `429`, `5xx` e falhas de rede durante a espera só adiam a próxima consulta.
 
 ## [0.4.0] - 2026-09-23
 

@@ -8,8 +8,8 @@ use std::fs;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
-use chrono::{Days, Local};
-use common::{TestEnv, stderr_of, stdout_of};
+use chrono::Days;
+use common::{CLIENT_SECRET, TOKEN, TestEnv, hoje, stderr_of, stdout_of};
 use serde_json::{Value, json};
 use wiremock::matchers::{
     any, body_json, body_partial_json, method, path, query_param, query_param_is_missing,
@@ -197,33 +197,52 @@ async fn png_pode_ir_para_a_saida_padrao() {
     assert!(assert.get_output().stdout.starts_with(b"\x89PNG\r\n\x1a\n"));
 }
 
+/// Without a Pix that makes a QR Code, `--qrcode` and `--qrcode-png` fail
+/// alike (5), before showing the charge or writing the image: a script
+/// must not read the charge and miss the QR Code.
 #[tokio::test(flavor = "multi_thread")]
 async fn cobranca_sem_pix_nao_tem_qr_code() {
-    let env = env().await;
-    mount_cobranca(&env, cobranca(false), 2).await;
-    let assert = env
-        .cmd()
-        .args(["cobranca", "consultar", CODIGO, "--qrcode"])
-        .assert()
-        .success();
-    assert!(
-        stderr_of(&assert).contains("aviso: a cobrança não tem Pix copia e cola"),
-        "{}",
-        stderr_of(&assert)
-    );
-    let arquivo = env.path("pix.png");
-    let assert = env
-        .cmd()
-        .args(["cobranca", "consultar", CODIGO, "--qrcode-png"])
-        .arg(&arquivo)
-        .assert()
-        .code(2);
-    assert!(
-        stderr_of(&assert).contains("a cobrança não tem Pix copia e cola"),
-        "{}",
-        stderr_of(&assert)
-    );
-    assert!(!arquivo.exists());
+    let mut em_processamento = cobranca(false);
+    em_processamento["cobranca"]["situacao"] = json!("EM_PROCESSAMENTO");
+    let mut crc_errado = cobranca(true);
+    crc_errado["pix"]["pixCopiaECola"] = json!(COPIA_E_COLA.replace("1D3D", "1D3E"));
+    for (corpo, motivo) in [
+        (
+            cobranca(false),
+            "a cobrança não tem Pix copia e cola: a conta não tinha chave Pix",
+        ),
+        (
+            em_processamento,
+            "a cobrança não tem Pix copia e cola: a cobrança ainda está sendo emitida",
+        ),
+        (crc_errado, "Pix copia e cola inválido"),
+    ] {
+        let env = env().await;
+        mount_cobranca(&env, corpo, 4).await;
+        let arquivo = env.path("pix.png");
+        let arquivo = arquivo.to_str().unwrap();
+        for extra in [
+            &["--qrcode"][..],
+            &["--qrcode-png", arquivo],
+            &["--qrcode-png", arquivo, "--json"],
+            &["--qrcode-png", "-"],
+        ] {
+            let assert = env
+                .cmd()
+                .args(["cobranca", "consultar", CODIGO])
+                .args(extra)
+                .assert()
+                .code(5);
+            assert_eq!(stdout_of(&assert), "", "{extra:?}");
+            let stderr = stderr_of(&assert);
+            assert!(
+                stderr.contains(&format!("erro: {motivo}")),
+                "{extra:?}\n{stderr}"
+            );
+            assert!(!stderr.contains("aviso"), "{extra:?}\n{stderr}");
+        }
+        assert!(!env.path("pix.png").exists());
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -492,9 +511,9 @@ async fn filtros_invalidos_nao_chamam_a_api() {
 
 // --- emitir -------------------------------------------------------------------------
 
+/// `dias` after today in Brasília, as the CLI counts.
 fn daqui_a(dias: u64) -> String {
-    Local::now()
-        .date_naive()
+    hoje()
         .checked_add_days(Days::new(dias))
         .unwrap()
         .format("%Y-%m-%d")
@@ -664,6 +683,234 @@ async fn emite_o_modelo_e_aguarda_o_boleto_e_o_pix() {
     assert!(fs::read(&png).unwrap().starts_with(b"\x89PNG\r\n\x1a\n"));
 }
 
+/// A charge issued without a Pix (the account had no Pix key) has no QR
+/// Code: after the issue, that is a warning, and not an error a script
+/// would read as "not issued" and issue the charge again.
+#[tokio::test(flavor = "multi_thread")]
+async fn emitida_sem_pix_avisa_e_termina_bem() {
+    let env = env().await;
+    let modelo = stdout_of(&env.cmd().args(["cobranca", "modelo"]).assert().success());
+    let arquivo = env.path("cobranca.json");
+    fs::write(&arquivo, &modelo).unwrap();
+    env.mount_token("boleto-cobranca.write boleto-cobranca.read", None)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/cobranca/v3/cobrancas"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"codigoSolicitacao": CODIGO})),
+        )
+        .expect(2)
+        .mount(&env.server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/cobranca/v3/cobrancas/{CODIGO}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(cobranca(false)))
+        .expect(2)
+        .mount(&env.server)
+        .await;
+
+    let png = env.path("pix.png");
+    let assert = env
+        .cmd()
+        .args(["cobranca", "emitir", "--arquivo"])
+        .arg(&arquivo)
+        .args(["--sim", "--aguardar", "--qrcode-png"])
+        .arg(&png)
+        .assert()
+        .success();
+    assert!(stdout_of(&assert).starts_with("Cobrança NF-123"));
+    let stderr = stderr_of(&assert);
+    assert!(
+        stderr.contains(
+            "aviso: a cobrança foi emitida, mas sem o QR Code: a cobrança não tem Pix copia e cola"
+        ),
+        "{stderr}"
+    );
+    assert!(!png.exists());
+
+    // With the image on the standard output, the charge goes to stderr.
+    let assert = env
+        .cmd()
+        .args(["cobranca", "emitir", "--arquivo"])
+        .arg(&arquivo)
+        .args(["--sim", "--aguardar", "--qrcode-png", "-"])
+        .assert()
+        .success();
+    assert_eq!(stdout_of(&assert), "");
+    assert!(
+        stderr_of(&assert).contains("Cobrança NF-123"),
+        "{}",
+        stderr_of(&assert)
+    );
+}
+
+/// Once the charge is requested, its code and how to follow it go to
+/// stderr: with the image on the standard output, nothing else would say
+/// which charge it was when the wait ends badly.
+#[tokio::test(flavor = "multi_thread")]
+async fn o_codigo_da_cobranca_solicitada_nunca_se_perde() {
+    let vencimento = daqui_a(30);
+    for (situacao, codigo_de_saida, erro) in [
+        (
+            "EM_PROCESSAMENTO",
+            8,
+            "mas o tempo de espera acabou (1 s) com ela ainda em processamento",
+        ),
+        (
+            "FALHA_EMISSAO",
+            5,
+            "a cobrança não foi emitida: falha na emissão",
+        ),
+    ] {
+        let env = env().await;
+        env.mount_token("boleto-cobranca.write boleto-cobranca.read", None)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/cobranca/v3/cobrancas"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(json!({"codigoSolicitacao": CODIGO})),
+            )
+            .expect(1)
+            .mount(&env.server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(format!("/cobranca/v3/cobrancas/{CODIGO}")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "cobranca": {"codigoSolicitacao": CODIGO, "situacao": situacao}
+            })))
+            .mount(&env.server)
+            .await;
+        let assert = env
+            .cmd()
+            .args(opcoes(&vencimento))
+            .args([
+                "--sim",
+                "--aguardar",
+                "--timeout",
+                "1s",
+                "--qrcode-png",
+                "-",
+            ])
+            .assert()
+            .code(codigo_de_saida);
+        assert_eq!(stdout_of(&assert), "", "{situacao}");
+        let stderr = stderr_of(&assert);
+        for linha in [
+            format!(
+                "Cobrança solicitada: código {CODIGO}. Acompanhe com: inter-pj cobranca consultar {CODIGO}"
+            ),
+            erro.to_owned(),
+        ] {
+            assert!(stderr.contains(&linha), "{linha}\n{stderr}");
+        }
+        assert!(!stderr.contains("--timeout"), "{stderr}");
+    }
+}
+
+/// The answer of the API in `--json`, with and without `--aguardar`, and
+/// the exit codes of the issue in the binary: the secret and the token
+/// never show, even with `-vv`.
+#[tokio::test(flavor = "multi_thread")]
+async fn emissao_em_json_e_codigos_de_saida_sem_vazar_segredo() {
+    let vencimento = daqui_a(30);
+    let sem_segredo = |assert: &assert_cmd::assert::Assert| {
+        let saida = format!("{}{}", stdout_of(assert), stderr_of(assert));
+        for segredo in [CLIENT_SECRET, TOKEN] {
+            assert!(!saida.contains(segredo), "{segredo:?} vazou:\n{saida}");
+        }
+    };
+    let pedido = |status: u16| {
+        Mock::given(method("POST"))
+            .and(path("/cobranca/v3/cobrancas"))
+            .respond_with(
+                ResponseTemplate::new(status).set_body_json(json!({"codigoSolicitacao": CODIGO})),
+            )
+            .expect(1)
+    };
+
+    // The request alone: the answer of the API, as it came.
+    let env = self::env().await;
+    env.mount_token("boleto-cobranca.write", None).await;
+    pedido(200).mount(&env.server).await;
+    let assert = env
+        .cmd()
+        .arg("-vv")
+        .args(opcoes(&vencimento))
+        .args(["--sim", "--json"])
+        .assert()
+        .success();
+    sem_segredo(&assert);
+    let json: Value = serde_json::from_str(&stdout_of(&assert)).unwrap();
+    assert_eq!(json, json!({"codigoSolicitacao": CODIGO}));
+    assert!(
+        stderr_of(&assert).contains("POST /cobranca/v3/cobrancas → 200"),
+        "{}",
+        stderr_of(&assert)
+    );
+
+    // With --aguardar, the charge issued.
+    let env = self::env().await;
+    env.mount_token("boleto-cobranca.write boleto-cobranca.read", None)
+        .await;
+    pedido(200).mount(&env.server).await;
+    mount_cobranca(&env, cobranca(true), 1).await;
+    let assert = env
+        .cmd()
+        .arg("-vv")
+        .args(opcoes(&vencimento))
+        .args(["--sim", "--json", "--aguardar"])
+        .assert()
+        .success();
+    sem_segredo(&assert);
+    let json: Value = serde_json::from_str(&stdout_of(&assert)).unwrap();
+    assert_eq!(json, cobranca(true));
+
+    // Refused for lack of permission (4), and an uncertain result (9).
+    for (status, codigo_de_saida) in [(403, 4), (503, 9)] {
+        let env = self::env().await;
+        env.mount_token("boleto-cobranca.write", None).await;
+        pedido(status).mount(&env.server).await;
+        let assert = env
+            .cmd()
+            .arg("-vv")
+            .args(opcoes(&vencimento))
+            .arg("--sim")
+            .assert()
+            .code(codigo_de_saida);
+        sem_segredo(&assert);
+        assert_eq!(stdout_of(&assert), "", "{status}");
+    }
+
+    // Not issued (5) and the time running out (8), in text.
+    for (situacao, codigo_de_saida) in [("FALHA_EMISSAO", 5), ("EM_PROCESSAMENTO", 8)] {
+        let env = self::env().await;
+        env.mount_token("boleto-cobranca.write boleto-cobranca.read", None)
+            .await;
+        pedido(200).mount(&env.server).await;
+        Mock::given(method("GET"))
+            .and(path(format!("/cobranca/v3/cobrancas/{CODIGO}")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "cobranca": {"codigoSolicitacao": CODIGO, "seuNumero": "NF-123", "situacao": situacao}
+            })))
+            .mount(&env.server)
+            .await;
+        let assert = env
+            .cmd()
+            .arg("-vv")
+            .args(opcoes(&vencimento))
+            .args(["--sim", "--aguardar", "--timeout", "1s"])
+            .assert()
+            .code(codigo_de_saida);
+        sem_segredo(&assert);
+        // The charge, as it stands, on stdout.
+        assert!(
+            stdout_of(&assert).starts_with("Cobrança NF-123"),
+            "{situacao}: {}",
+            stdout_of(&assert)
+        );
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn simulacao_da_emissao_nao_envia_nada() {
     let env = env().await;
@@ -773,6 +1020,91 @@ async fn emissao_invalida_ou_sem_confirmacao_nao_chama_a_api() {
             .assert()
             .code(2);
     }
+}
+
+/// The commands the issue suggests run on the same account: the global
+/// options given on the command line go into them, the ones in the
+/// environment stay there.
+#[tokio::test(flavor = "multi_thread")]
+async fn as_dicas_da_emissao_sao_da_mesma_conta() {
+    let env = TestEnv::new().await;
+    env.write_config(&format!(
+        "\n[perfis.filial]\nambiente = \"sandbox\"\nclient_id = \"id-da-filial\"\ncertificado = '{}'\nchave_privada = '{}'",
+        env.path("certificado.crt").display(),
+        env.path("chave.key").display()
+    ));
+    env.mount_token("boleto-cobranca.write", None).await;
+    Mock::given(method("POST"))
+        .and(path("/cobranca/v3/cobrancas"))
+        .respond_with(ResponseTemplate::new(503))
+        .up_to_n_times(4)
+        .expect(4)
+        .mount(&env.server)
+        .await;
+    let config = env.config_path().display().to_string();
+    let casos = [
+        (vec!["-p", "filial"], None, "inter-pj -p filial".to_owned()),
+        (vec![], Some("filial"), "inter-pj".to_owned()),
+        (
+            vec!["--config", config.as_str(), "--perfil", "filial"],
+            None,
+            format!("inter-pj --config {config} -p filial"),
+        ),
+        (
+            vec!["--ambiente", "sandbox"],
+            None,
+            "inter-pj --ambiente sandbox".to_owned(),
+        ),
+    ];
+    let vencimento = daqui_a(30);
+    for (globais, no_ambiente, chamada) in &casos {
+        let mut cmd = env.cmd();
+        if let Some(perfil) = no_ambiente {
+            cmd.env("INTER_PERFIL", perfil);
+        }
+        let assert = cmd
+            .args(globais)
+            .args(opcoes(&vencimento))
+            .arg("--sim")
+            .assert()
+            .code(9);
+        let stderr = stderr_of(&assert);
+        assert!(
+            stderr.contains(&format!(
+                "dica: confira antes de tentar de novo: {chamada} cobranca listar --filtrar-por emissao --seu-numero NF-123"
+            )),
+            "{globais:?}: {stderr}"
+        );
+        assert!(
+            stderr.contains("(boleto-cobranca.read), e uma lista vazia logo depois do erro não prova que nada foi emitido"),
+            "{stderr}"
+        );
+    }
+
+    // After the 503s, the charge is requested: how to follow it keeps the
+    // account too.
+    Mock::given(method("POST"))
+        .and(path("/cobranca/v3/cobrancas"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"codigoSolicitacao": CODIGO})),
+        )
+        .expect(1)
+        .mount(&env.server)
+        .await;
+    let assert = env
+        .cmd()
+        .args(["-p", "filial"])
+        .args(opcoes(&vencimento))
+        .arg("--sim")
+        .assert()
+        .success();
+    let stdout = stdout_of(&assert);
+    assert!(
+        stdout.contains(&format!(
+            "Acompanhe com: inter-pj -p filial cobranca consultar {CODIGO}"
+        )),
+        "{stdout}"
+    );
 }
 
 /// The API refuses a repeated charge for 30 minutes, but a charge that may
