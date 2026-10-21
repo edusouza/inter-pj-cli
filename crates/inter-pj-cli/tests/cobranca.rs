@@ -1191,6 +1191,69 @@ async fn cancela_depois_de_mostrar_a_cobranca() {
     }
 }
 
+/// What `cancelar`, `editar` and `pagar` suggest runs on the same account:
+/// the global options of the command line go into it.
+#[tokio::test(flavor = "multi_thread")]
+async fn as_sugestoes_das_alteracoes_sao_da_mesma_conta() {
+    let env = TestEnv::new().await;
+    env.write_config(&format!(
+        "\n[perfis.filial]\nambiente = \"sandbox\"\nclient_id = \"id-da-filial\"\ncertificado = '{}'\nchave_privada = '{}'",
+        env.path("certificado.crt").display(),
+        env.path("chave.key").display()
+    ));
+    env.mount_token("boleto-cobranca.write boleto-cobranca.read", None)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/cobranca/v3/cobrancas/{CODIGO}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(cobranca(true)))
+        .mount(&env.server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(format!("/cobranca/v3/cobrancas/{CODIGO}/cancelar")))
+        .respond_with(ResponseTemplate::new(202))
+        .mount(&env.server)
+        .await;
+    Mock::given(method("PATCH"))
+        .and(path(format!("/cobranca/v3/cobrancas/{CODIGO}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "status": "PROCESSANDO",
+            "codigoEdicao": EDICAO
+        })))
+        .mount(&env.server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(format!("/cobranca/v3/cobrancas/{CODIGO}/pagar")))
+        .respond_with(ResponseTemplate::new(204))
+        .mount(&env.server)
+        .await;
+    for (args, sugestao) in [
+        (
+            vec!["cancelar", CODIGO, "--motivo", "Pedido cancelado", "--sim"],
+            format!("Confira com: inter-pj -p filial cobranca consultar {CODIGO}"),
+        ),
+        (
+            vec!["editar", CODIGO, "--valor", "200,00", "--sim"],
+            format!("Acompanhe com: inter-pj -p filial cobranca edicao {EDICAO} --aguardar"),
+        ),
+        (
+            vec!["pagar", CODIGO, "--com", "boleto"],
+            format!("Confira com: inter-pj -p filial cobranca consultar {CODIGO}"),
+        ),
+    ] {
+        let assert = env
+            .cmd()
+            .args(["-p", "filial", "cobranca"])
+            .args(&args)
+            .assert()
+            .success();
+        let stdout = stdout_of(&assert);
+        assert!(
+            stdout.ends_with(&format!("{sugestao}\n")),
+            "{args:?}\n{stdout}"
+        );
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn cancelamento_sem_confirmacao_ou_motivo_nao_chama_a_api() {
     let env = env().await;

@@ -9,7 +9,8 @@ use inter_pj::cobranca::{
 use inter_pj::{Environment, Error as InterError, InterClient};
 use serde_json::json;
 
-use super::{argumento, data, descrever_situacao, documento};
+use super::{data, descrever_situacao, documento};
+use crate::chamada::{argumento, chamada};
 use crate::cli::{
     CobrancaCancelarArgs, CobrancaEdicaoArgs, CobrancaEditarArgs, CobrancaPagarArgs, FormaArg,
     Formato,
@@ -59,7 +60,9 @@ pub(super) async fn cancelar(
         })),
         // `commands::run` refuses csv for this command.
         Formato::Texto | Formato::Csv => output::print(&format!(
-            "Cancelamento solicitado.\n\nConfira com: inter-pj cobranca consultar {codigo}"
+            "Cancelamento solicitado.\n\nConfira com: {} cobranca consultar {}",
+            chamada(),
+            argumento(codigo)
         )),
     }
 }
@@ -198,7 +201,9 @@ pub(super) async fn pagar(context: &Context, args: &CobrancaPagarArgs) -> Result
         })),
         // `commands::run` refuses csv for this command.
         Formato::Texto | Formato::Csv => output::print(&format!(
-            "Cobrança paga no sandbox, com {forma}.\n\nConfira com: inter-pj cobranca consultar {codigo}"
+            "Cobrança paga no sandbox, com {forma}.\n\nConfira com: {} cobranca consultar {}",
+            chamada(),
+            argumento(codigo)
         )),
     }
 }
@@ -384,8 +389,10 @@ fn render_edicao(
     {
         let _ = write!(
             texto,
-            "\n\nAcompanhe com: inter-pj cobranca edicao {} --aguardar",
-            argumento(codigo)
+            "\n\nAcompanhe com: {} cobranca edicao {} --aguardar",
+            chamada(),
+            // A code of the API, without the characters a shell would read.
+            argumento(&output::limpo(codigo))
         );
     }
     texto
@@ -534,6 +541,11 @@ aviso: a consulta pode levar até 30 minutos para mostrar o novo valor ou vencim
             "A alteração não foi feita.\nMensagem  Cobrança já paga"
         );
         assert_eq!(render_edicao(None, None, None), "Alteração solicitada.");
+        // A code of the API goes into the command as one argument.
+        assert!(
+            render_edicao(Some("e 1'x"), Some(&StatusEdicao::Processando), None)
+                .ends_with(r"Acompanhe com: inter-pj cobranca edicao 'e 1'\''x' --aguardar"),
+        );
     }
 
     // --- the commands against a mock API ------------------------------------
