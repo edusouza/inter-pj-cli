@@ -394,7 +394,7 @@ async fn consulta_e_aguarda_o_lote() {
         .assert()
         .code(5);
     assert!(
-        stderr_of(&assert).contains("o lote foi processado com erro: 1 de 2 cobranças negadas"),
+        stderr_of(&assert).contains("o lote foi processado, mas 1 de 2 cobranças foram negadas"),
         "{}",
         stderr_of(&assert)
     );

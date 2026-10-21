@@ -402,7 +402,7 @@ pub(crate) struct EncargosCobvArgs {
     #[arg(long, value_name = "TAXA|VALOR", value_parser = parse_taxa_ou_valor)]
     pub(crate) abatimento: Option<TaxaOuValor>,
 
-    /// Desconto por pagar até uma data: 2% ou 10,00 até o vencimento, ou até a data depois do @ (2%@2026-10-15); repita para até 3 datas
+    /// Desconto por pagar até uma data antes do vencimento: 2% ou 10,00 até a véspera do vencimento, ou até a data depois do @ (2%@2026-10-15); repita para até 3 datas
     #[arg(
         long,
         value_name = "TAXA|VALOR[@DATA]",
@@ -430,8 +430,8 @@ pub(crate) enum PeriodoJuros {
     Ano,
 }
 
-/// `--desconto`: a percentage or an amount, until a date (by default, the
-/// due date).
+/// `--desconto`: a percentage or an amount, until a date before the due
+/// date (by default, the day before it).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct DescontoAte {
     pub(crate) valor: TaxaOuValor,
@@ -656,7 +656,7 @@ pub(crate) struct PixDevolucaoSolicitarArgs {
     #[arg(long, value_name = "TEXTO")]
     pub(crate) descricao: Option<String>,
 
-    /// id da devolução, de 1 a 35 letras e dígitos [padrão: gerado]; repetir o comando com o mesmo id não devolve de novo
+    /// id da devolução, de 1 a 35 letras e dígitos [padrão: gerado]; repetir o comando com o mesmo id não devolve de novo, então um script que repete o comando passa um id fixo
     #[arg(long, value_name = "ID", value_parser = parse_id_devolucao)]
     pub(crate) id: Option<IdDevolucao>,
 
@@ -957,7 +957,7 @@ impl From<SituacaoLoteArg> for StatusCobvLote {
 /// `--inicio` and `--fim` of the Pix listings.
 #[derive(Debug, Clone, Copy, Args)]
 pub(crate) struct PeriodoPixArgs {
-    /// Início: AAAA-MM-DD (desde o começo do dia, no fuso local) ou data e hora com fuso (2026-09-01T08:00:00-03:00) [padrão: 30 dias atrás]
+    /// Início: AAAA-MM-DD (desde o começo do dia, em Brasília) ou data e hora com fuso (2026-09-01T08:00:00-03:00) [padrão: 30 dias atrás]
     #[arg(long, value_name = "DATA", value_parser = parse_momento)]
     pub(crate) inicio: Option<Momento>,
 

@@ -263,6 +263,19 @@ async fn simulacao_mostra_o_txid_na_url() {
         format!("{}/pix/v2/cobv/{TXID}", env.server.uri())
     );
     assert_eq!(json["corpo"], corpo());
+
+    // Without a date, the discount ends the day before the due date.
+    let assert = env
+        .cmd()
+        .args(criar_com("--desconto", "10,00"))
+        .args(["--txid", TXID, "--simular", "--json"])
+        .assert()
+        .success();
+    let json: Value = serde_json::from_str(&stdout_of(&assert)).unwrap();
+    assert_eq!(
+        json["corpo"]["valor"]["desconto"]["descontoDataFixa"],
+        json!([{"data": "2099-10-19", "valorPerc": "10.00"}])
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -276,7 +289,12 @@ async fn cobranca_invalida_nao_chama_a_api() {
         ),
         (
             criar_com("--desconto", "10,00@2099-10-25"),
-            "--desconto: o desconto vale até uma data no vencimento ou antes dele",
+            "--desconto: o desconto vale até uma data antes do vencimento",
+        ),
+        // The API refuses a discount on the due date itself.
+        (
+            criar_com("--desconto", "10,00@2099-10-20"),
+            "--desconto: o desconto vale até uma data antes do vencimento",
         ),
         (
             [criar(), vec!["--desconto", "2%"]].concat(),
@@ -360,8 +378,117 @@ async fn cobranca_invalida_nao_chama_a_api() {
     env.cmd().args(criar()).write_stdin("s\n").assert().code(2);
 }
 
+/// Once the charge exists, a QR Code that cannot be made is a warning, as
+/// in `pix cob criar`: exit 2 would read as "nothing was created".
+#[tokio::test(flavor = "multi_thread")]
+async fn falha_do_qr_code_depois_da_criacao_e_so_um_aviso() {
+    let env = env().await;
+    env.mount_token("cobv.write", None).await;
+    let mut sem_copia_e_cola = cobv("ATIVA");
+    sem_copia_e_cola["pixCopiaECola"] = Value::Null;
+    Mock::given(method("PUT"))
+        .and(path(format!("/pix/v2/cobv/{TXID}")))
+        .respond_with(ResponseTemplate::new(201).set_body_json(sem_copia_e_cola))
+        .expect(1)
+        .mount(&env.server)
+        .await;
+    let png = env.path("qr.png");
+    let assert = env
+        .cmd()
+        .args(criar())
+        .args(["--txid", TXID, "--sim", "--qrcode-png"])
+        .arg(&png)
+        .assert()
+        .success();
+    assert!(
+        stdout_of(&assert).starts_with("Cobrança Pix com vencimento criada."),
+        "{}",
+        stdout_of(&assert)
+    );
+    let stderr = stderr_of(&assert);
+    assert!(
+        stderr.contains(&format!(
+            "aviso: para gravá-lo, use: inter-pj pix cobv consultar {TXID} --qrcode-png {}",
+            png.display()
+        )),
+        "{stderr}"
+    );
+    assert!(!png.exists());
+}
+
+/// The commands suggested after a creation run on its account: with the
+/// profile, the file, the environment or the account of the command line,
+/// a check on the default profile would find nothing and invite a second
+/// charge.
+#[tokio::test(flavor = "multi_thread")]
+async fn os_comandos_sugeridos_sao_da_mesma_conta() {
+    let env = TestEnv::new().await;
+    env.write_config(&format!(
+        "\n[perfis.filial]\nambiente = \"sandbox\"\nclient_id = \"id-da-filial\"\ncertificado = '{}'\nchave_privada = '{}'",
+        env.path("certificado.crt").display(),
+        env.path("chave.key").display()
+    ));
+    env.mount_token("cobv.write", None).await;
+    Mock::given(method("PUT"))
+        .and(path(format!("/pix/v2/cobv/{TXID}")))
+        .respond_with(ResponseTemplate::new(503))
+        .up_to_n_times(3)
+        .expect(3)
+        .mount(&env.server)
+        .await;
+    let config = env.config_path().display().to_string();
+    let casos = [
+        (vec!["-p", "filial"], "inter-pj -p filial".to_owned()),
+        (
+            vec!["--config", config.as_str(), "--ambiente", "sandbox"],
+            format!("inter-pj --config {config} --ambiente sandbox"),
+        ),
+        (
+            vec!["--conta-corrente", "12345678"],
+            "inter-pj --conta-corrente 12345678".to_owned(),
+        ),
+    ];
+    for (opcoes, chamada) in &casos {
+        let assert = env
+            .cmd()
+            .args(opcoes)
+            .args(criar())
+            .args(["--txid", TXID, "--sim", "--sem-retentativa"])
+            .assert()
+            .code(9);
+        let stderr = stderr_of(&assert);
+        assert!(
+            stderr.contains(&format!(
+                "dica: confira com: {chamada} pix cobv consultar {TXID}"
+            )),
+            "{opcoes:?}: {stderr}"
+        );
+    }
+
+    Mock::given(method("PUT"))
+        .and(path(format!("/pix/v2/cobv/{TXID}")))
+        .respond_with(ResponseTemplate::new(201).set_body_json(cobv("ATIVA")))
+        .expect(1)
+        .mount(&env.server)
+        .await;
+    let assert = env
+        .cmd()
+        .args(["-p", "filial"])
+        .args(criar())
+        .args(["--txid", TXID, "--sim"])
+        .assert()
+        .success();
+    let stdout = stdout_of(&assert);
+    assert!(
+        stdout.contains(&format!(
+            "Acompanhe com: inter-pj -p filial pix cobv consultar {TXID}"
+        )),
+        "{stdout}"
+    );
+}
+
 /// With an unknown outcome, the error says how to check and how to repeat
-/// without creating two charges.
+/// without creating two charges, and exits with 9, like `pix cob criar`.
 #[tokio::test(flavor = "multi_thread")]
 async fn resultado_incerto_orienta_a_repetir_com_o_mesmo_txid() {
     let env = env().await;
@@ -377,7 +504,7 @@ async fn resultado_incerto_orienta_a_repetir_com_o_mesmo_txid() {
         .args(criar())
         .args(["--txid", TXID, "--sim"])
         .assert()
-        .code(6);
+        .code(9);
     let stderr = stderr_of(&assert);
     for dica in [
         format!("dica: confira com: inter-pj pix cobv consultar {TXID}"),
@@ -443,11 +570,12 @@ async fn revisa_e_remove_a_cobranca() {
         .expect(1)
         .mount(&env.server)
         .await;
-    // A discount without a date lasts until the current due date.
+    // A discount without a date lasts until the day before the current
+    // due date.
     Mock::given(method("PATCH"))
         .and(path(cobv_path.clone()))
         .and(body_json(json!({
-            "valor": {"desconto": {"modalidade": 2, "descontoDataFixa": [{"data": "2099-10-20", "valorPerc": "5.00"}]}}
+            "valor": {"desconto": {"modalidade": 2, "descontoDataFixa": [{"data": "2099-10-19", "valorPerc": "5.00"}]}}
         })))
         .respond_with(ResponseTemplate::new(200).set_body_json(revisada))
         .expect(1)
@@ -500,7 +628,7 @@ async fn revisa_e_remove_a_cobranca() {
         .assert()
         .success();
     assert!(
-        stderr_of(&assert).contains("R$ 10,00 até 15/10/2099 → 5% até 20/10/2099"),
+        stderr_of(&assert).contains("R$ 10,00 até 15/10/2099 → 5% até 19/10/2099"),
         "{}",
         stderr_of(&assert)
     );
@@ -518,6 +646,65 @@ async fn revisa_e_remove_a_cobranca() {
     );
 }
 
+/// A change or a removal with an unknown outcome (a `5xx` after the PATCH)
+/// may have been applied: the error says how to check it and exits with
+/// 9. A refusal of the API (4xx) is an ordinary error.
+#[tokio::test(flavor = "multi_thread")]
+async fn revisao_incerta_orienta_a_conferir() {
+    let env = env().await;
+    env.mount_token("cobv.write cobv.read", None).await;
+    let cobv_path = format!("/pix/v2/cobv/{TXID}");
+    Mock::given(method("GET"))
+        .and(path(cobv_path.clone()))
+        .respond_with(ResponseTemplate::new(200).set_body_json(cobv("ATIVA")))
+        .mount(&env.server)
+        .await;
+    Mock::given(method("PATCH"))
+        .and(path(cobv_path.clone()))
+        .respond_with(ResponseTemplate::new(503))
+        .up_to_n_times(2)
+        .expect(2)
+        .mount(&env.server)
+        .await;
+    let revisar = |extra: &[&'static str]| {
+        let mut args = vec!["pix", "cobv", "revisar", TXID];
+        args.extend_from_slice(extra);
+        args.extend(["--sim", "--sem-retentativa"]);
+        args
+    };
+    for (extra, situacao) in [
+        (&["--remover"][..], "a cobrança pode ter sido removida"),
+        (&["--valor", "160"][..], "a alteração pode ter sido feita"),
+    ] {
+        let assert = env.cmd().args(revisar(extra)).assert().code(9);
+        let stderr = stderr_of(&assert);
+        assert!(
+            stderr.contains(&format!(
+                "dica: {situacao}: confira com inter-pj pix cobv consultar {TXID} antes de repetir o comando"
+            )),
+            "{stderr}"
+        );
+    }
+    Mock::given(method("PATCH"))
+        .and(path(cobv_path))
+        .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+            "title": "Requisição inválida", "status": 400, "detail": "valor inválido"
+        })))
+        .expect(1)
+        .mount(&env.server)
+        .await;
+    let assert = env
+        .cmd()
+        .args(revisar(&["--valor", "160"]))
+        .assert()
+        .code(5);
+    assert!(
+        !stderr_of(&assert).contains("pode ter sido feita"),
+        "{}",
+        stderr_of(&assert)
+    );
+}
+
 /// What depends on the charge is checked after the lookup, and nothing is
 /// changed when it fails.
 #[tokio::test(flavor = "multi_thread")]
@@ -527,7 +714,7 @@ async fn revisao_confere_a_cobranca_atual() {
     Mock::given(method("GET"))
         .and(path(format!("/pix/v2/cobv/{TXID}")))
         .respond_with(ResponseTemplate::new(200).set_body_json(cobv("ATIVA")))
-        .expect(2)
+        .expect(3)
         .mount(&env.server)
         .await;
     Mock::given(method("GET"))
@@ -544,7 +731,12 @@ async fn revisao_confere_a_cobranca_atual() {
     let casos = [
         (
             &["--vencimento", "2099-10-10"][..],
-            "--vencimento: o desconto atual vale até 15/10/2099, depois do novo vencimento",
+            "--vencimento: o desconto atual vale até 15/10/2099, que não é antes do novo vencimento",
+        ),
+        // A due date on the last day of the discount: the API refuses it.
+        (
+            &["--vencimento", "2099-10-15"][..],
+            "--vencimento: o desconto atual vale até 15/10/2099, que não é antes do novo vencimento",
         ),
         (
             &["--abatimento", "200,00"][..],
@@ -638,7 +830,7 @@ async fn lista_as_cobrancas_do_periodo() {
     );
     assert!(texto.contains("20/10/2099  concluída (paga)"), "{texto}");
     assert!(
-        texto.ends_with("2 cobranças · R$ 300,00 · pagas R$ 150,00\n"),
+        texto.ends_with("2 cobranças · R$ 300,00 · pagas R$ 150,00 (valor original)\n"),
         "{texto}"
     );
     let json: Value = serde_json::from_str(&stdout_of(

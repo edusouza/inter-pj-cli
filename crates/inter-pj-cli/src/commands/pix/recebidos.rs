@@ -62,7 +62,7 @@ async fn listar(context: &Context, args: &PixRecebidosListarArgs) -> Result<(), 
     };
     match context.formato() {
         Formato::Json => output::print_json(&json!({ "pix": pix })),
-        Formato::Csv => output::print_raw(&csv(&pix).csv(context.separador())),
+        Formato::Csv => output::print_csv(&csv(&pix), context.separador()),
         Formato::Texto => {
             context.warn_if_sandbox(&settings);
             let mut texto = format!("{}\n\n", titulo(&filtro));
@@ -375,6 +375,22 @@ Para devolver: inter-pj pix devolucao solicitar {E2E} --valor VALOR (ou --tudo)"
         );
         assert_eq!(componentes(&json!({"saque": {}})), None);
         assert_eq!(componentes(&json!("texto")), None);
+    }
+
+    #[test]
+    fn the_csv_for_a_terminal_has_no_escape_sequence() {
+        let mut forjado = pix(&json!([]));
+        forjado.info_pagador = Some("Obrigado\u{1b}]52;c;ZXZpbA==\u{7}\u{9b}2J".to_owned());
+        let tabela = csv(&[forjado]);
+        let terminal = tabela.csv_para_terminal(crate::tabela::Separador::Virgula);
+        assert!(
+            !terminal.contains(['\u{1b}', '\u{7}', '\u{9b}']),
+            "{terminal}"
+        );
+        assert_eq!(terminal.split("\r\n").count(), 3, "{terminal}");
+        // In a file, the text as the API sent it.
+        let arquivo = tabela.csv(crate::tabela::Separador::Virgula);
+        assert!(arquivo.contains("Obrigado\u{1b}"), "{arquivo}");
     }
 
     #[test]
