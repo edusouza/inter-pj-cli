@@ -793,7 +793,7 @@ async fn resultado_incerto_orienta_a_conferir_antes_de_emitir_de_novo() {
         .args(opcoes(&daqui_a(30)))
         .arg("--sim")
         .assert()
-        .code(6);
+        .code(9);
     let stderr = stderr_of(&assert);
     assert!(
         stderr.contains("dica: a cobrança pode ter sido emitida"),

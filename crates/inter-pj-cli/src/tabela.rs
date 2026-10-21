@@ -1,6 +1,7 @@
 //! Tabular output shared by the listing commands: aligned text for people
 //! and CSV (RFC 4180) for spreadsheets and scripts.
 
+use std::borrow::Cow;
 use std::fmt::Write as _;
 
 use chrono::NaiveDate;
@@ -101,9 +102,16 @@ impl Celula {
         }
     }
 
-    fn para_csv(&self, separador: Separador) -> String {
+    fn para_csv(&self, separador: Separador, terminal: bool) -> String {
         match self {
-            Self::Texto(text) => escape_csv(&neutralize_formula(text), separador.campo()),
+            Self::Texto(text) => {
+                let text = if terminal {
+                    limpo(text)
+                } else {
+                    Cow::Borrowed(text.as_str())
+                };
+                escape_csv(&neutralize_formula(&text), separador.campo())
+            }
             Self::Dinheiro(value) => match separador {
                 Separador::Virgula => value.to_string(),
                 Separador::PontoEVirgula => value.to_string().replace('.', ","),
@@ -194,11 +202,22 @@ impl Tabela {
     }
 
     /// RFC 4180: header line, CRLF line endings, fields quoted when needed.
-    /// With `;`, a UTF-8 BOM lets Excel detect the encoding.
+    /// With `;`, a UTF-8 BOM lets Excel detect the encoding. The text goes
+    /// as sent, for the spreadsheets and the scripts.
     pub(crate) fn csv(&self, separador: Separador) -> String {
+        self.renderizar_csv(separador, false)
+    }
+
+    /// [`Tabela::csv`] to be read in a terminal: the text cleaned as in the
+    /// text output (one line per row, no escape sequence), without the BOM.
+    pub(crate) fn csv_para_terminal(&self, separador: Separador) -> String {
+        self.renderizar_csv(separador, true)
+    }
+
+    fn renderizar_csv(&self, separador: Separador, terminal: bool) -> String {
         let sep = separador.campo();
         let mut out = String::new();
-        if separador == Separador::PontoEVirgula {
+        if separador == Separador::PontoEVirgula && !terminal {
             out.push('\u{feff}');
         }
         let cabecalho: Vec<String> = self
@@ -208,7 +227,10 @@ impl Tabela {
             .collect();
         let _ = write!(out, "{}\r\n", cabecalho.join(&sep.to_string()));
         for linha in &self.linhas {
-            let campos: Vec<String> = linha.iter().map(|c| c.para_csv(separador)).collect();
+            let campos: Vec<String> = linha
+                .iter()
+                .map(|c| c.para_csv(separador, terminal))
+                .collect();
             let _ = write!(out, "{}\r\n", campos.join(&sep.to_string()));
         }
         out
