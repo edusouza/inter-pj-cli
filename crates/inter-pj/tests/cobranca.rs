@@ -11,6 +11,7 @@ use inter_pj::cobranca::{
     Desconto, EdicaoCobranca, EmissaoCobranca, EmissaoCobrancaError, FiltrarDataPor,
     FiltroCobrancas, OrdenarCobrancasPor, Pagador, PagarCom, SituacaoCobranca, StatusEdicao, Uf,
 };
+use inter_pj::documento::Documento;
 use inter_pj::{Environment, Error};
 use serde_json::json;
 use wiremock::matchers::{
@@ -108,6 +109,19 @@ async fn invalid_requests_never_reach_the_api() {
         source.downcast_ref(),
         Some(&EmissaoCobrancaError::Cep {
             campo: "pagador.cep"
+        })
+    );
+    // A document built by hand is checked again.
+    invalida = cobranca();
+    invalida.pagador.cpf_cnpj = Documento::Cnpj("12345678000196".to_owned());
+    let err = client.cobranca().emitir(&invalida).await.unwrap_err();
+    let Error::InvalidInput(source) = &err else {
+        panic!("{err:?}");
+    };
+    assert_eq!(
+        source.downcast_ref(),
+        Some(&EmissaoCobrancaError::Documento {
+            campo: "pagador.cpfCnpj"
         })
     );
     assert!(matches!(
