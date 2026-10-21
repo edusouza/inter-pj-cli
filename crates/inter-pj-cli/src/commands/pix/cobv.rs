@@ -97,7 +97,14 @@ async fn criar(
         "Cobrança Pix com vencimento criada.\n\n{}\n\nAcompanhe com: {consulta}",
         render_cobv(&criada)
     );
-    opcoes.mostrar(context, &settings, &texto, &criada, &copia_e_cola(&criada))
+    opcoes.mostrar_criada(
+        context,
+        &settings,
+        &texto,
+        &criada,
+        &copia_e_cola(&criada),
+        &consulta,
+    )
 }
 
 /// The charge of the options, checked as the API would.

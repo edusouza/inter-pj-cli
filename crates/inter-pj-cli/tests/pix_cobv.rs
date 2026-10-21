@@ -378,6 +378,44 @@ async fn cobranca_invalida_nao_chama_a_api() {
     env.cmd().args(criar()).write_stdin("s\n").assert().code(2);
 }
 
+/// Once the charge exists, a QR Code that cannot be made is a warning, as
+/// in `pix cob criar`: exit 2 would read as "nothing was created".
+#[tokio::test(flavor = "multi_thread")]
+async fn falha_do_qr_code_depois_da_criacao_e_so_um_aviso() {
+    let env = env().await;
+    env.mount_token("cobv.write", None).await;
+    let mut sem_copia_e_cola = cobv("ATIVA");
+    sem_copia_e_cola["pixCopiaECola"] = Value::Null;
+    Mock::given(method("PUT"))
+        .and(path(format!("/pix/v2/cobv/{TXID}")))
+        .respond_with(ResponseTemplate::new(201).set_body_json(sem_copia_e_cola))
+        .expect(1)
+        .mount(&env.server)
+        .await;
+    let png = env.path("qr.png");
+    let assert = env
+        .cmd()
+        .args(criar())
+        .args(["--txid", TXID, "--sim", "--qrcode-png"])
+        .arg(&png)
+        .assert()
+        .success();
+    assert!(
+        stdout_of(&assert).starts_with("Cobrança Pix com vencimento criada."),
+        "{}",
+        stdout_of(&assert)
+    );
+    let stderr = stderr_of(&assert);
+    assert!(
+        stderr.contains(&format!(
+            "aviso: para gravá-lo, use: inter-pj pix cobv consultar {TXID} --qrcode-png {}",
+            png.display()
+        )),
+        "{stderr}"
+    );
+    assert!(!png.exists());
+}
+
 /// The commands suggested after a creation run on its account: with the
 /// profile, the file, the environment or the account of the command line,
 /// a check on the default profile would find nothing and invite a second
