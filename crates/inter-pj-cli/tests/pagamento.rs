@@ -5,7 +5,7 @@
 
 mod common;
 
-use chrono::{Days, Local};
+use chrono::Days;
 use common::{TestEnv, stderr_of, stdout_of};
 use serde_json::{Value, json};
 use wiremock::matchers::{any, body_json, method, path, query_param};
@@ -112,7 +112,7 @@ Vencimento  Pagamento   Beneficiário        Status        Valor  Código da tra
 #[tokio::test(flavor = "multi_thread")]
 async fn lista_os_ultimos_30_dias_por_padrao() {
     let env = env("pagamento-boleto.read").await;
-    let hoje = Local::now().date_naive();
+    let hoje = common::hoje();
     let inicio = hoje.checked_sub_days(Days::new(29)).unwrap();
     Mock::given(method("GET"))
         .and(path(PAGAMENTO))
@@ -278,7 +278,7 @@ async fn cancelamento_recusado_pela_api() {
         "{stderr}"
     );
     assert!(stderr.contains("O pagamento já foi realizado."), "{stderr}");
-    assert!(stdout_of(&assert).is_empty());
+    assert_eq!(stdout_of(&assert), "");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -304,8 +304,7 @@ async fn ajuda_em_portugues() {
 // --- pagar -------------------------------------------------------------------------
 
 fn daqui_a(dias: u64) -> String {
-    Local::now()
-        .date_naive()
+    common::hoje()
         .checked_add_days(Days::new(dias))
         .unwrap()
         .format("%Y-%m-%d")
@@ -488,30 +487,210 @@ async fn paga_com_sim_e_mostra_como_acompanhar() {
 }
 
 /// Without an idempotency key, a payment that may have been made is not
-/// repeated: the error says how to check it first.
+/// repeated: the error says how to check it first, and the code 9 tells a
+/// script not to repeat it blindly, whatever the cause.
 #[tokio::test(flavor = "multi_thread")]
 async fn resultado_incerto_orienta_a_conferir_antes_de_repetir() {
+    for (nome, resposta) in [
+        ("503", ResponseTemplate::new(503)),
+        ("504", ResponseTemplate::new(504)),
+        (
+            "200 ilegível",
+            ResponseTemplate::new(200).set_body_string("<html>proxy</html>"),
+        ),
+    ] {
+        let env = TestEnv::new().await;
+        env.write_config("");
+        env.mount_token("pagamento-boleto.write", Some(1)).await;
+        Mock::given(method("POST"))
+            .and(path(PAGAMENTO))
+            .respond_with(resposta)
+            .expect(1)
+            .mount(&env.server)
+            .await;
+
+        let assert = env
+            .cmd()
+            .args(["pagamento", "boleto", "pagar", BOLETO, "--sim"])
+            .assert()
+            .code(9);
+        let stderr = stderr_of(&assert);
+        assert!(stderr.contains("pagar duas vezes"), "{nome}: {stderr}");
+        assert!(
+            stderr.contains(&format!(
+                "dica: confira antes de tentar de novo: inter-pj pagamento boleto listar --codigo {BARRAS}"
+            )),
+            "{nome}: {stderr}"
+        );
+        assert!(
+            stderr.contains(
+                "a consulta precisa da permissão de leitura dos pagamentos (pagamento-boleto.read)"
+            ),
+            "{nome}: {stderr}"
+        );
+        assert!(
+            stderr.contains("uma lista vazia logo depois do erro não prova que nada foi pago"),
+            "{nome}: {stderr}"
+        );
+    }
+}
+
+/// A `429`, a refused connection or a failed token request paid nothing:
+/// none of them says the payment may have been made, nor exits with 9.
+#[tokio::test(flavor = "multi_thread")]
+async fn falhas_que_certamente_nao_pagaram_nao_sao_incertas() {
     let env = TestEnv::new().await;
     env.write_config("");
     env.mount_token("pagamento-boleto.write", Some(1)).await;
     Mock::given(method("POST"))
         .and(path(PAGAMENTO))
-        .respond_with(ResponseTemplate::new(503))
+        .respond_with(ResponseTemplate::new(429))
         .expect(1)
         .mount(&env.server)
         .await;
+    let assert = env
+        .cmd()
+        .args([
+            "pagamento",
+            "boleto",
+            "pagar",
+            BOLETO,
+            "--sim",
+            "--sem-retentativa",
+        ])
+        .assert()
+        .code(6);
+    let stderr = stderr_of(&assert);
+    assert!(!stderr.contains("pode ter sido feito"), "{stderr}");
 
+    // The token endpoint answers something unreadable: no payment is sent.
+    let env = TestEnv::new().await;
+    env.write_config("");
+    Mock::given(method("POST"))
+        .and(path("/oauth/v2/token"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("<html>proxy</html>"))
+        .mount(&env.server)
+        .await;
+    nothing_is_sent(&env).await;
     let assert = env
         .cmd()
         .args(["pagamento", "boleto", "pagar", BOLETO, "--sim"])
         .assert()
+        .code(1);
+    let stderr = stderr_of(&assert);
+    assert!(stderr.contains("POST /oauth/v2/token"), "{stderr}");
+    assert!(!stderr.contains("pode ter sido feito"), "{stderr}");
+    assert!(!stderr.contains("pagar duas vezes"), "{stderr}");
+
+    // Nobody listens: the connection is refused.
+    let porta = {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.local_addr().unwrap().port()
+    };
+    let assert = env
+        .cmd()
+        .env("INTER_BASE_URL", format!("http://127.0.0.1:{porta}"))
+        .args([
+            "pagamento",
+            "boleto",
+            "pagar",
+            BOLETO,
+            "--sim",
+            "--sem-retentativa",
+        ])
+        .assert()
         .code(6);
     let stderr = stderr_of(&assert);
-    assert!(stderr.contains("pagar duas vezes"), "{stderr}");
-    assert!(
-        stderr.contains(&format!(
-            "dica: confira antes de tentar de novo: inter-pj pagamento boleto listar --codigo {BARRAS}"
-        )),
-        "{stderr}"
-    );
+    assert!(!stderr.contains("pode ter sido feito"), "{stderr}");
+}
+
+/// The check runs on the account of the payment: the profile, the file or
+/// the environment chosen on the command line goes into the commands it
+/// suggests, or the check would look at the default profile, find nothing
+/// and invite a second payment. One chosen in the environment stays in the
+/// shell by itself.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_conferencia_sugerida_e_na_mesma_conta() {
+    let env = TestEnv::new().await;
+    env.write_config(&format!(
+        "\n[perfis.filial]\nambiente = \"sandbox\"\nclient_id = \"id-da-filial\"\ncertificado = '{}'\nchave_privada = '{}'",
+        env.path("certificado.crt").display(),
+        env.path("chave.key").display()
+    ));
+    env.mount_token("pagamento-boleto.write", None).await;
+    Mock::given(method("POST"))
+        .and(path(PAGAMENTO))
+        .respond_with(ResponseTemplate::new(503))
+        .up_to_n_times(4)
+        .expect(4)
+        .mount(&env.server)
+        .await;
+    let config = env.config_path().display().to_string();
+    let casos = [
+        (vec!["-p", "filial"], None, "inter-pj -p filial".to_owned()),
+        (vec![], Some("filial"), "inter-pj".to_owned()),
+        (
+            vec!["--config", config.as_str(), "--perfil", "filial"],
+            None,
+            format!("inter-pj --config {config} -p filial"),
+        ),
+        (
+            vec!["--ambiente", "sandbox"],
+            None,
+            "inter-pj --ambiente sandbox".to_owned(),
+        ),
+    ];
+    for (opcoes, no_ambiente, chamada) in &casos {
+        let mut cmd = env.cmd();
+        if let Some(perfil) = no_ambiente {
+            cmd.env("INTER_PERFIL", perfil);
+        }
+        let assert = cmd
+            .args(opcoes)
+            .args(["pagamento", "boleto", "pagar", BOLETO, "--sim"])
+            .assert()
+            .code(9);
+        let stderr = stderr_of(&assert);
+        assert!(
+            stderr.contains(&format!(
+                "dica: confira antes de tentar de novo: {chamada} pagamento boleto listar --codigo {BARRAS}"
+            )),
+            "{opcoes:?}: {stderr}"
+        );
+    }
+
+    // After the 503s, the payment goes through: how to follow it and how
+    // to cancel it keep the account too.
+    Mock::given(method("POST"))
+        .and(path(PAGAMENTO))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "statusPagamento": "AGENDADO",
+            "codigoTransacao": TRANSACAO,
+            "dataAgendamento": "2026-10-09"
+        })))
+        .expect(1)
+        .mount(&env.server)
+        .await;
+    let assert = env
+        .cmd()
+        .args([
+            "-p",
+            "filial",
+            "pagamento",
+            "boleto",
+            "pagar",
+            BOLETO,
+            "--sim",
+        ])
+        .assert()
+        .success();
+    let stdout = stdout_of(&assert);
+    for linha in [
+        format!(
+            "Acompanhe com: inter-pj -p filial pagamento boleto listar --codigo-transacao {TRANSACAO}"
+        ),
+        format!("Para cancelar: inter-pj -p filial pagamento boleto cancelar {TRANSACAO}"),
+    ] {
+        assert!(stdout.contains(&linha), "{linha}\n{stdout}");
+    }
 }
