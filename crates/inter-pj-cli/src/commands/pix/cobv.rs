@@ -825,14 +825,33 @@ fn tabela(cobs: &[Cobv]) -> Tabela {
     tabela
 }
 
-/// `3 cobranças · R$ 450,00 · pagas R$ 150,00`.
+/// `3 cobranças · R$ 450,00 · recebido R$ 153,00`: the original amounts,
+/// and what the Pix that paid the charges brought, which fines, interest,
+/// rebates and discounts make differ from the original amounts. When the
+/// API did not list the Pix of a charge paid, the original amount of the
+/// paid ones, said so.
 fn totais(cobs: &[Cobv]) -> String {
-    super::totais(cobs.iter().map(|cobv| {
-        (
-            cobv.valor.as_ref().and_then(|valor| valor.original),
-            cobv.status.as_ref(),
-        )
-    }))
+    let original = |cobv: &Cobv| cobv.valor.as_ref().and_then(|valor| valor.original);
+    let mut texto = super::totais(cobs.iter().map(|cobv| (original(cobv), None)));
+    let pagas: Vec<&Cobv> = cobs
+        .iter()
+        .filter(|cobv| cobv.status == Some(StatusCob::Concluida))
+        .collect();
+    if pagas.is_empty() {
+        return texto;
+    }
+    if pagas.iter().all(|cobv| !cobv.pix.is_empty()) {
+        let recebido: Decimal = pagas
+            .iter()
+            .flat_map(|cobv| &cobv.pix)
+            .filter_map(|pix| pix.valor)
+            .sum();
+        let _ = write!(texto, " · recebido {}", output::brl(recebido));
+    } else {
+        let valor: Decimal = pagas.iter().copied().filter_map(original).sum();
+        let _ = write!(texto, " · pagas {} (valor original)", output::brl(valor));
+    }
+    texto
 }
 
 /// Every field, with the API's names (nested ones with a dot) and codes;
@@ -1276,7 +1295,18 @@ Cobrança Pix com vencimento {TXID} a alterar
     #[test]
     fn listings_add_up() {
         let cobs = [cobv("CONCLUIDA"), cobv("ATIVA")];
-        assert_eq!(totais(&cobs), "2 cobranças · R$ 300,00 · pagas R$ 150,00");
+        // Paid with the discount: R$ 140,00 of R$ 150,00.
+        assert_eq!(
+            totais(&cobs),
+            "2 cobranças · R$ 300,00 · recebido R$ 140,00"
+        );
+        let mut sem_pix = cobv("CONCLUIDA");
+        sem_pix.pix.clear();
+        assert_eq!(
+            totais(&[sem_pix, cobv("ATIVA")]),
+            "2 cobranças · R$ 300,00 · pagas R$ 150,00 (valor original)"
+        );
+        assert_eq!(totais(&[cobv("ATIVA")]), "1 cobrança · R$ 150,00");
         let csv = csv(&cobs).csv(crate::tabela::Separador::PontoEVirgula);
         assert!(
             csv.contains(";CONCLUIDA;0;2026-09-23T20:15:00.358Z;2026-10-20;10;150,00;2;2,00;;;;;1;;12345678909;;Fulano de Tal;"),

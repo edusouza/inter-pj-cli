@@ -675,10 +675,10 @@ Vencimento  Status                Valor  Devedor               txid
 20/10/2026  ativa             R$ 150,00  Cliente Exemplo Ltda  cobvexemplo0000000000000000001
 05/10/2026  concluída (paga)  R$ 300,00  Outro Cliente         cobvexemplo0000000000000000002
 
-2 cobranças · R$ 450,00 · pagas R$ 300,00
+2 cobranças · R$ 450,00 · recebido R$ 306,00
 ```
 
-A listagem tem os filtros de `pix cob listar` e também `--lote ID`; em CSV, os encargos aparecem com a modalidade e o valor (`valor.multa.modalidade`, `valor.multa.valorPerc`), e os descontos por data, só no JSON.
+No rodapé, o primeiro valor soma os valores originais, e `recebido` soma os Pix que pagaram as cobranças concluídas, com multa, juros, abatimento e desconto (aqui, 2% de multa). Se a API não listar os Pix de alguma cobrança paga, o rodapé mostra o valor original das pagas, com essa indicação. A listagem tem os filtros de `pix cob listar` e também `--lote ID`; em CSV, os encargos aparecem com a modalidade e o valor (`valor.multa.modalidade`, `valor.multa.valorPerc`), e os descontos por data, só no JSON.
 
 ### Formatos de saída
 

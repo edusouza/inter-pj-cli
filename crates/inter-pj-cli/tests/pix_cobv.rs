@@ -770,7 +770,7 @@ async fn lista_as_cobrancas_do_periodo() {
     );
     assert!(texto.contains("20/10/2099  concluída (paga)"), "{texto}");
     assert!(
-        texto.ends_with("2 cobranças · R$ 300,00 · pagas R$ 150,00\n"),
+        texto.ends_with("2 cobranças · R$ 300,00 · pagas R$ 150,00 (valor original)\n"),
         "{texto}"
     );
     let json: Value = serde_json::from_str(&stdout_of(
