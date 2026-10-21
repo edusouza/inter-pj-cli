@@ -277,16 +277,25 @@ async fn o_limite_vale_para_cada_pagamento() {
 }
 
 async fn mount_lote(env: &TestEnv, status: &str) {
+    mount_lote_com(
+        env,
+        status,
+        json!([
+            {"tipoPagamento": "BOLETO", "status": "PAGO", "valorPagar": 30.1},
+            {"tipoPagamento": "DARF", "status": "ERRO_PAGAMENTO", "valorTotal": 47.14, "detalhe": "Saldo insuficiente"}
+        ]),
+    )
+    .await;
+}
+
+async fn mount_lote_com(env: &TestEnv, status: &str, pagamentos: Value) {
     Mock::given(method("GET"))
         .and(path(format!("{LOTE}/{ID_LOTE}")))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "idLote": ID_LOTE,
             "status": status,
             "qtdePagamentos": 2,
-            "pagamentos": [
-                {"tipoPagamento": "BOLETO", "status": "PAGO", "valorPagar": 30.1},
-                {"tipoPagamento": "DARF", "status": "ERRO_PAGAMENTO", "valorTotal": 47.14, "detalhe": "Saldo insuficiente"}
-            ]
+            "pagamentos": pagamentos
         })))
         .mount(&env.server)
         .await;
@@ -327,16 +336,59 @@ async fn consulta_um_lote() {
     assert_eq!(json["pagamentos"][1]["detalhe"], "Saldo insuficiente");
 }
 
+/// The exit code of `--aguardar` follows each payment, not only the status
+/// of the batch: 0 only when every payment is paid or scheduled, 5 when one
+/// was not made, 8 while one still waits for an approval.
 #[tokio::test(flavor = "multi_thread")]
 async fn aguardar_sai_conforme_o_resultado() {
-    for (status, codigo) in [
-        ("PROCESSADOSEMERRO", 0),
-        ("PROCESSADOCOMERRO", 5),
-        ("EMPROCESSAMENTO", 8),
+    let item = |tipo: &str, status: &str| json!({"tipoPagamento": tipo, "status": status});
+    for (status, pagamentos, codigo, esperado) in [
+        (
+            "PROCESSADOSEMERRO",
+            json!([item("BOLETO", "PAGO"), item("DARF", "PAGO")]),
+            0,
+            "",
+        ),
+        (
+            "PROCESSADOSEMERRO",
+            json!([item("BOLETO", "PAGO"), item("DARF", "PAGAMENTO_AGENDADO")]),
+            0,
+            "aviso: 1 pagamento agendado sai da conta na data do agendamento",
+        ),
+        (
+            "PROCESSADOSEMERRO",
+            json!([item("BOLETO", "PAGO"), item("DARF", "ERRO_PAGAMENTO")]),
+            5,
+            "erro: o lote foi processado, mas 1 de 2 pagamentos não foi feito",
+        ),
+        (
+            "PROCESSADOCOMERRO",
+            json!([
+                item("BOLETO", "CANCELADO"),
+                item("DARF", "AGENDAMENTO_CANCELADO")
+            ]),
+            5,
+            "erro: o lote foi processado, mas 2 de 2 pagamentos não foram feitos",
+        ),
+        (
+            "PROCESSADOSEMERRO",
+            json!([
+                item("BOLETO", "PAGO"),
+                item("BOLETO", "AGUARDANDO_APROVACAO")
+            ]),
+            8,
+            "tempo de espera esgotado (1 s): o lote ainda está com 1 de 2 pagamentos aguardando aprovação ou em processamento",
+        ),
+        (
+            "EMPROCESSAMENTO",
+            json!([item("BOLETO", "EMPROCESSAMENTO")]),
+            8,
+            "tempo de espera esgotado (1 s): o lote ainda está em processamento",
+        ),
     ] {
         let env = env().await;
         env.mount_token("pagamento-lote.read", None).await;
-        mount_lote(&env, status).await;
+        mount_lote_com(&env, status, pagamentos).await;
         let assert = env
             .cmd()
             .args([
@@ -351,19 +403,158 @@ async fn aguardar_sai_conforme_o_resultado() {
             .assert()
             .code(codigo);
         let stderr = stderr_of(&assert);
-        match codigo {
-            5 => assert!(
-                stderr.contains("o lote foi processado com erro: 1 de 2 pagamentos não foi feito"),
-                "{stderr}"
-            ),
-            8 => assert!(
-                stderr
-                    .contains("tempo de espera esgotado (1 s): o lote ainda está em processamento"),
-                "{stderr}"
-            ),
-            _ => assert!(!stderr.contains("erro:"), "{stderr}"),
+        assert!(stderr.contains(esperado), "{status}/{codigo}: {stderr}");
+        if codigo == 0 {
+            assert!(!stderr.contains("erro:"), "{stderr}");
         }
     }
+}
+
+/// The same payment twice in a file is refused before any request, even
+/// with --sim; --permitir-repetidos sends it.
+#[tokio::test(flavor = "multi_thread")]
+async fn pagamentos_repetidos_sao_recusados() {
+    let repetido =
+        format!("{CSV}BOLETO;07797777051167847115990071126347115950000003010;;;;;;;;;\r\n");
+    let recusado = env().await;
+    nothing_is_sent(&recusado).await;
+    let arquivo = recusado.path("lote.csv");
+    std::fs::write(&arquivo, &repetido).unwrap();
+    let assert = recusado
+        .cmd()
+        .args(["pagamento", "lote", "enviar", "--arquivo"])
+        .arg(&arquivo)
+        .arg("--sim")
+        .assert()
+        .code(2);
+    let stderr = stderr_of(&assert);
+    for linha in [
+        "pagamentos repetidos em",
+        "linha 2 e linha 5: o mesmo pagamento aparece mais de uma vez",
+        "dica: se forem mesmo pagamentos distintos, use --permitir-repetidos",
+    ] {
+        assert!(stderr.contains(linha), "{linha}\n{stderr}");
+    }
+    assert!(!stderr.contains("Lote a enviar"), "{stderr}");
+
+    let enviado = env().await;
+    enviado.mount_token("pagamento-lote.write", Some(1)).await;
+    Mock::given(method("POST"))
+        .and(path(LOTE))
+        .respond_with(ResponseTemplate::new(202).set_body_json(json!({
+            "idLote": ID_LOTE,
+            "status": "EMPROCESSAMENTO",
+            "qtdePagamentos": 4
+        })))
+        .expect(1)
+        .mount(&enviado.server)
+        .await;
+    let arquivo = enviado.path("lote.csv");
+    std::fs::write(&arquivo, &repetido).unwrap();
+    let assert = enviado
+        .cmd()
+        .args(["pagamento", "lote", "enviar", "--arquivo"])
+        .arg(&arquivo)
+        .args(["--permitir-repetidos", "--sim"])
+        .assert()
+        .success();
+    let stderr = stderr_of(&assert);
+    assert!(
+        stderr.contains("o mesmo pagamento aparece mais de uma vez"),
+        "{stderr}"
+    );
+}
+
+/// What the output suggests runs on the account of the batch: the profile
+/// of the command line goes with it, and an id of the API that is not one
+/// goes quoted.
+#[tokio::test(flavor = "multi_thread")]
+async fn os_comandos_sugeridos_sao_na_mesma_conta() {
+    let env = env().await;
+    env.write_config(&format!(
+        "\n[perfis.filial]\nambiente = \"sandbox\"\nclient_id = \"id-da-filial\"\ncertificado = '{}'\nchave_privada = '{}'",
+        env.path("certificado.crt").display(),
+        env.path("chave.key").display()
+    ));
+    env.mount_token("pagamento-lote.write", None).await;
+    Mock::given(method("POST"))
+        .and(path(LOTE))
+        .respond_with(ResponseTemplate::new(504))
+        .up_to_n_times(1)
+        .expect(1)
+        .mount(&env.server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(LOTE))
+        .respond_with(ResponseTemplate::new(202).set_body_json(json!({
+            "idLote": "abc; rm -rf ~",
+            "status": "EMPROCESSAMENTO"
+        })))
+        .expect(1)
+        .mount(&env.server)
+        .await;
+    let arquivo = env.path("lote.csv");
+    std::fs::write(&arquivo, CSV).unwrap();
+    let enviar = || {
+        let mut cmd = env.cmd();
+        cmd.args(["-p", "filial", "pagamento", "lote", "enviar", "--arquivo"])
+            .arg(&arquivo)
+            .arg("--sim");
+        cmd
+    };
+
+    let assert = enviar().assert().code(9);
+    let stderr = stderr_of(&assert);
+    assert!(
+        stderr.contains(
+            "dica: confira antes de tentar de novo: inter-pj -p filial pagamento boleto listar e inter-pj -p filial pagamento darf listar"
+        ),
+        "{stderr}"
+    );
+
+    let stdout = stdout_of(&enviar().assert().success());
+    assert!(
+        stdout.contains(
+            "Acompanhe com: inter-pj -p filial pagamento lote consultar 'abc; rm -rf ~' --aguardar"
+        ),
+        "{stdout}"
+    );
+}
+
+/// An answer of the sending already in error is not a success.
+#[tokio::test(flavor = "multi_thread")]
+async fn envio_ja_com_erro_sai_com_5() {
+    let env = env().await;
+    env.mount_token("pagamento-lote.write", Some(1)).await;
+    Mock::given(method("POST"))
+        .and(path(LOTE))
+        .respond_with(ResponseTemplate::new(202).set_body_json(json!({
+            "idLote": ID_LOTE,
+            "status": "PROCESSADOCOMERRO",
+            "qtdePagamentos": 3
+        })))
+        .expect(1)
+        .mount(&env.server)
+        .await;
+    let arquivo = env.path("lote.csv");
+    std::fs::write(&arquivo, CSV).unwrap();
+    let assert = env
+        .cmd()
+        .args(["pagamento", "lote", "enviar", "--arquivo"])
+        .arg(&arquivo)
+        .arg("--sim")
+        .assert()
+        .code(5);
+    assert!(
+        stdout_of(&assert).starts_with("Lote recebido: 3 pagamentos, processado com erro."),
+        "{}",
+        stdout_of(&assert)
+    );
+    assert!(
+        stderr_of(&assert).contains("a resposta do envio diz que houve erro"),
+        "{}",
+        stderr_of(&assert)
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

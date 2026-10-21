@@ -93,14 +93,8 @@ async fn extrato_without_transactions_is_empty() {
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"transacoes": []})))
         .mount(&server)
         .await;
-    assert!(
-        client(&server)
-            .banking()
-            .extrato(agosto())
-            .await
-            .unwrap()
-            .is_empty()
-    );
+    let transacoes = client(&server).banking().extrato(agosto()).await.unwrap();
+    assert_eq!(transacoes, Vec::new());
 }
 
 #[tokio::test]
