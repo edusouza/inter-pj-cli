@@ -34,10 +34,18 @@ pub(super) async fn consultar(
     let settings = context.settings()?;
     let client = context.client(&settings)?;
     let cobranca = client.cobranca().consultar(&args.codigo).await?;
+    // A QR Code that cannot be made fails the command before anything is
+    // shown, whichever option asked for it: a script must not read the
+    // charge and miss the image.
+    let qr = if args.qrcode || png.is_some() {
+        Some(qr_code(&cobranca)?)
+    } else {
+        None
+    };
 
     // The image alone goes to the standard output.
-    if let Some(png) = png.as_ref().filter(|png| png.stdout()) {
-        return png.gravar(&qr_code(&cobranca)?.png());
+    if let (Some(png), Some(qr)) = (png.as_ref().filter(|png| png.stdout()), &qr) {
+        return png.gravar(&qr.png());
     }
     match context.formato() {
         Formato::Json => output::print_json(&cobranca)?,
@@ -47,17 +55,11 @@ pub(super) async fn consultar(
             output::print(&render_cobranca(&cobranca))?;
         }
     }
-    if args.qrcode {
-        match qr_code(&cobranca) {
-            Ok(qr) => output::print_raw(&format!("\n{}", qr.terminal(qr::cores()))),
-            Err(err) => {
-                eprintln!("aviso: {err}");
-                Ok(())
-            }
-        }?;
+    if let Some(qr) = qr.as_ref().filter(|_| args.qrcode) {
+        output::print_raw(&format!("\n{}", qr.terminal(qr::cores())))?;
     }
-    if let Some(png) = &png {
-        let imagem = qr_code(&cobranca)?.png();
+    if let (Some(png), Some(qr)) = (&png, &qr) {
+        let imagem = qr.png();
         png.gravar(&imagem)?;
         eprintln!(
             "QR Code salvo em {} ({})",
@@ -81,11 +83,11 @@ fn qr_code(cobranca: &CobrancaDetalhada) -> Result<QrPix, CliError> {
         } else {
             "a conta não tinha chave Pix quando a cobrança foi emitida, ou ela só aceita boleto"
         };
-        return Err(CliError::Usage(format!(
+        return Err(CliError::SemQrCode(format!(
             "a cobrança não tem Pix copia e cola: {motivo}"
         )));
     };
-    QrPix::new(copia_e_cola).map_err(CliError::Usage)
+    QrPix::new(copia_e_cola).map_err(CliError::SemQrCode)
 }
 
 pub(super) async fn pdf(context: &Context, args: &CobrancaPdfArgs) -> Result<(), CliError> {

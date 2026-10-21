@@ -403,7 +403,7 @@ $ inter-pj cobranca consultar 0b7e4c1a-5d3f-4a2b-9c8d-7e6f5a4b3c2d --qrcode-png 
 $ inter-pj cobranca pdf 0b7e4c1a-5d3f-4a2b-9c8d-7e6f5a4b3c2d                           # cobranca-<codigo>.pdf
 ```
 
-`--qrcode` desenha o QR Code do Pix no terminal, para o cliente ler com o celular. Em um terminal, ele sai preto no branco, qualquer que seja o tema. Com `NO_COLOR` ou com a saída redirecionada, sem cores, os módulos claros é que são desenhados, como no `qrencode -t UTF8`, e o código fica certo em terminais de fundo escuro; para imprimir ou enviar, prefira `--qrcode-png`. Antes de desenhar, a CLI confere o copia e cola (CRC16). O PNG e o PDF são gravados com permissão `600` e não sobrescrevem um arquivo existente sem `--sobrescrever`; `-` os envia para a saída padrão. As consultas precisam do escopo `boleto-cobranca.read`.
+`--qrcode` desenha o QR Code do Pix no terminal, para o cliente ler com o celular. Em um terminal, ele sai preto no branco, qualquer que seja o tema. Com `NO_COLOR` ou com a saída redirecionada, sem cores, os módulos claros é que são desenhados, como no `qrencode -t UTF8`, e o código fica certo em terminais de fundo escuro; para imprimir ou enviar, prefira `--qrcode-png`. Antes de desenhar, a CLI confere o copia e cola (CRC16). Se a cobrança não tem um Pix que dê um QR Code (ainda está sendo emitida, foi emitida sem chave Pix na conta ou o copia e cola não confere), `--qrcode` e `--qrcode-png` terminam com o código 5, sem mostrar a cobrança e sem gravar a imagem. O PNG e o PDF são gravados com permissão `600` e não sobrescrevem um arquivo existente sem `--sobrescrever`; `-` os envia para a saída padrão. As consultas precisam do escopo `boleto-cobranca.read`.
 
 ### Formatos de saída
 
@@ -440,7 +440,7 @@ $ curl --cert certificado.crt --key chave.key \
 | 2 | uso incorreto (argumentos inválidos) |
 | 3 | configuração ausente ou inválida (inclui certificado/chave) |
 | 4 | falha de autenticação ou acesso negado (credenciais, escopos, 401/403) |
-| 5 | requisição rejeitada pela API (400, 404, 409, 422); com `--aguardar`, Pix que terminou sem ser pago ou lote com algum pagamento que não foi feito |
+| 5 | requisição rejeitada pela API (400, 404, 409, 422); com `--aguardar`, Pix que terminou sem ser pago ou lote com algum pagamento que não foi feito; `--qrcode` ou `--qrcode-png` de uma cobrança sem Pix |
 | 6 | serviço indisponível, limite de requisições (429), erro 5xx ou falha de rede, numa operação que certamente não foi feita (uma consulta, ou um envio que a API não recebeu) |
 | 7 | operação cancelada na confirmação (nada foi enviado) |
 | 8 | `pix consultar` ou `pagamento lote consultar` com `--aguardar`: tempo esgotado antes de um status final (num lote, também com pagamentos aguardando aprovação) |

@@ -193,33 +193,52 @@ async fn png_pode_ir_para_a_saida_padrao() {
     assert!(assert.get_output().stdout.starts_with(b"\x89PNG\r\n\x1a\n"));
 }
 
+/// Without a Pix that makes a QR Code, `--qrcode` and `--qrcode-png` fail
+/// alike (5), before showing the charge or writing the image: a script
+/// must not read the charge and miss the QR Code.
 #[tokio::test(flavor = "multi_thread")]
 async fn cobranca_sem_pix_nao_tem_qr_code() {
-    let env = env().await;
-    mount_cobranca(&env, cobranca(false), 2).await;
-    let assert = env
-        .cmd()
-        .args(["cobranca", "consultar", CODIGO, "--qrcode"])
-        .assert()
-        .success();
-    assert!(
-        stderr_of(&assert).contains("aviso: a cobrança não tem Pix copia e cola"),
-        "{}",
-        stderr_of(&assert)
-    );
-    let arquivo = env.path("pix.png");
-    let assert = env
-        .cmd()
-        .args(["cobranca", "consultar", CODIGO, "--qrcode-png"])
-        .arg(&arquivo)
-        .assert()
-        .code(2);
-    assert!(
-        stderr_of(&assert).contains("a cobrança não tem Pix copia e cola"),
-        "{}",
-        stderr_of(&assert)
-    );
-    assert!(!arquivo.exists());
+    let mut em_processamento = cobranca(false);
+    em_processamento["cobranca"]["situacao"] = json!("EM_PROCESSAMENTO");
+    let mut crc_errado = cobranca(true);
+    crc_errado["pix"]["pixCopiaECola"] = json!(COPIA_E_COLA.replace("1D3D", "1D3E"));
+    for (corpo, motivo) in [
+        (
+            cobranca(false),
+            "a cobrança não tem Pix copia e cola: a conta não tinha chave Pix",
+        ),
+        (
+            em_processamento,
+            "a cobrança não tem Pix copia e cola: a cobrança ainda está sendo emitida",
+        ),
+        (crc_errado, "Pix copia e cola inválido"),
+    ] {
+        let env = env().await;
+        mount_cobranca(&env, corpo, 4).await;
+        let arquivo = env.path("pix.png");
+        let arquivo = arquivo.to_str().unwrap();
+        for extra in [
+            &["--qrcode"][..],
+            &["--qrcode-png", arquivo],
+            &["--qrcode-png", arquivo, "--json"],
+            &["--qrcode-png", "-"],
+        ] {
+            let assert = env
+                .cmd()
+                .args(["cobranca", "consultar", CODIGO])
+                .args(extra)
+                .assert()
+                .code(5);
+            assert_eq!(stdout_of(&assert), "", "{extra:?}");
+            let stderr = stderr_of(&assert);
+            assert!(
+                stderr.contains(&format!("erro: {motivo}")),
+                "{extra:?}\n{stderr}"
+            );
+            assert!(!stderr.contains("aviso"), "{extra:?}\n{stderr}");
+        }
+        assert!(!env.path("pix.png").exists());
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
