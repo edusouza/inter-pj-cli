@@ -574,7 +574,7 @@ async fn listar(context: &Context, args: &PixLoteCobvListarArgs) -> Result<(), C
     };
     match context.formato() {
         Formato::Json => output::print_json(&json!({ "lotes": lotes })),
-        Formato::Csv => output::print_raw(&csv(&lotes).csv(context.separador())),
+        Formato::Csv => output::print_csv(&csv(&lotes), context.separador()),
         Formato::Texto => {
             context.warn_if_sandbox(&settings);
             let formato = "%d/%m/%Y %H:%M";
@@ -824,6 +824,27 @@ Problemas
             texto.ends_with("Veja por quê: inter-pj pix lote-cobv situacao 42 negada"),
             "{texto}"
         );
+    }
+
+    #[test]
+    fn the_csv_for_a_terminal_has_no_escape_sequence() {
+        let forjado: LoteCobv = serde_json::from_value(json!({
+            "id": 42,
+            "descricao": "Mensalidades\u{1b}]52;c;ZXZpbA==\u{7}\u{9b}2J",
+            "criacao": "2026-09-24T13:10:00.358Z",
+            "cobsv": []
+        }))
+        .unwrap();
+        let tabela = csv(&[forjado]);
+        let terminal = tabela.csv_para_terminal(crate::tabela::Separador::Virgula);
+        assert!(
+            !terminal.contains(['\u{1b}', '\u{7}', '\u{9b}']),
+            "{terminal}"
+        );
+        assert_eq!(terminal.split("\r\n").count(), 3, "{terminal}");
+        // In a file, the text as the API sent it.
+        let arquivo = tabela.csv(crate::tabela::Separador::Virgula);
+        assert!(arquivo.contains("Mensalidades\u{1b}"), "{arquivo}");
     }
 
     #[test]
