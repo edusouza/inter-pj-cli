@@ -221,6 +221,6 @@ async fn identificadores_invalidos_nao_chamam_a_api() {
         ][..],
     ] {
         let assert = env.cmd().args(args).assert().code(2);
-        assert!(!stderr_of(&assert).is_empty());
+        assert_ne!(stderr_of(&assert), "");
     }
 }
