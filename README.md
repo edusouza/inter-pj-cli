@@ -589,7 +589,7 @@ Copia e cola  00020101021226760014br.gov.bcb.pix2554pix.example.com/qr/v2/9d36b8
 $ inter-pj pix cob consultar 7978c0c97ea847e78e8849634473c1f1 --qrcode
 ```
 
-`--qrcode` e `--qrcode-png` funcionam como nas cobranças com boleto, mas o QR Code só é gerado enquanto a cobrança está ativa: para uma cobrança paga ou removida, `--qrcode` mostra um aviso no lugar dele, e `--qrcode-png` termina com erro, sem gravar a imagem.
+`--qrcode` e `--qrcode-png` funcionam como nas cobranças com boleto, mas o QR Code só é gerado enquanto a cobrança está ativa e não expirou (depois da expiração, o status continua `ativa`, mas o Pix não é mais aceito): para uma cobrança paga, removida ou expirada, `--qrcode` mostra um aviso no lugar dele, e `--qrcode-png` termina com erro, sem gravar a imagem.
 
 A listagem mostra as cobranças criadas em um período, por padrão os últimos 30 dias até agora:
 

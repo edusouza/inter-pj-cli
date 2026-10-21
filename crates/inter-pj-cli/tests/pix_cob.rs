@@ -550,6 +550,51 @@ async fn cobranca_paga_nao_e_revisada_nem_tem_qr_code() {
     );
 }
 
+/// The status stays `ATIVA` after the expiration, but the Pix is no longer
+/// accepted: no image of a QR Code that cannot be paid.
+#[tokio::test(flavor = "multi_thread")]
+async fn cobranca_expirada_nao_tem_qr_code() {
+    let env = env().await;
+    env.mount_token("cob.read", None).await;
+    // Created on 23/09/2026 for 1 hour.
+    Mock::given(method("GET"))
+        .and(path(format!("/pix/v2/cob/{TXID}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(cob("ATIVA")))
+        .up_to_n_times(1)
+        .expect(1)
+        .mount(&env.server)
+        .await;
+    let png = env.path("qr.png");
+    let assert = env
+        .cmd()
+        .args(["pix", "cob", "consultar", TXID, "--qrcode-png"])
+        .arg(&png)
+        .assert()
+        .code(2);
+    assert!(
+        stderr_of(&assert).contains("a cobrança expirou em 23/09/2026"),
+        "{}",
+        stderr_of(&assert)
+    );
+    assert!(!png.exists());
+
+    // Created now, for 1 hour: the image is saved.
+    let mut vigente = cob("ATIVA");
+    vigente["calendario"]["criacao"] = json!(chrono::Utc::now().to_rfc3339());
+    Mock::given(method("GET"))
+        .and(path(format!("/pix/v2/cob/{TXID}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(vigente))
+        .expect(1)
+        .mount(&env.server)
+        .await;
+    env.cmd()
+        .args(["pix", "cob", "consultar", TXID, "--qrcode-png"])
+        .arg(&png)
+        .assert()
+        .success();
+    assert!(fs::read(&png).unwrap().starts_with(b"\x89PNG"));
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn lista_as_cobrancas_do_periodo() {
     let env = env().await;
