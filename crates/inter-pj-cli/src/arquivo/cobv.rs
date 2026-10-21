@@ -539,7 +539,7 @@ mod tests {
             ),
             (
                 |v| v["valor"]["desconto"]["descontoDataFixa"][0]["data"] = json!("2026-10-24"),
-                "cobv.json, campo \"valor.desconto.descontoDataFixa[0].data\": o desconto vale até uma data no vencimento ou antes dele",
+                "cobv.json, campo \"valor.desconto.descontoDataFixa[0].data\": o desconto vale até uma data antes do vencimento",
             ),
             (
                 |v| v["valor"]["desconto"]["descontoDataFixa"][0]["valor"] = json!(1),

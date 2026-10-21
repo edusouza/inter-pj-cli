@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use serde::Serialize;
 
 use super::Context;
+use crate::chamada::argumento;
 use crate::cli::Formato;
 use crate::config::Settings;
 use crate::error::CliError;
@@ -60,15 +61,68 @@ impl OpcoesQr {
         json: &impl Serialize,
         copia_e_cola: &Result<&str, String>,
     ) -> Result<(), CliError> {
+        self.mostrar_com(context, settings, texto, json, copia_e_cola, None)
+    }
+
+    /// [`mostrar`](Self::mostrar) for a charge the command has just
+    /// created: a PNG that cannot be made or saved is a warning with the
+    /// command that saves it later, `consulta` and the image option, and
+    /// not an error, which a script would read as "nothing was created"
+    /// and repeat. With the image on the standard output, the charge goes
+    /// to `stderr` when the image fails.
+    pub(crate) fn mostrar_criada(
+        &self,
+        context: &Context,
+        settings: &Settings,
+        texto: &str,
+        json: &impl Serialize,
+        copia_e_cola: &Result<&str, String>,
+        consulta: &str,
+    ) -> Result<(), CliError> {
+        self.mostrar_com(context, settings, texto, json, copia_e_cola, Some(consulta))
+    }
+
+    fn mostrar_com(
+        &self,
+        context: &Context,
+        settings: &Settings,
+        texto: &str,
+        json: &impl Serialize,
+        copia_e_cola: &Result<&str, String>,
+        criada: Option<&str>,
+    ) -> Result<(), CliError> {
         let qr_code = || {
             copia_e_cola
                 .clone()
                 .and_then(QrPix::new)
                 .map_err(CliError::Usage)
         };
+        // After a creation, the failure of the image is only a warning.
+        let falhou = |png: &Saida, err: CliError| match criada {
+            None => Err(err),
+            Some(consulta) => {
+                eprintln!(
+                    "aviso: a cobrança foi criada, mas o QR Code não foi gravado: {}",
+                    output::limpo(&err.to_string())
+                );
+                eprintln!(
+                    "aviso: para gravá-lo, use: {consulta} --qrcode-png {}",
+                    argumento(&png.caminho().display().to_string())
+                );
+                Ok(())
+            }
+        };
         // The image alone goes to the standard output.
         if let Some(png) = self.png.as_ref().filter(|png| png.stdout()) {
-            return png.gravar(&qr_code()?.png());
+            return match qr_code().and_then(|qr| png.gravar(&qr.png())) {
+                Ok(()) => Ok(()),
+                Err(err) => {
+                    if criada.is_some() {
+                        eprintln!("{}", output::sem_controle(texto));
+                    }
+                    falhou(png, err)
+                }
+            };
         }
         match context.formato() {
             Formato::Json => output::print_json(json)?,
@@ -85,13 +139,18 @@ impl OpcoesQr {
             }
         }
         if let Some(png) = &self.png {
-            let imagem = qr_code()?.png();
-            png.gravar(&imagem)?;
-            eprintln!(
-                "QR Code salvo em {} ({})",
-                png.caminho().display(),
-                tamanho(imagem.len())
-            );
+            let gravada = qr_code().and_then(|qr| {
+                let imagem = qr.png();
+                png.gravar(&imagem).map(|()| imagem.len())
+            });
+            match gravada {
+                Ok(bytes) => eprintln!(
+                    "QR Code salvo em {} ({})",
+                    png.caminho().display(),
+                    tamanho(bytes)
+                ),
+                Err(err) => falhou(png, err)?,
+            }
         }
         Ok(())
     }

@@ -1,13 +1,15 @@
 //! Output helpers: Brazilian formatting and writing to stdout.
 
 use std::borrow::Cow;
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 
 use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, TimeZone};
+use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::{Decimal, RoundingStrategy};
 use serde::Serialize;
 
 use crate::error::CliError;
+use crate::tabela::{Separador, Tabela};
 
 /// Formats a monetary value in Brazilian reais: `R$ 1.234,56` / `-R$ 10,00`.
 pub(crate) fn brl(value: Decimal) -> String {
@@ -20,6 +22,23 @@ pub(crate) fn brl(value: Decimal) -> String {
     let digits = format!("{:.2}", rounded.abs());
     let (integer, cents) = digits.split_once('.').unwrap_or((&digits, "00"));
     format!("{sign}R$ {},{cents}", group_thousands(integer))
+}
+
+/// A monetary value as a JSON number, as the library's models write it:
+/// whole values as integers (`37`), others through their shortest
+/// round-trip `f64` (`160.5`).
+pub(crate) fn valor_json(valor: Decimal) -> serde_json::Value {
+    if valor.fract().is_zero()
+        && let Some(inteiro) = valor.to_i64()
+    {
+        return inteiro.into();
+    }
+    // Amounts the CLI reads have at most 12 digits, which an `f64` holds;
+    // the text is only a fallback.
+    valor
+        .to_f64()
+        .and_then(serde_json::Number::from_f64)
+        .map_or_else(|| valor.to_string().into(), serde_json::Value::Number)
 }
 
 /// A percentage the Brazilian way: `2,5%`.
@@ -38,16 +57,44 @@ fn group_thousands(integer: &str) -> String {
     out
 }
 
-/// Text from the API or from a code on one line, without control
-/// characters: names and descriptions come from third parties, and an
-/// escape sequence or a line break in them could rewrite or fake what the
-/// terminal shows (e.g. a line with another amount).
+/// Whether `c` must not reach the terminal from the data: the control
+/// characters (escape sequences, line breaks, the C1 controls) and the
+/// format characters that reorder or hide text. These are:
+/// - the bidirectional marks, embeddings, overrides and isolates (a U+202E
+///   in a description would show the rest of the row, the amount included,
+///   reversed);
+/// - the zero-width space, the word joiner and the invisible operators;
+/// - the byte order mark;
+/// - the line and paragraph separators.
+///
+/// The joiners of emoji sequences and of some scripts (U+200C, U+200D)
+/// stay.
+fn perigoso(c: char) -> bool {
+    c.is_control()
+        || matches!(
+            c,
+            '\u{061C}'
+                | '\u{200B}'
+                | '\u{200E}'
+                | '\u{200F}'
+                | '\u{2028}'..='\u{202E}'
+                | '\u{2060}'..='\u{2064}'
+                | '\u{2066}'..='\u{2069}'
+                | '\u{FEFF}'
+        )
+}
+
+/// Text from the API or from a code on one line, without the characters
+/// of [`perigoso`]: names and descriptions come from third parties, and an
+/// escape sequence, a line break or a bidirectional override in them could
+/// rewrite or fake what the terminal shows (e.g. a line with another
+/// amount).
 pub(crate) fn limpo(texto: &str) -> Cow<'_, str> {
-    if texto.chars().any(char::is_control) {
+    if texto.chars().any(perigoso) {
         Cow::Owned(
             texto
                 .chars()
-                .map(|c| if c.is_control() { '\u{FFFD}' } else { c })
+                .map(|c| if perigoso(c) { '\u{FFFD}' } else { c })
                 .collect(),
         )
     } else {
@@ -71,6 +118,7 @@ pub(crate) fn sem_controle(texto: &str) -> Cow<'_, str> {
 }
 
 /// Renders label/value rows with aligned columns (values right-aligned).
+/// Labels and values go through [`limpo`]: both can come from the API.
 pub(crate) fn key_values(rows: &[(&str, String)]) -> String {
     let label_width = rows
         .iter()
@@ -84,7 +132,7 @@ pub(crate) fn key_values(rows: &[(&str, String)]) -> String {
         .unwrap_or(0);
     rows.iter()
         .map(|(label, value)| {
-            let value = limpo(value);
+            let (label, value) = (limpo(label), limpo(value));
             format!("{label:<label_width$}  {value:>value_width$}")
         })
         .collect::<Vec<_>>()
@@ -92,6 +140,7 @@ pub(crate) fn key_values(rows: &[(&str, String)]) -> String {
 }
 
 /// Renders label/value rows with values left-aligned (for paths and text).
+/// Labels and values go through [`limpo`]: both can come from the API.
 pub(crate) fn key_values_left(rows: &[(&str, String)]) -> String {
     let label_width = rows
         .iter()
@@ -100,7 +149,7 @@ pub(crate) fn key_values_left(rows: &[(&str, String)]) -> String {
         .unwrap_or(0);
     rows.iter()
         .map(|(label, value)| {
-            format!("{label:<label_width$}  {}", limpo(value))
+            format!("{:<label_width$}  {}", limpo(label), limpo(value))
                 .trim_end()
                 .to_owned()
         })
@@ -120,6 +169,18 @@ pub(crate) fn print(text: &str) -> Result<(), CliError> {
             Err(CliError::io("falha ao escrever na saída padrão", err))
         }
         _ => Ok(()),
+    }
+}
+
+/// Prints `tabela` as CSV. A file or a pipe gets the text as sent, for the
+/// spreadsheets and the scripts; a terminal, the text cleaned as in the
+/// text output (a text of the API could carry escape sequences), without
+/// the BOM.
+pub(crate) fn print_csv(tabela: &Tabela, separador: Separador) -> Result<(), CliError> {
+    if io::stdout().is_terminal() {
+        print_raw(&tabela.csv_para_terminal(separador))
+    } else {
+        print_raw(&tabela.csv(separador))
     }
 }
 
@@ -193,9 +254,10 @@ where
     )
 }
 
-/// A title and its lines, indented.
+/// A title and its lines, indented. The title goes through [`limpo`], like
+/// the lines: a txid or a name of the API can be part of it.
 pub(crate) fn secao(titulo: &str, linhas: &[(&str, String)]) -> String {
-    let mut texto = titulo.to_owned();
+    let mut texto = limpo(titulo).into_owned();
     for linha in key_values_left(linhas).lines() {
         texto.push_str("\n  ");
         texto.push_str(linha);
@@ -245,6 +307,17 @@ mod tests {
     }
 
     #[test]
+    fn amounts_are_json_numbers() {
+        let json = |input: &str| valor_json(dec(input)).to_string();
+        assert_eq!(json("37.00"), "37");
+        assert_eq!(json("0"), "0");
+        assert_eq!(json("160.50"), "160.5");
+        assert_eq!(json("2850.55"), "2850.55");
+        assert_eq!(json("9999999999.99"), "9999999999.99");
+        assert_eq!(json("0.01"), "0.01");
+    }
+
+    #[test]
     fn aligns_columns_with_accents() {
         let rows = [
             ("Saldo disponível", "R$ 2.850,55".to_owned()),
@@ -282,6 +355,30 @@ mod tests {
         ];
         assert_eq!(key_values_left(&rows).lines().count(), 2);
         assert_eq!(key_values(&rows).lines().count(), 2);
+    }
+
+    #[test]
+    fn titles_labels_and_marks_that_reorder_text_are_cleaned_too() {
+        // U+202E would show the rest of the line reversed.
+        assert_eq!(limpo("Pedido \u{202E}00,1 $R"), "Pedido \u{FFFD}00,1 $R");
+        for marca in ['\u{200B}', '\u{2028}', '\u{2066}', '\u{FEFF}', '\u{061C}'] {
+            assert_eq!(limpo(&format!("a{marca}b")), "a\u{FFFD}b", "{marca:?}");
+        }
+        // The joiners of emoji sequences stay.
+        assert_eq!(limpo("👩\u{200D}💻"), "👩\u{200D}💻");
+
+        let texto = secao(
+            "Cobrança Pix X\n  Status       ativa",
+            &[("Pedido\n  Valor  R$ 1,00\u{202E}", "123".to_owned())],
+        );
+        assert_eq!(texto.lines().count(), 2, "{texto}");
+        assert!(!texto.contains('\u{202E}'), "{texto}");
+        assert!(
+            texto.starts_with("Cobrança Pix X\u{FFFD}  Status       ativa\n"),
+            "{texto}"
+        );
+        let rows = [("A\nB", "1".to_owned())];
+        assert_eq!(key_values(&rows), "A\u{FFFD}B  1");
     }
 
     #[test]

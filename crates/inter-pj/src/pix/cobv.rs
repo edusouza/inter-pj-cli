@@ -509,10 +509,12 @@ impl DescontoCobv {
                 &format!("{campo}.valorPerc"),
                 Some(original),
             )?;
-            if desconto.data > vencimento {
+            // "A data de desconto obrigatoriamente deverá ser menor que a
+            // data de vencimento da cobrança" (the API's documentation).
+            if desconto.data >= vencimento {
                 return Err(CobrancaPixError::new(
                     format!("{campo}.data"),
-                    "o desconto vale até uma data no vencimento ou antes dele",
+                    "o desconto vale até uma data antes do vencimento",
                 ));
             }
             if datas[..i].iter().any(|outro| outro.data == desconto.data) {
@@ -550,7 +552,7 @@ impl Serialize for DescontoCobv {
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
 pub struct DescontoData {
-    /// Last day of the discount.
+    /// Last day of the discount, before the due date.
     pub data: NaiveDate,
     /// Amount or percentage.
     #[serde(serialize_with = "decimal_texto::serialize")]
@@ -1030,6 +1032,17 @@ mod tests {
         assert_eq!(
             campo(DescontoCobv::ValorFixoAteDatas(vec![depois])),
             Err("valor.desconto.descontoDataFixa[0].data".to_owned())
+        );
+        // On the due date itself, the API refuses it too.
+        let no_vencimento = DescontoData::new(dia(2026, 12, 31), dec("10"));
+        assert_eq!(
+            campo(DescontoCobv::ValorFixoAteDatas(vec![no_vencimento])),
+            Err("valor.desconto.descontoDataFixa[0].data".to_owned())
+        );
+        let na_vespera = DescontoData::new(dia(2026, 12, 30), dec("10"));
+        assert_eq!(
+            campo(DescontoCobv::ValorFixoAteDatas(vec![na_vespera])),
+            Ok(())
         );
         assert_eq!(
             campo(DescontoCobv::ValorFixoAteDatas(vec![ate(11, "200")])),

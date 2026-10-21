@@ -129,13 +129,7 @@ pub(crate) fn ler_lote(caminho: &Path, hoje: NaiveDate) -> Result<ArquivoLote, C
 }
 
 fn json(nome: &str, texto: &str, hoje: NaiveDate) -> Result<ArquivoLote, CliError> {
-    let valor: Value = serde_json::from_str(texto).map_err(|err| {
-        CliError::Usage(format!(
-            "{nome}: JSON inválido na linha {}, coluna {}",
-            err.line(),
-            err.column()
-        ))
-    })?;
+    let valor = super::json(texto, nome)?;
     let (meu_identificador, itens) = match &valor {
         Value::Array(itens) => (None, itens),
         Value::Object(objeto) => {

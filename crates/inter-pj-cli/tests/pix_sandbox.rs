@@ -77,7 +77,70 @@ async fn paga_uma_cobranca_com_vencimento_com_outro_valor() {
         .assert()
         .success();
     let json: Value = serde_json::from_str(&stdout_of(&assert)).unwrap();
-    assert_eq!(json, json!({"endToEndId": E2E, "valor": "160.50"}));
+    assert_eq!(json, json!({"endToEndId": E2E, "valor": 160.5}));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_conferencia_e_da_mesma_conta() {
+    let env = TestEnv::new().await;
+    env.write_config(&format!(
+        "\n[perfis.filial]\nambiente = \"sandbox\"\nclient_id = \"id-da-filial\"\ncertificado = '{}'\nchave_privada = '{}'",
+        env.path("certificado.crt").display(),
+        env.path("chave.key").display()
+    ));
+    env.mount_token("pix.write", None).await;
+    Mock::given(method("POST"))
+        .and(path(format!("/pix/v2/cob/pagar/{TXID}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"e2e": E2E})))
+        .mount(&env.server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(format!("/pix/v2/cobv/pagar/{TXID}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"e2e": E2E})))
+        .mount(&env.server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/pix/v2/sandbox/cob/pagamento"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"endToEnd": E2E})))
+        .mount(&env.server)
+        .await;
+    let casos: [(&[&str], String); 3] = [
+        (
+            &["pix", "cob", "pagar", TXID, "--valor", "1"],
+            format!("pix cob consultar {TXID}"),
+        ),
+        (
+            &["pix", "cobv", "pagar", TXID, "--valor", "1"],
+            format!("pix cobv consultar {TXID}"),
+        ),
+        (
+            &[
+                "pix",
+                "sandbox",
+                "pagar-qrcode",
+                "--copia-e-cola",
+                COPIA_E_COLA,
+                "--valor",
+                "1",
+            ],
+            "pix recebidos listar".to_owned(),
+        ),
+    ];
+    for (comando, consulta) in &casos {
+        let assert = env
+            .cmd()
+            .args(["-p", "filial", "--ambiente", "sandbox"])
+            .args(*comando)
+            .assert()
+            .success();
+        let stdout = stdout_of(&assert);
+        assert!(
+            stdout.ends_with(&format!(
+                "Confira com: inter-pj -p filial --ambiente sandbox {consulta}\n"
+            )),
+            "{stdout}"
+        );
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
