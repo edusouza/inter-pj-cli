@@ -502,7 +502,7 @@ async fn listar(context: &Context, args: &PixCobListarArgs) -> Result<(), CliErr
     };
     match context.formato() {
         Formato::Json => output::print_json(&json!({ "cobs": cobs })),
-        Formato::Csv => output::print_raw(&csv(&cobs).csv(context.separador())),
+        Formato::Csv => output::print_csv(&csv(&cobs), context.separador()),
         Formato::Texto => {
             context.warn_if_sandbox(&settings);
             let mut texto = format!("{}\n\n", filtros.titulo("Cobranças Pix imediatas", &[]));
@@ -851,6 +851,22 @@ Copia e cola  00020101021226"
         assert_eq!(
             copia_e_cola_em(&sem_calendario, agora("2030-01-01T00:00:00Z"), &brasilia()),
             Ok("00020101021226")
+        );
+    }
+
+    #[test]
+    fn the_csv_for_a_terminal_has_no_escape_sequence() {
+        let mut forjada = cob("ATIVA");
+        forjada.solicitacao_pagador = Some("Pedido\u{1b}]52;c;ZXZpbA==\u{7}\nR$ 0,01".to_owned());
+        let tabela = csv(&[forjada]);
+        let terminal = tabela.csv_para_terminal(crate::tabela::Separador::Virgula);
+        assert!(!terminal.contains(['\u{1b}', '\u{7}']), "{terminal}");
+        assert_eq!(terminal.split("\r\n").count(), 3, "{terminal}");
+        // In a file, the text as the API sent it.
+        assert!(
+            tabela
+                .csv(crate::tabela::Separador::Virgula)
+                .contains('\u{1b}')
         );
     }
 

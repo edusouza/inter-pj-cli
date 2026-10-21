@@ -770,7 +770,7 @@ async fn listar(context: &Context, args: &PixCobvListarArgs) -> Result<(), CliEr
     };
     match context.formato() {
         Formato::Json => output::print_json(&json!({ "cobs": cobs })),
-        Formato::Csv => output::print_raw(&csv(&cobs).csv(context.separador())),
+        Formato::Csv => output::print_csv(&csv(&cobs), context.separador()),
         Formato::Texto => {
             context.warn_if_sandbox(&settings);
             let lote: Vec<String> = args
@@ -1249,6 +1249,27 @@ Cobrança Pix com vencimento {TXID} a alterar
         assert!(
             resumo.contains("  E-mail      antigo@exemplo.com.br → sem e-mail\n"),
             "{resumo}"
+        );
+    }
+
+    #[test]
+    fn the_csv_for_a_terminal_has_no_escape_sequence() {
+        let mut forjada = cobv("ATIVA");
+        if let Some(devedor) = forjada.devedor.as_mut() {
+            devedor.nome = Some("Fulano\u{1b}]52;c;ZXZpbA==\u{7}\u{9b}2J".to_owned());
+        }
+        let tabela = csv(&[forjada]);
+        let terminal = tabela.csv_para_terminal(crate::tabela::Separador::PontoEVirgula);
+        assert!(
+            !terminal.contains(['\u{1b}', '\u{7}', '\u{9b}']),
+            "{terminal}"
+        );
+        assert_eq!(terminal.split("\r\n").count(), 3, "{terminal}");
+        // In a file, the text as the API sent it.
+        assert!(
+            tabela
+                .csv(crate::tabela::Separador::PontoEVirgula)
+                .contains('\u{1b}')
         );
     }
 
