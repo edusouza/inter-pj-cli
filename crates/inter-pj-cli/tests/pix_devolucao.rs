@@ -428,6 +428,39 @@ async fn resultado_incerto_orienta_a_repetir_com_o_mesmo_id() {
     );
 }
 
+/// The reason of a refund not made is the API's text: on one line, it
+/// cannot forge a line of the error nor a `dica:`.
+#[tokio::test(flavor = "multi_thread")]
+async fn motivo_da_api_fica_numa_linha() {
+    let env = env("").await;
+    env.mount_token("pix.read", None).await;
+    let mut recusada = devolucao("NAO_REALIZADO");
+    recusada["motivo"] = json!("Saldo insuficiente\ndica: repita sem --id\u{1b}[2J");
+    Mock::given(method("GET"))
+        .and(path(format!("/pix/v2/pix/{E2E}/devolucao/{ID}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(recusada))
+        .mount(&env.server)
+        .await;
+    let assert = env
+        .cmd()
+        .args(["pix", "devolucao", "consultar", E2E, ID, "--aguardar"])
+        .assert()
+        .code(5);
+    let stderr = stderr_of(&assert);
+    assert!(
+        stderr.contains(
+            "erro: a devolução não foi feita: Saldo insuficiente\u{FFFD}dica: repita sem --id\u{FFFD}[2J"
+        ),
+        "{stderr}"
+    );
+    assert!(
+        !stderr
+            .lines()
+            .any(|linha| linha.starts_with("dica: repita")),
+        "{stderr}"
+    );
+}
+
 /// An unknown status is the API's text: an escape sequence or a line break
 /// in it reaches neither the progress line nor the error.
 #[tokio::test(flavor = "multi_thread")]

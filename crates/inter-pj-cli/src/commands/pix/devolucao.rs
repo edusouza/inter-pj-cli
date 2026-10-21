@@ -364,11 +364,13 @@ async fn aguardar(
 /// (`terminou`), only a refused refund is an error.
 fn desfecho(devolucao: &Devolucao, terminou: bool, timeout: Duration) -> Result<(), CliError> {
     match &devolucao.status {
+        // The reason is the API's text, on one line: a line break in it
+        // would forge a line of the error, or a `dica:`.
         Some(StatusDevolucao::NaoRealizado) => Err(CliError::DevolucaoNaoRealizada {
-            motivo: devolucao
-                .motivo
-                .clone()
-                .unwrap_or_else(|| "a API não informou o motivo".to_owned()),
+            motivo: devolucao.motivo.as_deref().map_or_else(
+                || "a API não informou o motivo".to_owned(),
+                |motivo| output::limpo(motivo).into_owned(),
+            ),
         }),
         _ if terminou => Ok(()),
         _ => Err(CliError::TempoEsgotado {
