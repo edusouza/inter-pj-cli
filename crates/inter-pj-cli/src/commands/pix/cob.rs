@@ -484,7 +484,7 @@ where
         .as_deref()
         .filter(|texto| !texto.is_empty())
     {
-        let _ = write!(texto, "\n\nCopia e cola  {copia_e_cola}");
+        let _ = write!(texto, "\n\nCopia e cola  {}", output::limpo(copia_e_cola));
     }
     texto
 }

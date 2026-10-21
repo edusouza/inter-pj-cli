@@ -550,6 +550,44 @@ async fn cobranca_paga_nao_e_revisada_nem_tem_qr_code() {
     );
 }
 
+/// The txid and the names of the additional information come from the API:
+/// a line break in them cannot fake a line of the charge, nor a
+/// bidirectional mark reverse one.
+#[tokio::test(flavor = "multi_thread")]
+async fn textos_da_api_nao_forjam_linhas() {
+    let env = env().await;
+    env.mount_token("cob.read", None).await;
+    let mut forjada = cob("ATIVA");
+    forjada["txid"] = json!("X\n  Valor        R$ 1,00");
+    forjada["infoAdicionais"] =
+        json!([{"nome": "Pedido\n  Status       paga\u{202E}", "valor": "1"}]);
+    Mock::given(method("GET"))
+        .and(path(format!("/pix/v2/cob/{TXID}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(forjada))
+        .expect(1)
+        .mount(&env.server)
+        .await;
+    let texto = stdout_of(
+        &env.cmd()
+            .args(["pix", "cob", "consultar", TXID])
+            .assert()
+            .success(),
+    );
+    assert!(
+        texto.starts_with("Cobrança Pix X\u{FFFD}  Valor        R$ 1,00\n  Status       ativa\n"),
+        "{texto}"
+    );
+    let comecam = |inicio: &str| {
+        texto
+            .lines()
+            .filter(|linha| linha.starts_with(inicio))
+            .count()
+    };
+    assert_eq!(comecam("  Valor"), 1, "{texto}");
+    assert_eq!(comecam("  Status"), 1, "{texto}");
+    assert!(!texto.contains('\u{202E}'), "{texto}");
+}
+
 /// The status stays `ATIVA` after the expiration, but the Pix is no longer
 /// accepted: no image of a QR Code that cannot be paid.
 #[tokio::test(flavor = "multi_thread")]

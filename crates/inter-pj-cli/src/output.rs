@@ -34,16 +34,44 @@ fn group_thousands(integer: &str) -> String {
     out
 }
 
-/// Text from the API or from a code on one line, without control
-/// characters: names and descriptions come from third parties, and an
-/// escape sequence or a line break in them could rewrite or fake what the
-/// terminal shows (e.g. a line with another amount).
+/// Whether `c` must not reach the terminal from the data: the control
+/// characters (escape sequences, line breaks, the C1 controls) and the
+/// format characters that reorder or hide text. These are:
+/// - the bidirectional marks, embeddings, overrides and isolates (a U+202E
+///   in a description would show the rest of the row, the amount included,
+///   reversed);
+/// - the zero-width space, the word joiner and the invisible operators;
+/// - the byte order mark;
+/// - the line and paragraph separators.
+///
+/// The joiners of emoji sequences and of some scripts (U+200C, U+200D)
+/// stay.
+fn perigoso(c: char) -> bool {
+    c.is_control()
+        || matches!(
+            c,
+            '\u{061C}'
+                | '\u{200B}'
+                | '\u{200E}'
+                | '\u{200F}'
+                | '\u{2028}'..='\u{202E}'
+                | '\u{2060}'..='\u{2064}'
+                | '\u{2066}'..='\u{2069}'
+                | '\u{FEFF}'
+        )
+}
+
+/// Text from the API or from a code on one line, without the characters
+/// of [`perigoso`]: names and descriptions come from third parties, and an
+/// escape sequence, a line break or a bidirectional override in them could
+/// rewrite or fake what the terminal shows (e.g. a line with another
+/// amount).
 pub(crate) fn limpo(texto: &str) -> Cow<'_, str> {
-    if texto.chars().any(char::is_control) {
+    if texto.chars().any(perigoso) {
         Cow::Owned(
             texto
                 .chars()
-                .map(|c| if c.is_control() { '\u{FFFD}' } else { c })
+                .map(|c| if perigoso(c) { '\u{FFFD}' } else { c })
                 .collect(),
         )
     } else {
@@ -67,6 +95,7 @@ pub(crate) fn sem_controle(texto: &str) -> Cow<'_, str> {
 }
 
 /// Renders label/value rows with aligned columns (values right-aligned).
+/// Labels and values go through [`limpo`]: both can come from the API.
 pub(crate) fn key_values(rows: &[(&str, String)]) -> String {
     let label_width = rows
         .iter()
@@ -80,7 +109,7 @@ pub(crate) fn key_values(rows: &[(&str, String)]) -> String {
         .unwrap_or(0);
     rows.iter()
         .map(|(label, value)| {
-            let value = limpo(value);
+            let (label, value) = (limpo(label), limpo(value));
             format!("{label:<label_width$}  {value:>value_width$}")
         })
         .collect::<Vec<_>>()
@@ -88,6 +117,7 @@ pub(crate) fn key_values(rows: &[(&str, String)]) -> String {
 }
 
 /// Renders label/value rows with values left-aligned (for paths and text).
+/// Labels and values go through [`limpo`]: both can come from the API.
 pub(crate) fn key_values_left(rows: &[(&str, String)]) -> String {
     let label_width = rows
         .iter()
@@ -96,7 +126,7 @@ pub(crate) fn key_values_left(rows: &[(&str, String)]) -> String {
         .unwrap_or(0);
     rows.iter()
         .map(|(label, value)| {
-            format!("{label:<label_width$}  {}", limpo(value))
+            format!("{:<label_width$}  {}", limpo(label), limpo(value))
                 .trim_end()
                 .to_owned()
         })
@@ -201,9 +231,10 @@ where
     )
 }
 
-/// A title and its lines, indented.
+/// A title and its lines, indented. The title goes through [`limpo`], like
+/// the lines: a txid or a name of the API can be part of it.
 pub(crate) fn secao(titulo: &str, linhas: &[(&str, String)]) -> String {
-    let mut texto = titulo.to_owned();
+    let mut texto = limpo(titulo).into_owned();
     for linha in key_values_left(linhas).lines() {
         texto.push_str("\n  ");
         texto.push_str(linha);
@@ -290,6 +321,30 @@ mod tests {
         ];
         assert_eq!(key_values_left(&rows).lines().count(), 2);
         assert_eq!(key_values(&rows).lines().count(), 2);
+    }
+
+    #[test]
+    fn titles_labels_and_marks_that_reorder_text_are_cleaned_too() {
+        // U+202E would show the rest of the line reversed.
+        assert_eq!(limpo("Pedido \u{202E}00,1 $R"), "Pedido \u{FFFD}00,1 $R");
+        for marca in ['\u{200B}', '\u{2028}', '\u{2066}', '\u{FEFF}', '\u{061C}'] {
+            assert_eq!(limpo(&format!("a{marca}b")), "a\u{FFFD}b", "{marca:?}");
+        }
+        // The joiners of emoji sequences stay.
+        assert_eq!(limpo("👩\u{200D}💻"), "👩\u{200D}💻");
+
+        let texto = secao(
+            "Cobrança Pix X\n  Status       ativa",
+            &[("Pedido\n  Valor  R$ 1,00\u{202E}", "123".to_owned())],
+        );
+        assert_eq!(texto.lines().count(), 2, "{texto}");
+        assert!(!texto.contains('\u{202E}'), "{texto}");
+        assert!(
+            texto.starts_with("Cobrança Pix X\u{FFFD}  Status       ativa\n"),
+            "{texto}"
+        );
+        let rows = [("A\nB", "1".to_owned())];
+        assert_eq!(key_values(&rows), "A\u{FFFD}B  1");
     }
 
     #[test]

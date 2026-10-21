@@ -19,6 +19,10 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 - Biblioteca: lotes de cobranças com vencimento — `Pix::criar_lote_cobv` (cada cobrança conferida como na criação avulsa, com o erro apontando o item, e sem txids repetidos), `revisar_lote_cobv`, `consultar_lote_cobv` (situação e problema de cada cobrança), `sumario_lote_cobv`, `consultar_lote_cobv_por_situacao` e `listar_lotes_cobv`/`listar_todos_lotes_cobv` (#38).
 - Biblioteca: pagamentos de cobranças Pix no sandbox — `Pix::pagar_cob_no_sandbox`, `pagar_cobv_no_sandbox` e `pagar_copia_e_cola_no_sandbox`, recusados fora do sandbox antes de qualquer requisição (#39).
 
+### Alterado
+
+- Na saída em texto, as tabelas e os blocos de rótulo e valor trocam por `�` também os caracteres que invertem ou escondem texto (controles bidirecionais, de largura zero, o BOM e os separadores de linha e de parágrafo), e o filtro vale para os títulos e os rótulos, que também podem vir da API: um txid ou o nome de uma informação adicional com uma quebra de linha não forja mais uma linha em `pix cob consultar` (#439).
+
 ## [0.5.0] - 2026-09-24
 
 Cobranças: boletos com Pix para os clientes da empresa, da emissão ao cancelamento, com o QR Code do Pix no terminal e em PNG.
