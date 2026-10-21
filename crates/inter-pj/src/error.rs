@@ -1,8 +1,10 @@
 use std::error::Error as StdError;
 use std::fmt;
 
+use crate::endpoint;
 use crate::identity::IdentityError;
 use crate::problem::Problem;
+use crate::retry;
 
 /// Result type used throughout the crate.
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -30,6 +32,13 @@ pub enum Error {
     /// The request could not be completed (network, TLS, timeout...).
     #[error("falha de comunicação com o Inter: {}", describe_transport(.0))]
     Transport(#[source] reqwest::Error),
+    /// The request for an access token could not be completed (network,
+    /// TLS, timeout...): the operation itself was not sent.
+    #[error(
+        "falha de comunicação com o Inter ao pedir o token de acesso: {}",
+        describe_transport(.0)
+    )]
+    TokenTransport(#[source] reqwest::Error),
     /// The API answered with a payload that could not be understood.
     #[error("resposta inesperada da API em {operation}: {message}")]
     Decode {
@@ -43,6 +52,44 @@ pub enum Error {
 impl From<reqwest::Error> for Error {
     fn from(err: reqwest::Error) -> Self {
         Self::Transport(err)
+    }
+}
+
+impl Error {
+    /// Whether the operation may have been processed by the API despite the
+    /// error: its request was sent and the answer was lost or unreadable (a
+    /// timeout or a dropped connection, a `5xx`, a success whose body could
+    /// not be read).
+    ///
+    /// It is `false` when the operation surely was not processed: the
+    /// connection could not be established, the API refused it (`4xx`,
+    /// `429` included), the access token could not be obtained, or nothing
+    /// was sent (invalid input, configuration, identity). An operation
+    /// without an idempotency key whose error says `true` must be checked
+    /// before it is tried again, or it may be done twice.
+    pub fn may_have_been_processed(&self) -> bool {
+        match self {
+            Self::Transport(err) => !retry::never_sent(err),
+            Self::Api(api) => {
+                matches!(api.kind(), ApiErrorKind::Unavailable | ApiErrorKind::Server)
+            }
+            // The token endpoint is read before the operation is sent.
+            Self::Decode { operation, .. } => *operation != endpoint::TOKEN.to_string(),
+            Self::Config(_)
+            | Self::InvalidInput(_)
+            | Self::Identity(_)
+            | Self::Auth(_)
+            | Self::TokenTransport(_) => false,
+        }
+    }
+
+    /// `self` as a failure of the token request: a transport error becomes
+    /// [`Error::TokenTransport`].
+    pub(crate) fn of_token_request(self) -> Self {
+        match self {
+            Self::Transport(err) => Self::TokenTransport(err),
+            other => other,
+        }
     }
 }
 
@@ -246,6 +293,38 @@ mod tests {
             err.to_string(),
             "GET /banking/v2/saldo respondeu 502 (gateway inválido): <html> <body>Bad Gateway</body> </html>"
         );
+    }
+
+    #[test]
+    fn only_a_request_that_was_sent_may_have_been_processed() {
+        let api = |status| Error::Api(Box::new(ApiError::new(status, "POST /x".into(), b"")));
+        for status in [500, 502, 503, 504] {
+            assert!(api(status).may_have_been_processed(), "{status}");
+        }
+        for status in [400, 401, 403, 404, 409, 422, 429] {
+            assert!(!api(status).may_have_been_processed(), "{status}");
+        }
+
+        // An unreadable success of the operation, but not of the token
+        // request, which comes before it.
+        let decode = |operation: &str| Error::Decode {
+            operation: operation.to_owned(),
+            message: "formato inesperado".to_owned(),
+        };
+        assert!(decode("POST /banking/v2/pagamento").may_have_been_processed());
+        assert!(!decode("POST /oauth/v2/token").may_have_been_processed());
+
+        for err in [
+            Error::Config("URL base inválida".to_owned()),
+            Error::InvalidInput("valor inválido".into()),
+            Error::Auth(Box::new(ApiError::new(
+                401,
+                "POST /oauth/v2/token".into(),
+                b"",
+            ))),
+        ] {
+            assert!(!err.may_have_been_processed(), "{err:?}");
+        }
     }
 
     #[test]

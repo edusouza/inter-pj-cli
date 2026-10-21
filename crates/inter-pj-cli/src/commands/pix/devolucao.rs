@@ -19,7 +19,7 @@ use crate::commands::{Context, simulacao};
 use crate::confirmacao::{
     Stdio, Terminal, confirmar, descrever_ambiente, pode_confirmar, verificar_limite,
 };
-use crate::error::{CliError, resultado_incerto};
+use crate::error::CliError;
 use crate::output::{self, horario_em, secao};
 use crate::valor::por_extenso;
 
@@ -88,10 +88,13 @@ async fn solicitar(
             .as_ref()
             .is_some_and(StatusDevolucao::is_final);
         if args.espera.aguardar && !terminou {
-            let (atual, terminou) =
-                aguardar(&client, &args.e2e, &id, args.espera.timeout, intervalo).await?;
-            mostrar(context, &args.e2e, &id, &atual)?;
-            return desfecho(&atual, terminou, args.espera.timeout);
+            let espera = Espera {
+                e2e: &args.e2e,
+                id: &id,
+                timeout: args.espera.timeout,
+                intervalo,
+            };
+            return espera.ate_o_fim(context, &client, existente).await;
         }
         mostrar(context, &args.e2e, &id, existente)?;
         return desfecho(existente, true, args.espera.timeout);
@@ -114,10 +117,15 @@ async fn solicitar(
         .map_err(|err| incerta(err, &args.e2e, &id))?;
     let terminou = feita.status.as_ref().is_some_and(StatusDevolucao::is_final);
     if args.espera.aguardar && !terminou {
-        let (atual, terminou) =
-            aguardar(&client, &args.e2e, &id, args.espera.timeout, intervalo).await?;
-        mostrar(context, &args.e2e, &id, &atual)?;
-        return desfecho(&atual, terminou, args.espera.timeout);
+        // The id, before the wait: an interrupted wait does not lose it.
+        eprintln!("devolução {id} solicitada; aguardando o fim");
+        let espera = Espera {
+            e2e: &args.e2e,
+            id: &id,
+            timeout: args.espera.timeout,
+            intervalo,
+        };
+        return espera.ate_o_fim(context, &client, &feita).await;
     }
     match context.formato() {
         Formato::Json => output::print_json(&feita)?,
@@ -248,11 +256,12 @@ fn resumo(
 /// The error of a refund: with an unknown outcome, how to check and
 /// repeat it with the same id.
 fn incerta(err: InterError, e2e: &str, id: &IdDevolucao) -> CliError {
-    if resultado_incerto(&err) {
+    if err.may_have_been_processed() {
         CliError::DevolucaoIncerta {
             source: err,
             e2e: e2e.to_owned(),
             id: id.to_string(),
+            aceita: false,
         }
     } else {
         err.into()
@@ -277,6 +286,45 @@ async fn consultar(
         aguardar(&client, &args.e2e, &args.id, args.espera.timeout, intervalo).await?;
     mostrar(context, &args.e2e, &args.id, &devolucao)?;
     desfecho(&devolucao, terminou, args.espera.timeout)
+}
+
+/// The wait for the end of a refund the API has accepted.
+struct Espera<'a> {
+    e2e: &'a str,
+    id: &'a IdDevolucao,
+    timeout: Duration,
+    intervalo: Duration,
+}
+
+impl Espera<'_> {
+    /// Waits for the end of the refund and shows it. A query that fails
+    /// does not lose it: the refund as accepted is shown, and the error,
+    /// which may come after the money left, says how to follow it.
+    async fn ate_o_fim(
+        &self,
+        context: &Context,
+        client: &InterClient,
+        aceita: &Devolucao,
+    ) -> Result<(), CliError> {
+        match aguardar(client, self.e2e, self.id, self.timeout, self.intervalo).await {
+            Ok((atual, terminou)) => {
+                mostrar(context, self.e2e, self.id, &atual)?;
+                desfecho(&atual, terminou, self.timeout)
+            }
+            Err(err) => {
+                mostrar(context, self.e2e, self.id, aceita)?;
+                Err(match err {
+                    CliError::Inter(source) => CliError::DevolucaoIncerta {
+                        source,
+                        e2e: self.e2e.to_owned(),
+                        id: self.id.to_string(),
+                        aceita: true,
+                    },
+                    outro => outro,
+                })
+            }
+        }
+    }
 }
 
 /// Queries every `intervalo` until the refund ends or `timeout` passes; the
@@ -304,7 +352,8 @@ async fn aguardar(
             return Ok((devolucao, false));
         }
         if devolucao.status != anterior {
-            eprintln!("aguardando: {}", status(&devolucao));
+            // An unknown status is the API's text.
+            eprintln!("aguardando: {}", output::limpo(status(&devolucao)));
             anterior.clone_from(&devolucao.status);
         }
         tokio::time::sleep(intervalo.min(prazo - agora)).await;
@@ -315,16 +364,18 @@ async fn aguardar(
 /// (`terminou`), only a refused refund is an error.
 fn desfecho(devolucao: &Devolucao, terminou: bool, timeout: Duration) -> Result<(), CliError> {
     match &devolucao.status {
+        // The reason is the API's text, on one line: a line break in it
+        // would forge a line of the error, or a `dica:`.
         Some(StatusDevolucao::NaoRealizado) => Err(CliError::DevolucaoNaoRealizada {
-            motivo: devolucao
-                .motivo
-                .clone()
-                .unwrap_or_else(|| "a API não informou o motivo".to_owned()),
+            motivo: devolucao.motivo.as_deref().map_or_else(
+                || "a API não informou o motivo".to_owned(),
+                |motivo| output::limpo(motivo).into_owned(),
+            ),
         }),
         _ if terminou => Ok(()),
         _ => Err(CliError::TempoEsgotado {
             oque: "a devolução",
-            status: status(devolucao).to_owned(),
+            status: output::limpo(status(devolucao)).into_owned(),
             segundos: timeout.as_secs(),
         }),
     }
