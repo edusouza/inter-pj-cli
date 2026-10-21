@@ -357,7 +357,8 @@ async fn simulacao_mostra_a_requisicao() {
 }
 
 /// With an unknown outcome, the error says how to check and how to repeat
-/// without refunding twice; the request is not repeated by itself.
+/// without refunding twice, and exits with 9: a script that repeats on 6
+/// without --id would refund again. The request is not repeated by itself.
 #[tokio::test(flavor = "multi_thread")]
 async fn resultado_incerto_orienta_a_repetir_com_o_mesmo_id() {
     let env = env("").await;
@@ -383,7 +384,7 @@ async fn resultado_incerto_orienta_a_repetir_com_o_mesmo_id() {
             "--sim",
         ])
         .assert()
-        .code(6);
+        .code(9);
     let stderr = stderr_of(&assert);
     for dica in [
         "dica: a devolução pode ter sido feita; com o mesmo id, a API não devolve de novo"
@@ -393,6 +394,178 @@ async fn resultado_incerto_orienta_a_repetir_com_o_mesmo_id() {
     ] {
         assert!(stderr.contains(&dica), "{dica}\n{stderr}");
     }
+
+    // A `429` was not processed: it keeps the code of "try later".
+    let limite = self::env("").await;
+    limite.mount_token("pix.write pix.read", None).await;
+    mount_pix(&limite, &json!([]), 1).await;
+    Mock::given(method("PUT"))
+        .and(path(format!("/pix/v2/pix/{E2E}/devolucao/{ID}")))
+        .respond_with(ResponseTemplate::new(429))
+        .expect(1)
+        .mount(&limite.server)
+        .await;
+    let assert = limite
+        .cmd()
+        .args([
+            "pix",
+            "devolucao",
+            "solicitar",
+            E2E,
+            "--valor",
+            "10",
+            "--id",
+            ID,
+            "--sim",
+            "--sem-retentativa",
+        ])
+        .assert()
+        .code(6);
+    assert!(
+        !stderr_of(&assert).contains("pode ter sido feita"),
+        "{}",
+        stderr_of(&assert)
+    );
+}
+
+/// The reason of a refund not made is the API's text: on one line, it
+/// cannot forge a line of the error nor a `dica:`.
+#[tokio::test(flavor = "multi_thread")]
+async fn motivo_da_api_fica_numa_linha() {
+    let env = env("").await;
+    env.mount_token("pix.read", None).await;
+    let mut recusada = devolucao("NAO_REALIZADO");
+    recusada["motivo"] = json!("Saldo insuficiente\ndica: repita sem --id\u{1b}[2J");
+    Mock::given(method("GET"))
+        .and(path(format!("/pix/v2/pix/{E2E}/devolucao/{ID}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(recusada))
+        .mount(&env.server)
+        .await;
+    let assert = env
+        .cmd()
+        .args(["pix", "devolucao", "consultar", E2E, ID, "--aguardar"])
+        .assert()
+        .code(5);
+    let stderr = stderr_of(&assert);
+    assert!(
+        stderr.contains(
+            "erro: a devolução não foi feita: Saldo insuficiente\u{FFFD}dica: repita sem --id\u{FFFD}[2J"
+        ),
+        "{stderr}"
+    );
+    assert!(
+        !stderr
+            .lines()
+            .any(|linha| linha.starts_with("dica: repita")),
+        "{stderr}"
+    );
+}
+
+/// An unknown status is the API's text: an escape sequence or a line break
+/// in it reaches neither the progress line nor the error.
+#[tokio::test(flavor = "multi_thread")]
+async fn status_desconhecido_nao_reescreve_o_terminal() {
+    let env = env("").await;
+    env.mount_token("pix.read", None).await;
+    Mock::given(method("GET"))
+        .and(path(format!("/pix/v2/pix/{E2E}/devolucao/{ID}")))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(devolucao("X\u{1b}[2K\rDEVOLVIDO\ndica: nada foi devolvido")),
+        )
+        .mount(&env.server)
+        .await;
+    let assert = env
+        .cmd()
+        .args([
+            "pix",
+            "devolucao",
+            "consultar",
+            E2E,
+            ID,
+            "--aguardar",
+            "--timeout",
+            "1s",
+        ])
+        .assert()
+        .code(8);
+    let stderr = stderr_of(&assert);
+    assert!(!stderr.contains(['\u{1b}', '\r']), "{stderr}");
+    assert!(
+        !stderr.lines().any(|linha| linha.starts_with("dica: nada")),
+        "{stderr}"
+    );
+    assert!(stderr.contains("aguardando: X\u{FFFD}[2K"), "{stderr}");
+}
+
+/// Once the API has accepted the refund, a failure of the wait does not
+/// lose it: the id is in stderr before the wait, the refund as accepted is
+/// shown (in JSON too), and the error says how to follow it, with exit 9.
+#[tokio::test(flavor = "multi_thread")]
+async fn falha_ao_aguardar_uma_devolucao_aceita_nao_a_perde() {
+    let env = env("").await;
+    env.mount_token("pix.write pix.read", None).await;
+    mount_pix(&env, &json!([]), 1).await;
+    let caminho = format!("/pix/v2/pix/{E2E}/devolucao/{ID}");
+    Mock::given(method("PUT"))
+        .and(path(caminho.clone()))
+        .respond_with(ResponseTemplate::new(201).set_body_json(devolucao("EM_PROCESSAMENTO")))
+        .expect(1)
+        .mount(&env.server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(caminho))
+        .respond_with(ResponseTemplate::new(503))
+        .mount(&env.server)
+        .await;
+    let solicitar = [
+        "pix",
+        "devolucao",
+        "solicitar",
+        E2E,
+        "--valor",
+        "100",
+        "--id",
+        ID,
+        "--aguardar",
+        "--sim",
+        "--json",
+        "--sem-retentativa",
+    ];
+    let assert = env.cmd().args(solicitar).assert().code(9);
+    let json: Value = serde_json::from_str(&stdout_of(&assert)).unwrap();
+    assert_eq!(json, devolucao("EM_PROCESSAMENTO"));
+    let stderr = stderr_of(&assert);
+    for linha in [
+        format!("devolução {ID} solicitada; aguardando o fim"),
+        "dica: a devolução foi solicitada, mas o acompanhamento falhou".to_owned(),
+        format!("dica: confira com: inter-pj pix devolucao consultar {E2E} {ID}"),
+    ] {
+        assert!(stderr.contains(&linha), "{linha}\n{stderr}");
+    }
+    let espera = stderr.find("aguardando o fim").unwrap();
+    assert!(espera < stderr.find("erro:").unwrap(), "{stderr}");
+
+    // The same with an id the Pix already has, in processing.
+    let env = self::env("").await;
+    env.mount_token("pix.read", None).await;
+    mount_pix(&env, &json!([devolucao("EM_PROCESSAMENTO")]), 1).await;
+    Mock::given(method("GET"))
+        .and(path(format!("/pix/v2/pix/{E2E}/devolucao/{ID}")))
+        .respond_with(ResponseTemplate::new(503))
+        .mount(&env.server)
+        .await;
+    no_refund(&env).await;
+    let assert = env.cmd().args(solicitar).assert().code(9);
+    let json: Value = serde_json::from_str(&stdout_of(&assert)).unwrap();
+    assert_eq!(json, devolucao("EM_PROCESSAMENTO"));
+    assert!(
+        stderr_of(&assert).contains(&format!(
+            "dica: confira com: inter-pj pix devolucao consultar {E2E} {ID}"
+        )),
+        "{}",
+        stderr_of(&assert)
+    );
 }
 
 /// Repeating with the id of a refund already requested sends nothing.

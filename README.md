@@ -7,6 +7,8 @@ CLI em Rust para acessar a sua **conta PJ do Inter Empresas** pela linha de coma
 
 > **Projeto não oficial.** Não tem vínculo com o Banco Inter. Use por sua conta e risco e comece pelo ambiente **sandbox**.
 
+**Documentação:** <https://edusouza.github.io/inter-pj-cli/> (instalação, guias, referência de comandos e arquitetura).
+
 ```console
 $ inter-pj saldo
 Saldo disponível          R$ 2.850,55
@@ -229,9 +231,9 @@ O destino é uma chave (`--chave`), um código copia e cola (`--copia-e-cola`) o
 Trilhos de segurança de todo envio:
 
 - **Resumo e confirmação**: antes de enviar, a CLI mostra destino, valor (também por extenso), data e ambiente (produção em destaque) e pergunta `[s/N]`; o padrão é não. `--sim` confirma sem perguntar. Respostas vindas de um *pipe* não valem: sem terminal e sem `--sim`, a CLI recusa (código 2).
-- **Validação local**: chave Pix (CPF/CNPJ com dígitos verificadores, e-mail, celular `+55DD9NNNNNNNN`, chave aleatória), valor maior que zero com até 2 casas, descrição de até 140 caracteres e data de agendamento. O valor aceita `150,00`, `1.500,00` e `150.00`; formas ambíguas como `1.500` são recusadas.
+- **Validação local**: chave Pix (CPF/CNPJ com dígitos verificadores, e-mail, celular `+55DD9NNNNNNNN`, chave aleatória), valor maior que zero com até 2 casas, descrição de até 140 caracteres e data de agendamento. As datas seguem o calendário do banco: "hoje" é o dia em Brasília, qualquer que seja o fuso da máquina, para que um agendamento para amanhã, pedido de um servidor em UTC perto da meia-noite, não seja pago hoje. O valor aceita `150,00`, `1.500,00` e `150.00`; formas ambíguas como `1.500` são recusadas.
 - **`--simular`**: valida e mostra a requisição (sem segredos), sem enviar nada.
-- **Idempotência**: cada envio leva uma chave (`x-id-idempotente`), mostrada no resumo. Se a resposta se perder (tempo esgotado, erro 5xx), o Pix pode ter sido feito: confira o extrato e, para repetir sem risco de pagar duas vezes, use `--id-idempotente <chave>`.
+- **Idempotência**: cada envio leva uma chave (`x-id-idempotente`), mostrada no resumo. Se a resposta se perder (tempo esgotado, erro 5xx), o Pix pode ter sido feito, e a CLI sai com o código 9: confira o extrato e, para repetir sem risco de pagar duas vezes, use `--id-idempotente <chave>`. Num script que repete envios que falharam, gere a chave antes (por exemplo, com `uuidgen`) e passe a mesma `--id-idempotente` em todas as tentativas; e nunca repita às cegas um comando que saiu com 9.
 - **Limite por operação**: com `limite_por_operacao` no perfil, valores acima dele são recusados, mesmo com `--sim`.
 - **Aprovação**: conforme a configuração da conta, o Pix aguarda aprovação no Internet Banking (Aprovar > Gestão de Aprovações); a CLI avisa quando for o caso.
 
@@ -271,7 +273,7 @@ $ inter-pj pagamento boleto pagar '<linha digitável>' --valor 31,20 --data 2026
 
 O código — linha digitável (47 dígitos nos boletos, 48 nas contas e tributos) ou código de barras (44) — tem todos os dígitos verificadores conferidos localmente. Valor e vencimento vêm do próprio código quando ele os traz; contas de consumo e tributos não trazem o vencimento, então precisam de `--vencimento` (a data impressa no documento). O resumo mostra o valor por extenso e, quando `--valor` ou `--vencimento` diferem do código, os dois lados com um aviso (juros, multa ou desconto); também avisa quando o pagamento fica para depois do vencimento. `--data` agenda o pagamento, e `--beneficiario` pede à API que confira o CPF/CNPJ de quem recebe. Os trilhos de segurança são os do Pix: confirmação `[s/N]` ou `--sim`, `--simular` e o limite por operação do perfil.
 
-Esta API não tem chave de idempotência. Se o resultado ficar incerto (tempo esgotado, erro 5xx), o pagamento pode ter sido feito e repetir o comando pode pagar duas vezes: a CLI mostra o `pagamento boleto listar --codigo ...` que confere isso antes de uma nova tentativa. Conforme a configuração da conta, o pagamento aguarda aprovação no Internet Banking. O pagamento precisa do escopo `pagamento-boleto.write`; no sandbox, a documentação oferece os códigos `03395988500000666539201493990000372830030102` (boleto vencido) e `82670000000653301602023123106000000002830894` (conta de água).
+Esta API não tem chave de idempotência. Se o resultado ficar incerto (tempo esgotado, erro 5xx ou resposta ilegível depois do envio), o pagamento pode ter sido feito e repetir o comando pode pagar duas vezes: a CLI sai com o código 9 e mostra o `pagamento boleto listar --codigo ...` que confere isso antes de uma nova tentativa, com as opções que escolheram a conta (`-p`, `--config`, `--ambiente`...). Essa consulta precisa do escopo `pagamento-boleto.read`, e uma lista vazia logo depois do erro não prova que nada foi pago: espere alguns minutos e confira também o extrato. Um script não deve repetir às cegas um pagamento que saiu com 9; um `429` ou uma conexão recusada, que certamente não pagaram, saem com 6. Uma falha ao pedir o token de acesso também não pagou nada: o pagamento só é enviado depois dele. "Hoje", para `--data` e para o aviso de pagamento vencido, é o dia em Brasília, qualquer que seja o fuso da máquina. Conforme a configuração da conta, o pagamento aguarda aprovação no Internet Banking. O pagamento precisa do escopo `pagamento-boleto.write`; no sandbox, a documentação oferece os códigos `03395988500000666539201493990000372830030102` (boleto vencido) e `82670000000653301602023123106000000002830894` (conta de água).
 
 ```console
 $ inter-pj pagamento boleto listar --inicio 2026-09-01 --fim 2026-09-30
@@ -357,7 +359,7 @@ Tipo    Status                 Valor  Código                                Det
 boleto  pago               R$ 666,53  3414f226-36fb-4d87-811e-cfd99911d845
 boleto  pago                R$ 65,33  8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f
 DARF    erro no pagamento   R$ 47,14                                        Saldo insuficiente
-erro: o lote foi processado com erro: 1 de 3 pagamentos não foi feito
+erro: o lote foi processado, mas 1 de 3 pagamentos não foi feito
 ```
 
 O arquivo usa os nomes de campo da API. Em JSON, é um objeto com `pagamentos` e, opcionalmente, `meuIdentificador` (`--identificador` o substitui), ou só a lista de pagamentos; em CSV, uma coluna por campo, com cabeçalho, e células vazias para os campos ausentes. Cada pagamento tem `tipoPagamento` e os campos do seu tipo:
@@ -365,11 +367,11 @@ O arquivo usa os nomes de campo da API. Em JSON, é um objeto com `pagamentos` e
 - `BOLETO` (boletos, contas e tributos com código de barras): `codBarraLinhaDigitavel` e, quando o código não os traz ou para pagar outro valor, `valorPagar` e `dataVencimento`; opcionalmente `dataPagamento` (agendamento) e `cpfCnpjBeneficiario`, como em `pagamento boleto pagar`;
 - `DARF`: os campos do arquivo de `pagamento darf pagar`.
 
-Antes de enviar, a CLI confere o lote inteiro com as validações de cada tipo (dígitos verificadores, datas, valores, CPF/CNPJ) e recusa campos desconhecidos ou de outro tipo; havendo problemas, lista todos, com a linha (CSV) ou a posição (JSON) e o campo, e não envia nada. O resumo mostra o total por tipo e por extenso, cada pagamento, e avisa sobre vencimentos passados, valores diferentes dos do código e pagamentos repetidos no arquivo. Os trilhos de segurança são os dos outros pagamentos: confirmação `[s/N]` ou `--sim`, `--simular` e o limite por operação do perfil, que vale para cada pagamento do lote (um lote não é recusado pelo total, e sim pelo pagamento que passa do limite).
+Antes de enviar, a CLI confere o lote inteiro com as validações de cada tipo (dígitos verificadores, datas, valores, CPF/CNPJ) e recusa campos desconhecidos ou de outro tipo; havendo problemas, lista todos, com a linha (CSV) ou a posição (JSON) e o campo, e não envia nada. O resumo mostra o total por tipo e por extenso, cada pagamento, e avisa sobre vencimentos passados e valores diferentes dos do código. Pagamentos repetidos no arquivo (o mesmo código, ou o mesmo DARF) são recusados antes de qualquer requisição, porque com `--sim` um aviso não impediria o pagamento em dobro; se forem mesmo pagamentos distintos, use `--permitir-repetidos`. Os trilhos de segurança são os dos outros pagamentos: confirmação `[s/N]` ou `--sim`, `--simular` e o limite por operação do perfil, que vale para cada pagamento do lote (um lote não é recusado pelo total, e sim pelo pagamento que passa do limite).
 
 O CSV aceita `,` ou `;` como separador (detectado pelo cabeçalho), UTF-8 com ou sem BOM e valores como `65,33`, como o Excel em português salva. Ao abrir um CSV, porém, o Excel converte o que parece número ou data: números longos viram notação científica e perdem dígitos (`1,36094E+16`), códigos perdem os zeros à esquerda (`0220` vira `220`) e datas mudam de formato (`30/10/2026`). Para editar no Excel, importe o arquivo (Dados > De Texto/CSV) sem detectar os tipos de dados, ou formate as colunas como texto antes de digitar; linhas digitáveis e CPF/CNPJ com pontuação, como no modelo, já ficam como texto. Se algo chegar estragado, a conferência recusa o arquivo e diz o que aconteceu, sem enviar nada.
 
-O lote é processado depois do envio: `pagamento lote consultar` mostra o status do lote e de cada pagamento, e com `--aguardar` consulta a cada 6 segundos até o fim do processamento, saindo com o código 0 (processado sem erro), 5 (algum pagamento não foi feito) ou 8 (o tempo acabou; padrão: 5 min). Como nos outros pagamentos, não há chave de idempotência: se o resultado do envio ficar incerto, confira `pagamento boleto listar` e `pagamento darf listar` antes de enviar de novo. O envio precisa do escopo `pagamento-lote.write`, e a consulta, de `pagamento-lote.read`.
+O lote é processado depois do envio: `pagamento lote consultar` mostra o status do lote e de cada pagamento, e com `--aguardar` consulta a cada 6 segundos até o lote ser processado e nenhum pagamento estar pendente. O código de saída olha cada pagamento, e não só o status do lote: 0 quando todos foram pagos ou agendados (os agendados, com um aviso: saem da conta na data do agendamento); 5 quando algum não foi feito (erro, recusado, cancelado, expirado) ou tem um status que a CLI não conhece; 8 quando o tempo acabou (padrão: 5 min) com o lote em processamento ou com pagamentos aguardando aprovação no Internet Banking. Uma consulta que falha durante a espera (`429`, `5xx`, rede) não a interrompe: a CLI tenta de novo no próximo intervalo e, no fim do prazo, mostra o último status que conhece. Como nos outros pagamentos, não há chave de idempotência: se o resultado do envio ficar incerto (código 9), confira `pagamento boleto listar` e `pagamento darf listar` antes de enviar de novo; os comandos sugeridos levam as opções que escolheram a conta (`-p`, `--config`, `--ambiente`...). O envio precisa do escopo `pagamento-lote.write`, e a consulta, de `pagamento-lote.read`.
 
 ### Cobranças
 
@@ -412,7 +414,7 @@ O arquivo (`--arquivo`, ou `-` para a entrada padrão) tem os nomes de campo da 
 
 Os trilhos são os dos pagamentos: confirmação `[s/N]` (sem terminal, ou com `--arquivo -`, exige `--sim`) e `--simular`, que mostra a requisição sem enviar nada; o limite por operação não se aplica, porque uma cobrança não tira dinheiro da conta. A emissão é assíncrona: a API responde com o código da solicitação, e a cobrança fica em processamento até o boleto e o Pix serem gerados. Com `--aguardar`, a CLI consulta a cada 6 segundos (até `--timeout`; padrão: 60s) e mostra a cobrança emitida, com o QR Code se `--qrcode` ou `--qrcode-png` forem pedidos, e sai com o código 5 se a emissão falhou ou 8 se o tempo acabou.
 
-Não há chave de idempotência, mas, por 30 minutos, a API recusa outra cobrança com o mesmo seu número, valor, vencimento e pagador. Se o resultado da emissão ficar incerto, o erro traz o comando que procura a cobrança (`cobranca listar --filtrar-por emissao --seu-numero NF-123`) para conferir antes de tentar de novo. A emissão precisa do escopo `boleto-cobranca.write` e, com `--aguardar`, também de `boleto-cobranca.read`.
+Não há chave de idempotência, mas, por 30 minutos, a API recusa outra cobrança com o mesmo seu número, valor, vencimento e pagador. Se o resultado da emissão ficar incerto, a CLI sai com o código 9 e o erro traz o comando que procura a cobrança (`cobranca listar --filtrar-por emissao --seu-numero NF-123`) para conferir antes de tentar de novo. A emissão precisa do escopo `boleto-cobranca.write` e, com `--aguardar`, também de `boleto-cobranca.read`.
 
 A consulta mostra a situação, os valores e os encargos, o boleto e o Pix:
 
@@ -541,7 +543,7 @@ $ inter-pj pix cob criar --chave pix@empresa.example --valor 50 --simular       
 
 A chave (`--chave`) é uma chave Pix da conta que recebe, e o valor, maior que zero, com até 2 casas; `--valor-alteravel` deixa o pagador mudar o valor. A cobrança expira no tempo de `--expiracao`, contado da criação (`3600s`, `30m`, `2h`, `7d`; o padrão da API é 1 dia). Opcionais: o devedor (`--devedor-documento`, com CPF ou CNPJ conferido, e `--devedor-nome`), o texto mostrado ao pagador (`--solicitacao`, até 140 caracteres) e informações adicionais (`--info NOME=VALOR`, que pode ser repetida até 50 vezes). Tudo é conferido antes de qualquer requisição.
 
-Cada cobrança tem um txid, de 26 a 35 letras e dígitos. A CLI gera um e o mostra no resumo, ou usa o de `--txid`; com o mesmo txid, a API não cria outra cobrança. Por isso, se o resultado ficar incerto (tempo esgotado, erro 5xx), o erro traz o comando que consulta a cobrança e o que repete a criação com o mesmo txid, sem risco de duplicá-la. Os trilhos são os das cobranças: resumo, confirmação `[s/N]` (sem terminal, exige `--sim`), `--simular` e o destaque de produção; o limite por operação não se aplica, porque a cobrança não tira dinheiro da conta. Criar e alterar precisam do escopo `cob.write`; consultar e listar, de `cob.read`.
+Cada cobrança tem um txid, de 26 a 35 letras e dígitos. A CLI gera um e o mostra no resumo, ou usa o de `--txid`; com o mesmo txid, a API não cria outra cobrança. Por isso, se o resultado ficar incerto (tempo esgotado, erro 5xx), a CLI sai com o código 9 e o erro traz o comando que consulta a cobrança e o que repete a criação com o mesmo txid, sem risco de duplicá-la. Esses comandos, como o `Acompanhe com` depois da criação, levam as opções que escolheram a conta na linha de comando (`-p`, `--config`, `--ambiente`, `--conta-corrente`...), para que a consulta não procure a cobrança em outro perfil, ambiente ou conta. Depois da criação, uma falha do QR Code (a API não mandou o copia e cola, o código não confere, o arquivo não pôde ser gravado) não desfaz nada: a CLI mostra a cobrança criada (em `stderr`, com `--qrcode-png -`), avisa e indica o `pix cob consultar` que grava a imagem depois, e termina com sucesso, para que um script não crie outra cobrança. Os trilhos são os das cobranças: resumo, confirmação `[s/N]` (sem terminal, exige `--sim`), `--simular` e o destaque de produção; o limite por operação não se aplica, porque a cobrança não tira dinheiro da conta. Criar e alterar precisam do escopo `cob.write`; consultar e listar, de `cob.read`.
 
 Enquanto não é paga, a cobrança pode ser alterada ou removida. A CLI a consulta antes e mostra o antes e o depois; cobranças pagas ou removidas são recusadas sem nenhuma alteração:
 
@@ -587,7 +589,7 @@ Copia e cola  00020101021226760014br.gov.bcb.pix2554pix.example.com/qr/v2/9d36b8
 $ inter-pj pix cob consultar 7978c0c97ea847e78e8849634473c1f1 --qrcode
 ```
 
-`--qrcode` e `--qrcode-png` funcionam como nas cobranças com boleto, mas o QR Code só é gerado enquanto a cobrança está ativa: para uma cobrança paga ou removida, `--qrcode` mostra um aviso no lugar dele, e `--qrcode-png` termina com erro, sem gravar a imagem.
+`--qrcode` e `--qrcode-png` funcionam como nas cobranças com boleto, mas o QR Code só é gerado enquanto a cobrança está ativa e não expirou (depois da expiração, o status continua `ativa`, mas o Pix não é mais aceito): para uma cobrança paga, removida ou expirada, `--qrcode` mostra um aviso no lugar dele, e `--qrcode-png` termina com erro, sem gravar a imagem.
 
 A listagem mostra as cobranças criadas em um período, por padrão os últimos 30 dias até agora:
 
@@ -606,7 +608,7 @@ $ inter-pj pix cob listar --status ativa --documento 12.345.678/0001-95
 $ inter-pj pix cob listar --inicio 2026-09-23T08:00:00-03:00 --fim 2026-09-23T12:00:00-03:00 --formato csv > manha.csv
 ```
 
-`--inicio` e `--fim` aceitam uma data (o dia inteiro, no fuso local) ou data e hora com fuso. Os filtros são `--status` (`ativa`, `concluida`, `removida-pelo-usuario` ou `removida-pelo-psp`), `--documento` (CPF/CNPJ do devedor) e `--com-location` ou `--sem-location`. A listagem lê todas as páginas, de 1.000 cobranças cada; `--pagina N` (a primeira é 0) com `--itens-por-pagina` traz uma só. Em CSV, as colunas têm os nomes da API (`valor.original`, `devedor.nome`, `pixCopiaECola`), com os códigos e os horários como a API os envia.
+`--inicio` e `--fim` aceitam uma data (o dia inteiro, com os dias de Brasília, o calendário do banco, qualquer que seja o fuso da máquina) ou data e hora com fuso; os 30 dias do padrão também são os de Brasília. Os filtros são `--status` (`ativa`, `concluida`, `removida-pelo-usuario` ou `removida-pelo-psp`), `--documento` (CPF/CNPJ do devedor) e `--com-location` ou `--sem-location`. A listagem lê todas as páginas, de 1.000 cobranças cada; `--pagina N` (a primeira é 0) com `--itens-por-pagina` traz uma só. Em CSV, as colunas têm os nomes da API (`valor.original`, `devedor.nome`, `pixCopiaECola`), com os códigos e os horários como a API os envia.
 
 A cobrança com vencimento (`pix cobv`) é o boleto do Pix: vale até a data de vencimento, com desconto por pagar antes e multa e juros por pagar depois, e o devedor é obrigatório:
 
@@ -642,12 +644,12 @@ A validade (`--validade-apos-vencimento`, em dias corridos; o padrão da API é 
 - `--multa`: por pagar depois do vencimento;
 - `--juros`: um percentual ao mês (ou ao dia ou ao ano, com `--juros-periodo`) ou um valor por dia de atraso;
 - `--abatimento`: vale qualquer que seja o dia do pagamento;
-- `--desconto`: vale até o vencimento ou até a data depois do `@` (`2%@2026-10-15`), e pode ser repetido para até 3 datas, todas com percentuais ou todas com valores; `--desconto-por-dia` dá um desconto para cada dia pago antes do vencimento;
+- `--desconto`: vale até a véspera do vencimento ou até a data depois do `@` (`2%@2026-10-15`), que precisa ser antes do vencimento: a API não aceita desconto no próprio dia do vencimento. Pode ser repetido para até 3 datas, todas com percentuais ou todas com valores; `--desconto-por-dia` dá um desconto para cada dia pago antes do vencimento;
 - `--dias-uteis`: os juros e o desconto por dia contam só os dias úteis.
 
-O vencimento é hoje ou depois, o desconto vale até ele e os valores fixos de desconto e abatimento são menores que o da cobrança; tudo é conferido antes de qualquer requisição. O devedor pode ter e-mail e endereço (`--devedor-email`, `--devedor-endereco`, `--devedor-cidade`, `--devedor-uf` e `--devedor-cep`). O arquivo (`--arquivo`, ou `-` para a entrada padrão) tem os nomes de campo da API (`calendario.dataDeVencimento`, `valor.multa.modalidade`...), com as modalidades como números; campos desconhecidos são recusados, e as mensagens apontam o campo (`cobv.json, campo "valor.desconto.descontoDataFixa[0].data": ...`). O txid, a confirmação, `--simular`, o QR Code e o resultado incerto funcionam como em `pix cob`; os escopos são `cobv.write` e `cobv.read`.
+O vencimento é hoje ou depois (o dia em Brasília, qualquer que seja o fuso da máquina), o desconto acaba antes dele e os valores fixos de desconto e abatimento são menores que o da cobrança; tudo é conferido antes de qualquer requisição. O devedor pode ter e-mail e endereço (`--devedor-email`, `--devedor-endereco`, `--devedor-cidade`, `--devedor-uf` e `--devedor-cep`). O arquivo (`--arquivo`, ou `-` para a entrada padrão) tem os nomes de campo da API (`calendario.dataDeVencimento`, `valor.multa.modalidade`...), com as modalidades como números; campos desconhecidos são recusados, e as mensagens apontam o campo (`cobv.json, campo "valor.desconto.descontoDataFixa[0].data": ...`). O txid, a confirmação, `--simular`, o QR Code e o resultado incerto funcionam como em `pix cob`; os escopos são `cobv.write` e `cobv.read`.
 
-`revisar` mostra o antes e o depois e muda só o que for informado: um novo vencimento mantém a validade atual, e um desconto sem data vale até o vencimento. O que depende da cobrança atual é conferido depois da consulta, sem nenhuma alteração se falhar: um novo vencimento antes do fim de um desconto atual, por exemplo, pede também o novo `--desconto`. O devedor informado substitui o atual, com o e-mail e o endereço.
+`revisar` mostra o antes e o depois e muda só o que for informado: um novo vencimento mantém a validade atual, e um desconto sem data vale até a véspera do vencimento. O que depende da cobrança atual é conferido depois da consulta, sem nenhuma alteração se falhar: um novo vencimento antes do fim de um desconto atual, por exemplo, pede também o novo `--desconto`. O devedor informado substitui o atual, com o e-mail e o endereço. Se o resultado da alteração ou da remoção ficar incerto (tempo esgotado, erro 5xx), ela pode ter sido feita: a CLI sai com o código 9 e indica o `pix cobv consultar` que a confere antes de repetir o comando.
 
 ```console
 $ inter-pj pix cobv revisar cobvexemplo0000000000000000001 --vencimento 2026-10-30 --multa 4,00
@@ -673,10 +675,10 @@ Vencimento  Status                Valor  Devedor               txid
 20/10/2026  ativa             R$ 150,00  Cliente Exemplo Ltda  cobvexemplo0000000000000000001
 05/10/2026  concluída (paga)  R$ 300,00  Outro Cliente         cobvexemplo0000000000000000002
 
-2 cobranças · R$ 450,00 · pagas R$ 300,00
+2 cobranças · R$ 450,00 · recebido R$ 306,00
 ```
 
-A listagem tem os filtros de `pix cob listar` e também `--lote ID`; em CSV, os encargos aparecem com a modalidade e o valor (`valor.multa.modalidade`, `valor.multa.valorPerc`), e os descontos por data, só no JSON.
+No rodapé, o primeiro valor soma os valores originais, e `recebido` soma os Pix que pagaram as cobranças concluídas, com multa, juros, abatimento e desconto (aqui, 2% de multa). Se a API não listar os Pix de alguma cobrança paga, o rodapé mostra o valor original das pagas, com essa indicação. A listagem tem os filtros de `pix cob listar` e também `--lote ID`; em CSV, os encargos aparecem com a modalidade e o valor (`valor.multa.modalidade`, `valor.multa.valorPerc`), e os descontos por data, só no JSON.
 
 Muitas cobranças com vencimento podem ser criadas ou alteradas de uma vez, em um lote, a partir de um arquivo JSON (nos campos da API) ou de uma planilha CSV (uma cobrança por linha; as colunas têm os caminhos dos campos da API, como `valor.multa.valorPerc`). Antes de enviar, a CLI confere todas as cobranças e, se alguma tiver problema, recusa o arquivo inteiro, apontando a linha e o campo de cada uma:
 
@@ -706,7 +708,7 @@ erro: ruim.csv: 3 cobranças com problema; nada foi enviado:
   linha 4, campo "txid": txid inválido: use de 26 a 35 letras e dígitos, sem acentos, espaços, hífens ou símbolos
 ```
 
-O id do lote é um número escolhido por você, e cada cobrança tem o seu txid, que não pode se repetir no arquivo; com o mesmo txid, a API não cria outra cobrança, e por isso repetir um lote de resultado incerto não duplica nada. Cada cobrança é conferida como em `pix cobv criar`, e vencimentos que já passaram são recusados. A descrição vem do arquivo JSON ou de `--descricao` (obrigatória com CSV). No CSV, o Excel costuma estragar números longos (notação científica) e tirar zeros à esquerda de CPF, CNPJ e CEP: a mensagem diz quando isso aconteceu. As informações adicionais só existem no JSON.
+O id do lote é um número escolhido por você, e cada cobrança tem o seu txid, que não pode se repetir no arquivo; com o mesmo txid, a API não cria outra cobrança, e por isso repetir um lote de resultado incerto não duplica nada. Cada cobrança é conferida como em `pix cobv criar`, e vencimentos que já passaram são recusados. Em JSON, um campo repetido no mesmo objeto (dois `"original"` numa cobrança, por exemplo) recusa o arquivo, com a linha: um leitor comum ficaria com o último sem avisar. A descrição vem do arquivo JSON ou de `--descricao` (obrigatória com CSV). No CSV, o Excel costuma estragar números longos (notação científica) e tirar zeros à esquerda de CPF, CNPJ e CEP: a mensagem diz quando isso aconteceu. As informações adicionais só existem no JSON.
 
 `revisar` envia as mudanças de cobranças do lote, no mesmo formato: só muda o que estiver no arquivo (uma célula vazia não muda nada), e `status` com `REMOVIDA_PELO_USUARIO_RECEBEDOR` remove a cobrança. Um calendário novo precisa do vencimento, porque a CLI não consulta cada cobrança. Os dois pedem confirmação (sem terminal, ou com `--arquivo -`, exigem `--sim`) e aceitam `--simular`.
 
@@ -769,7 +771,7 @@ Cobrança cobvexemplo0000000000000000001 desvinculada: a location está livre.
 ...
 ```
 
-A listagem filtra por `--tipo cob` ou `cobv` e por `--com-cobranca` ou `--sem-cobranca`. `desvincular` consulta a location antes, recusa sem nenhuma alteração uma location sem cobrança e pede confirmação (sem terminal, `--sim`), porque o QR Code impresso deixa de levar à cobrança. Os escopos são `payloadlocation.write` e `payloadlocation.read`.
+A listagem filtra por `--tipo cob` ou `cobv` e por `--com-cobranca` ou `--sem-cobranca`. `desvincular` consulta a location antes, recusa sem nenhuma alteração uma location sem cobrança e pede confirmação (sem terminal, `--sim`), porque o QR Code impresso deixa de levar à cobrança. Se o resultado de `criar` ou de `desvincular` ficar incerto (tempo esgotado, erro 5xx), a operação pode ter sido feita: a CLI sai com o código 9 e indica o comando que a confere (`pix loc listar --sem-cobranca` ou `pix loc consultar <id>`) antes de repetir. Os escopos são `payloadlocation.write` e `payloadlocation.read`.
 
 No sandbox, as cobranças podem ser pagas pela CLI, para testar o fluxo inteiro (criar, pagar, consultar e, com um webhook cadastrado, receber a notificação):
 
@@ -854,9 +856,9 @@ erro: a devolução de R$ 260,00 passa do que resta do Pix: R$ 250,00 de R$ 300,
 - **Resumo e confirmação**: o Pix, o que já foi devolvido e a devolução, com o valor por extenso e a produção em destaque; `[s/N]` só de um terminal, ou `--sim`. Sem terminal nem `--sim`, nem a consulta é feita.
 - **Limite por operação**: `limite_por_operacao` vale também para as devoluções, mesmo com `--sim`.
 - **`--simular`**: mostra a requisição, sem consultar nem enviar nada.
-- **Idempotência**: cada devolução tem um id (1 a 35 letras e dígitos), gerado ou dado com `--id` e mostrado no resumo; com o mesmo id, a API não devolve de novo. Se o resultado ficar incerto, o erro traz o comando que consulta a devolução e o que a repete com o mesmo id; repetir um id que o Pix já tem apenas mostra a devolução existente.
+- **Idempotência**: cada devolução tem um id (1 a 35 letras e dígitos), gerado ou dado com `--id` e mostrado no resumo; com o mesmo id, a API não devolve de novo. Se o resultado ficar incerto (tempo esgotado, erro 5xx), o dinheiro pode ter saído: a CLI sai com o código 9 e o erro traz o comando que consulta a devolução e o que a repete com o mesmo id; repetir um id que o Pix já tem apenas mostra a devolução existente. Um script que repete o comando deve passar um `--id` fixo: sem ele, cada execução gera outro id, e uma devolução parcial repetida cabe no Pix e sai de novo.
 
-`--natureza retirada` devolve o dinheiro de um Pix Saque ou o troco de um Pix Troco (o padrão, `original`, é o do Pix comum), e `--descricao` (até 140 caracteres) vai para o pagador. A devolução é processada depois do pedido: `pix devolucao consultar` mostra em que pé ela está e, com `--aguardar` (aceito também por `solicitar`), consulta a cada 6 segundos até o fim, saindo com o código 0 (devolvida), 5 (não realizada, com o motivo) ou 8 (o tempo acabou; padrão: 60s). Devolver precisa do escopo `pix.write`, além de `pix.read` para a consulta.
+`--natureza retirada` devolve o dinheiro de um Pix Saque ou o troco de um Pix Troco (o padrão, `original`, é o do Pix comum), e `--descricao` (até 140 caracteres) vai para o pagador. A devolução é processada depois do pedido: `pix devolucao consultar` mostra em que pé ela está e, com `--aguardar` (aceito também por `solicitar`), consulta a cada 6 segundos até o fim, saindo com o código 0 (devolvida), 5 (não realizada, com o motivo) ou 8 (o tempo acabou; padrão: 60s). Em `solicitar`, o id vai para `stderr` antes da espera, e uma consulta que falha (erro 5xx, rede) depois de a API aceitar a devolução não a perde: a CLI mostra a devolução aceita (também em `--json`) e sai com o código 9, com o comando que a acompanha. Devolver precisa do escopo `pix.write`, além de `pix.read` para a consulta.
 
 ### Formatos de saída
 
@@ -893,10 +895,11 @@ $ curl --cert certificado.crt --key chave.key \
 | 2 | uso incorreto (argumentos inválidos) |
 | 3 | configuração ausente ou inválida (inclui certificado/chave) |
 | 4 | falha de autenticação ou acesso negado (credenciais, escopos, 401/403) |
-| 5 | requisição rejeitada pela API (400, 404, 409, 422); com `--aguardar`, Pix que terminou sem ser pago, lote processado com erro, cobrança que não foi emitida, alteração que não foi feita ou devolução não realizada |
-| 6 | serviço indisponível, limite de requisições (429), erro 5xx ou falha de rede |
+| 5 | requisição rejeitada pela API (400, 404, 409, 422); com `--aguardar`, Pix que terminou sem ser pago, lote com algum pagamento que não foi feito, cobrança que não foi emitida, alteração que não foi feita ou devolução não realizada |
+| 6 | serviço indisponível, limite de requisições (429), erro 5xx ou falha de rede, numa operação que certamente não foi feita (uma consulta, ou um envio que a API não recebeu) |
 | 7 | operação cancelada na confirmação (nada foi enviado) |
-| 8 | `pix consultar`, `pagamento lote consultar`, `cobranca emitir`, `cobranca editar`, `cobranca edicao`, `pix devolucao` ou `pix lote-cobv consultar` com `--aguardar`: tempo esgotado antes de um status final |
+| 8 | `pix consultar`, `pagamento lote consultar`, `cobranca emitir`, `cobranca editar`, `cobranca edicao`, `pix devolucao` ou `pix lote-cobv consultar` com `--aguardar`: tempo esgotado antes de um status final (num lote, também com pagamentos aguardando aprovação) |
+| 9 | resultado incerto: um envio pode ter sido feito (tempo esgotado, erro 5xx ou resposta ilegível depois do envio). Confira com o comando da dica antes de tentar de novo; um script não deve repetir o comando às cegas |
 
 Mensagens de erro vão para `stderr`, em português, com a explicação da API e dicas. Com `-v`/`-vv` a CLI mostra detalhes das requisições (método, caminho, status e tempo) — nunca tokens, segredos ou corpos de resposta.
 
@@ -916,6 +919,7 @@ O projeto é um workspace Cargo:
 | --- | --- |
 | [`crates/inter-pj`](crates/inter-pj) | biblioteca: cliente HTTP, OAuth2/mTLS, cache de token, modelos das APIs |
 | [`crates/inter-pj-cli`](crates/inter-pj-cli) | binário `inter-pj`: comandos, configuração, formatação |
+| [`crates/sitegen`](crates/sitegen) | gerador do site de documentação; não faz parte do pacote da CLI |
 
 ```console
 $ cargo test --workspace          # unitários, integração (mock), mTLS real, contrato e E2E
@@ -923,7 +927,7 @@ $ cargo clippy --workspace --all-targets -- -D warnings
 $ cargo fmt --all --check
 ```
 
-Os testes rodam offline, sem credenciais: um servidor mock simula a API, os certificados são gerados a cada execução e os contratos são verificados contra a [especificação OpenAPI](spec/). Arquitetura em [`docs/arquitetura.md`](docs/arquitetura.md); fluxo de contribuição em [`CONTRIBUTING.md`](CONTRIBUTING.md).
+Os testes rodam offline, sem credenciais: um servidor mock simula a API, os certificados são gerados a cada execução e os contratos são verificados contra a [especificação OpenAPI](spec/). Arquitetura em [`docs/arquitetura.md`](docs/arquitetura.md); fluxo de contribuição em [`CONTRIBUTING.md`](CONTRIBUTING.md). O site de documentação, em [`site/`](site), é construído com o [Zensical](https://zensical.org) e publicado no GitHub Pages; a seção "Este site" de [`desenvolvimento.md`](site/conteudo/por-dentro/desenvolvimento.md) explica como.
 
 ## Licença
 

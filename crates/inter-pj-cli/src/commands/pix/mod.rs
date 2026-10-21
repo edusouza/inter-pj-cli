@@ -14,7 +14,7 @@ mod sandbox;
 
 use std::fmt::Write as _;
 
-use chrono::{DateTime, Days, FixedOffset, Local, NaiveDate, NaiveTime, TimeZone};
+use chrono::{DateTime, Days, FixedOffset, NaiveDate, NaiveTime, TimeZone, Utc};
 use inter_pj::Error as InterError;
 use inter_pj::documento::Documento;
 use inter_pj::pix::{
@@ -22,10 +22,10 @@ use inter_pj::pix::{
 };
 use rust_decimal::Decimal;
 
-use super::Context;
+use super::{BRASILIA, Context};
 use crate::cli::{Momento, PeriodoPixArgs, PixCobListarArgs, PixCommand, StatusCobArg};
 use crate::confirmacao::Stdio;
-use crate::error::{CliError, resultado_incerto};
+use crate::error::CliError;
 use crate::output::{self, horario_em};
 use crate::tabela::{Celula, Coluna, Tabela};
 
@@ -47,10 +47,11 @@ pub(super) async fn run(context: &Context, command: PixCommand) -> Result<(), Cl
     }
 }
 
-/// The period of the arguments, in the local time zone: by default, from
-/// the start of the day 30 days ago (today included) to now.
+/// The period of the arguments, with the days of Brasília, the bank's
+/// calendar, whatever the time zone of the machine: by default, from the
+/// start of the day 30 days ago (today included) to now.
 fn periodo(args: PeriodoPixArgs) -> Result<PeriodoPix, CliError> {
-    periodo_em(args, Local::now().fixed_offset(), &Local)
+    periodo_em(args, Utc::now().with_timezone(&BRASILIA), &BRASILIA)
 }
 
 fn periodo_em<Tz: TimeZone>(
@@ -183,11 +184,26 @@ fn descrever_status_devolucao(status: &StatusDevolucao) -> &str {
 /// The error of a creation: with an unknown outcome, how to check and
 /// repeat it with the same txid.
 fn incerta(err: InterError, tipo: &'static str, txid: &Txid) -> CliError {
-    if resultado_incerto(&err) {
+    if err.may_have_been_processed() {
         CliError::CobrancaPixIncerta {
             source: err,
             tipo,
             txid: txid.to_string(),
+        }
+    } else {
+        err.into()
+    }
+}
+
+/// The error of a change or removal: with an unknown outcome, how to check
+/// it before repeating it.
+fn revisao_incerta(err: InterError, tipo: &'static str, txid: &Txid, remocao: bool) -> CliError {
+    if err.may_have_been_processed() {
+        CliError::RevisaoPixIncerta {
+            source: err,
+            tipo,
+            txid: txid.to_string(),
+            remocao,
         }
     } else {
         err.into()
@@ -340,7 +356,22 @@ mod tests {
     }
 
     #[test]
-    fn periods_are_whole_days_in_the_local_time_zone() {
+    fn periods_are_whole_days_of_brasilia() {
+        // At 22:30 in Brasília, already the next day in UTC, the default
+        // period ends on the day of Brasília.
+        let noite = momento("2026-10-21T01:30:00Z").with_timezone(&BRASILIA);
+        let padrao = periodo_em(
+            PeriodoPixArgs {
+                inicio: None,
+                fim: None,
+            },
+            noite,
+            &BRASILIA,
+        )
+        .unwrap();
+        assert_eq!(padrao.inicio, momento("2026-09-21T00:00:00-03:00"));
+        assert_eq!(padrao.fim, momento("2026-10-20T22:30:00-03:00"));
+
         let brasilia = FixedOffset::west_opt(3 * 3600).unwrap();
         let agora = momento("2026-09-23T15:00:00-03:00");
         let padrao = periodo_em(

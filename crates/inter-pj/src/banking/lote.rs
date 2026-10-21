@@ -844,7 +844,7 @@ mod tests {
         );
 
         let lote: Lote = serde_json::from_value(json!({"pagamentos": null})).unwrap();
-        assert!(lote.pagamentos.is_empty());
+        assert_eq!(lote.pagamentos, Vec::new());
     }
 
     #[test]

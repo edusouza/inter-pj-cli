@@ -23,7 +23,7 @@ use crate::cli::{
 use crate::commands::{Context, hoje, simulacao};
 use crate::config::Settings;
 use crate::confirmacao::{Stdio, Terminal, confirmar, descrever_ambiente};
-use crate::error::{CliError, resultado_incerto};
+use crate::error::CliError;
 use crate::output::{self, horario_em, horario_local, secao};
 use crate::tabela::{Celula, Coluna, Tabela};
 
@@ -165,7 +165,7 @@ fn erro_do_lote(err: &inter_pj::pix::CobrancaPixError) -> CliError {
 
 /// The error of a request: with an unknown outcome, how to check it.
 fn incerto(err: InterError, id: u64) -> CliError {
-    if resultado_incerto(&err) {
+    if err.may_have_been_processed() {
         CliError::LoteCobvIncerto { source: err, id }
     } else {
         err.into()
@@ -398,7 +398,7 @@ fn desfecho(lote: &LoteCobv, terminou: bool, timeout: Duration) -> Result<(), Cl
     match (terminou, negadas) {
         (true, 0) => Ok(()),
         (true, negadas) => Err(CliError::LoteComErro {
-            detalhe: format!("{negadas} de {} cobranças negadas", lote.cobsv.len()),
+            detalhe: format!("{negadas} de {} cobranças foram negadas", lote.cobsv.len()),
         }),
         (false, _) => Err(CliError::TempoEsgotado {
             oque: "o lote",
@@ -574,7 +574,7 @@ async fn listar(context: &Context, args: &PixLoteCobvListarArgs) -> Result<(), C
     };
     match context.formato() {
         Formato::Json => output::print_json(&json!({ "lotes": lotes })),
-        Formato::Csv => output::print_raw(&csv(&lotes).csv(context.separador())),
+        Formato::Csv => output::print_csv(&csv(&lotes), context.separador()),
         Formato::Texto => {
             context.warn_if_sandbox(&settings);
             let formato = "%d/%m/%Y %H:%M";
@@ -787,7 +787,7 @@ Problemas
         let err = desfecho(&com_negada, true, timeout).unwrap_err();
         assert_eq!(
             err.to_string(),
-            "o lote foi processado com erro: 1 de 2 cobranças negadas"
+            "o lote foi processado, mas 1 de 2 cobranças foram negadas"
         );
         assert_eq!(err.exit_code(), 5);
         let processando = lote(
@@ -824,6 +824,27 @@ Problemas
             texto.ends_with("Veja por quê: inter-pj pix lote-cobv situacao 42 negada"),
             "{texto}"
         );
+    }
+
+    #[test]
+    fn the_csv_for_a_terminal_has_no_escape_sequence() {
+        let forjado: LoteCobv = serde_json::from_value(json!({
+            "id": 42,
+            "descricao": "Mensalidades\u{1b}]52;c;ZXZpbA==\u{7}\u{9b}2J",
+            "criacao": "2026-09-24T13:10:00.358Z",
+            "cobsv": []
+        }))
+        .unwrap();
+        let tabela = csv(&[forjado]);
+        let terminal = tabela.csv_para_terminal(crate::tabela::Separador::Virgula);
+        assert!(
+            !terminal.contains(['\u{1b}', '\u{7}', '\u{9b}']),
+            "{terminal}"
+        );
+        assert_eq!(terminal.split("\r\n").count(), 3, "{terminal}");
+        // In a file, the text as the API sent it.
+        let arquivo = tabela.csv(crate::tabela::Separador::Virgula);
+        assert!(arquivo.contains("Mensalidades\u{1b}"), "{arquivo}");
     }
 
     #[test]

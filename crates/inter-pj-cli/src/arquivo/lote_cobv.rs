@@ -146,13 +146,7 @@ fn json<T>(
     texto: &str,
     item_de: &impl Fn(&Value, &str) -> Result<T, CliError>,
 ) -> Result<(Option<String>, Lidos<T>), CliError> {
-    let valor: Value = serde_json::from_str(texto).map_err(|err| {
-        CliError::Usage(format!(
-            "{nome}: JSON inválido na linha {}, coluna {}",
-            err.line(),
-            err.column()
-        ))
-    })?;
+    let valor = super::json(texto, nome)?;
     let (descricao, itens) = match &valor {
         Value::Array(itens) => (None, itens),
         Value::Object(objeto) => {

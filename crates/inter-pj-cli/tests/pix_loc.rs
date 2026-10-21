@@ -186,6 +186,77 @@ async fn consulta_e_desvincula_a_cobranca() {
     );
 }
 
+/// A creation or an unlinking with an unknown outcome (a `5xx` after the
+/// request) may have been made: the error says how to check it and exits
+/// with 9, without the hints about certificates. A 4xx is an ordinary
+/// error.
+#[tokio::test(flavor = "multi_thread")]
+async fn resultado_incerto_orienta_a_conferir() {
+    let env = env().await;
+    env.mount_token("payloadlocation.write payloadlocation.read", None)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/pix/v2/loc"))
+        .respond_with(ResponseTemplate::new(503))
+        .expect(1)
+        .mount(&env.server)
+        .await;
+    let assert = env
+        .cmd()
+        .args(["pix", "loc", "criar", "--tipo", "cob", "--sem-retentativa"])
+        .assert()
+        .code(9);
+    let stderr = stderr_of(&assert);
+    assert!(
+        stderr.contains("dica: a location pode ter sido criada: confira com inter-pj pix loc listar --sem-cobranca antes de repetir o comando"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("certificado"), "{stderr}");
+
+    Mock::given(method("GET"))
+        .and(path("/pix/v2/loc/790"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(loc(790, Some(TXID))))
+        .mount(&env.server)
+        .await;
+    Mock::given(method("DELETE"))
+        .and(path("/pix/v2/loc/790/txid"))
+        .respond_with(ResponseTemplate::new(503))
+        .up_to_n_times(1)
+        .expect(1)
+        .mount(&env.server)
+        .await;
+    let desvincular = [
+        "pix",
+        "loc",
+        "desvincular",
+        "790",
+        "--sim",
+        "--sem-retentativa",
+    ];
+    let assert = env.cmd().args(desvincular).assert().code(9);
+    let stderr = stderr_of(&assert);
+    assert!(
+        stderr.contains("dica: a cobrança pode ter sido desvinculada: confira com inter-pj pix loc consultar 790 antes de repetir o comando"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("certificado"), "{stderr}");
+
+    Mock::given(method("DELETE"))
+        .and(path("/pix/v2/loc/790/txid"))
+        .respond_with(ResponseTemplate::new(404).set_body_json(json!({
+            "title": "Não encontrado", "status": 404, "detail": "location sem cobrança"
+        })))
+        .expect(1)
+        .mount(&env.server)
+        .await;
+    let assert = env.cmd().args(desvincular).assert().code(5);
+    assert!(
+        !stderr_of(&assert).contains("pode ter sido"),
+        "{}",
+        stderr_of(&assert)
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn sem_cobranca_ou_sem_confirmacao_nada_e_desvinculado() {
     let env = env().await;
