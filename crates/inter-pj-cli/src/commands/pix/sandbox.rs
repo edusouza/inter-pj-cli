@@ -9,6 +9,7 @@ use inter_pj::pix::PagamentoSandbox;
 use rust_decimal::Decimal;
 use serde_json::json;
 
+use crate::chamada::chamada;
 use crate::cli::{Formato, PixPagarQrcodeArgs, PixSandboxCommand, PixSandboxPagarArgs};
 use crate::commands::Context;
 use crate::config::Settings;
@@ -54,7 +55,7 @@ pub(super) async fn pagar_cob(
         context,
         &pagamento,
         valor,
-        &format!("inter-pj pix cob consultar {}", args.txid),
+        &format!("{} pix cob consultar {}", chamada(), args.txid),
     )
 }
 
@@ -81,7 +82,7 @@ pub(super) async fn pagar_cobv(
         context,
         &pagamento,
         valor,
-        &format!("inter-pj pix cobv consultar {}", args.txid),
+        &format!("{} pix cobv consultar {}", chamada(), args.txid),
     )
 }
 
@@ -107,7 +108,12 @@ async fn pagar_qrcode(context: &Context, args: &PixPagarQrcodeArgs) -> Result<()
         .pix()
         .pagar_copia_e_cola_no_sandbox(&args.copia_e_cola.codigo, valor)
         .await?;
-    mostrar(context, &pagamento, valor, "inter-pj pix recebidos listar")
+    mostrar(
+        context,
+        &pagamento,
+        valor,
+        &format!("{} pix recebidos listar", chamada()),
+    )
 }
 
 fn mostrar(
