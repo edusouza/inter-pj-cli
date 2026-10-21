@@ -228,6 +228,90 @@ async fn resultado_incerto_orienta_a_repetir_com_o_mesmo_txid() {
     assert!(!stderr.contains("pode ter sido criada"), "{stderr}");
 }
 
+/// The commands suggested after a creation run on its account: with the
+/// profile, the file, the environment or the account of the command line,
+/// a check on the default profile would find nothing and invite a second
+/// charge. One chosen in the environment stays in the shell by itself.
+#[tokio::test(flavor = "multi_thread")]
+async fn os_comandos_sugeridos_sao_da_mesma_conta() {
+    let env = TestEnv::new().await;
+    env.write_config(&format!(
+        "\n[perfis.filial]\nambiente = \"sandbox\"\nclient_id = \"id-da-filial\"\ncertificado = '{}'\nchave_privada = '{}'",
+        env.path("certificado.crt").display(),
+        env.path("chave.key").display()
+    ));
+    env.mount_token("cob.write", None).await;
+    Mock::given(method("PUT"))
+        .and(path(format!("/pix/v2/cob/{TXID}")))
+        .respond_with(ResponseTemplate::new(503))
+        .up_to_n_times(5)
+        .expect(5)
+        .mount(&env.server)
+        .await;
+    let config = env.config_path().display().to_string();
+    let casos = [
+        (vec!["-p", "filial"], None, "inter-pj -p filial".to_owned()),
+        (vec![], Some("filial"), "inter-pj".to_owned()),
+        (
+            vec!["--config", config.as_str(), "--perfil", "filial"],
+            None,
+            format!("inter-pj --config {config} -p filial"),
+        ),
+        (
+            vec!["--ambiente", "sandbox"],
+            None,
+            "inter-pj --ambiente sandbox".to_owned(),
+        ),
+        (
+            vec!["--conta-corrente", "12345678"],
+            None,
+            "inter-pj --conta-corrente 12345678".to_owned(),
+        ),
+    ];
+    for (opcoes, no_ambiente, chamada) in &casos {
+        let mut cmd = env.cmd();
+        if let Some(perfil) = no_ambiente {
+            cmd.env("INTER_PERFIL", perfil);
+        }
+        let assert = cmd
+            .args(opcoes)
+            .args(criar())
+            .args(["--txid", TXID, "--sim", "--sem-retentativa"])
+            .assert()
+            .code(9);
+        let stderr = stderr_of(&assert);
+        assert!(
+            stderr.contains(&format!(
+                "dica: confira com: {chamada} pix cob consultar {TXID}"
+            )),
+            "{opcoes:?}: {stderr}"
+        );
+    }
+
+    // After the 503s, the charge is created: how to follow it keeps the
+    // account too.
+    Mock::given(method("PUT"))
+        .and(path(format!("/pix/v2/cob/{TXID}")))
+        .respond_with(ResponseTemplate::new(201).set_body_json(cob("ATIVA")))
+        .expect(1)
+        .mount(&env.server)
+        .await;
+    let assert = env
+        .cmd()
+        .args(["-p", "filial"])
+        .args(criar())
+        .args(["--txid", TXID, "--sim"])
+        .assert()
+        .success();
+    let stdout = stdout_of(&assert);
+    assert!(
+        stdout.contains(&format!(
+            "Acompanhe com: inter-pj -p filial pix cob consultar {TXID}"
+        )),
+        "{stdout}"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn consulta_e_revisa_a_cobranca() {
     let env = env().await;

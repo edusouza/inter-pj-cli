@@ -5,6 +5,8 @@ use std::io;
 use inter_pj::banking::PeriodoError;
 use inter_pj::{ApiError, ApiErrorKind, Error as InterError};
 
+use crate::chamada::chamada;
+
 /// Documented exit codes.
 pub(crate) mod exit {
     pub(crate) const UNEXPECTED: u8 = 1;
@@ -211,7 +213,7 @@ impl CliError {
                 return vec![
                     "a cobrança pode ter sido criada; com o mesmo txid, a API não cria outra"
                         .to_owned(),
-                    format!("confira com: inter-pj pix {tipo} consultar {txid}"),
+                    format!("confira com: {} pix {tipo} consultar {txid}", chamada()),
                     format!("ou repita o comando com --txid {txid}"),
                 ];
             }

@@ -12,6 +12,7 @@ use rust_decimal::Decimal;
 use serde_json::json;
 
 use super::{descrever_status, incerta, periodo, pessoa, tabela_pix};
+use crate::chamada::chamada;
 use crate::cli::{
     Formato, PixCobCommand, PixCobConsultarArgs, PixCobCriarArgs, PixCobListarArgs,
     PixCobRevisarArgs, SimNao, StatusCobArg,
@@ -76,8 +77,9 @@ async fn criar(
         .await
         .map_err(|err| incerta(err, "cob", &txid))?;
     let texto = format!(
-        "Cobrança Pix criada.\n\n{}\n\nAcompanhe com: inter-pj pix cob consultar {txid}",
-        render_cob(&criada)
+        "Cobrança Pix criada.\n\n{}\n\nAcompanhe com: {} pix cob consultar {txid}",
+        render_cob(&criada),
+        chamada()
     );
     opcoes.mostrar(context, &settings, &texto, &criada, &copia_e_cola(&criada))
 }
