@@ -76,12 +76,19 @@ async fn criar(
         .criar_cob(&txid, &cob)
         .await
         .map_err(|err| incerta(err, "cob", &txid))?;
+    let consulta = format!("{} pix cob consultar {txid}", chamada());
     let texto = format!(
-        "Cobrança Pix criada.\n\n{}\n\nAcompanhe com: {} pix cob consultar {txid}",
-        render_cob(&criada),
-        chamada()
+        "Cobrança Pix criada.\n\n{}\n\nAcompanhe com: {consulta}",
+        render_cob(&criada)
     );
-    opcoes.mostrar(context, &settings, &texto, &criada, &copia_e_cola(&criada))
+    opcoes.mostrar_criada(
+        context,
+        &settings,
+        &texto,
+        &criada,
+        &copia_e_cola(&criada),
+        &consulta,
+    )
 }
 
 /// The charge of the options, checked as the API would.

@@ -4,10 +4,13 @@
 
 mod common;
 
+use std::fs;
+use std::path::PathBuf;
+
 use common::{COPIA_E_COLA, TestEnv, ler_qr_code, stderr_of, stdout_of};
 use serde_json::{Value, json};
 use wiremock::matchers::{any, body_json, method, path, path_regex, query_param};
-use wiremock::{Mock, ResponseTemplate};
+use wiremock::{Mock, Request, Respond, ResponseTemplate};
 
 const TXID: &str = "7978c0c97ea847e78e8849634473c1f1";
 const CHAVE: &str = "pix@empresa.example";
@@ -111,6 +114,118 @@ async fn cria_com_o_txid_e_desenha_o_qr_code() {
     ] {
         assert!(stderr.contains(linha), "{linha}\n{stderr}");
     }
+}
+
+/// Creates the charge and, before answering, a file where the PNG would go:
+/// the write of the image fails after the creation.
+struct CriaEOcupaOArquivo(PathBuf);
+
+impl Respond for CriaEOcupaOArquivo {
+    fn respond(&self, _: &Request) -> ResponseTemplate {
+        fs::write(&self.0, "outro").unwrap();
+        ResponseTemplate::new(201).set_body_json(cob("ATIVA"))
+    }
+}
+
+/// Once the charge exists, a QR Code that cannot be made or saved does not
+/// turn the creation into an error: a script would read exit 2 as "nothing
+/// was created" and create another charge. The charge is shown, and a
+/// warning says how to save the image later.
+#[tokio::test(flavor = "multi_thread")]
+async fn falha_do_qr_code_depois_da_criacao_e_so_um_aviso() {
+    let env = env().await;
+    env.mount_token("cob.write", None).await;
+    let cob_path = format!("/pix/v2/cob/{TXID}");
+    let mut sem_copia_e_cola = cob("ATIVA");
+    sem_copia_e_cola["pixCopiaECola"] = Value::Null;
+    Mock::given(method("PUT"))
+        .and(path(cob_path.clone()))
+        .respond_with(ResponseTemplate::new(201).set_body_json(sem_copia_e_cola))
+        .up_to_n_times(1)
+        .expect(1)
+        .mount(&env.server)
+        .await;
+    let png = env.path("qr.png");
+    let assert = env
+        .cmd()
+        .args(criar())
+        .args(["--txid", TXID, "--sim", "--qrcode-png"])
+        .arg(&png)
+        .assert()
+        .success();
+    let stdout = stdout_of(&assert);
+    assert!(
+        stdout.starts_with(&format!("Cobrança Pix criada.\n\nCobrança Pix {TXID}\n")),
+        "{stdout}"
+    );
+    let stderr = stderr_of(&assert);
+    for aviso in [
+        "aviso: a cobrança foi criada, mas o QR Code não foi gravado: a API não informou o copia e cola desta cobrança".to_owned(),
+        format!(
+            "aviso: para gravá-lo, use: inter-pj pix cob consultar {TXID} --qrcode-png {}",
+            png.display()
+        ),
+    ] {
+        assert!(stderr.contains(&aviso), "{aviso}\n{stderr}");
+    }
+    assert!(!png.exists());
+
+    // An invalid "copia e cola" with the image on the standard output: the
+    // charge, with its txid, goes to stderr.
+    let mut invalida = cob("ATIVA");
+    invalida["pixCopiaECola"] = json!(COPIA_E_COLA.replace("63041D3D", "63040000"));
+    Mock::given(method("PUT"))
+        .and(path(cob_path.clone()))
+        .respond_with(ResponseTemplate::new(201).set_body_json(invalida))
+        .up_to_n_times(1)
+        .expect(1)
+        .mount(&env.server)
+        .await;
+    let assert = env
+        .cmd()
+        .args(criar())
+        .args(["--txid", TXID, "--sim", "--qrcode-png", "-"])
+        .assert()
+        .success();
+    assert_eq!(stdout_of(&assert), "");
+    let stderr = stderr_of(&assert);
+    for linha in [
+        format!("Cobrança Pix criada.\n\nCobrança Pix {TXID}\n"),
+        "aviso: a cobrança foi criada, mas o QR Code não foi gravado: Pix copia e cola inválido"
+            .to_owned(),
+        format!("aviso: para gravá-lo, use: inter-pj pix cob consultar {TXID} --qrcode-png -"),
+    ] {
+        assert!(stderr.contains(&linha), "{linha}\n{stderr}");
+    }
+
+    // The file appears between the check and the write.
+    Mock::given(method("PUT"))
+        .and(path(cob_path))
+        .respond_with(CriaEOcupaOArquivo(png.clone()))
+        .expect(1)
+        .mount(&env.server)
+        .await;
+    let assert = env
+        .cmd()
+        .args(criar())
+        .args(["--txid", TXID, "--sim", "--qrcode-png"])
+        .arg(&png)
+        .assert()
+        .success();
+    assert!(
+        stdout_of(&assert).starts_with("Cobrança Pix criada."),
+        "{}",
+        stdout_of(&assert)
+    );
+    let stderr = stderr_of(&assert);
+    assert!(
+        stderr.contains(&format!(
+            "aviso: a cobrança foi criada, mas o QR Code não foi gravado: o arquivo {} já existe",
+            png.display()
+        )),
+        "{stderr}"
+    );
+    assert_eq!(fs::read_to_string(&png).unwrap(), "outro");
 }
 
 #[tokio::test(flavor = "multi_thread")]
