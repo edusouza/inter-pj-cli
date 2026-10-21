@@ -19,7 +19,7 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ### Alterado
 
-- Os códigos de saída 5 e 8 valem também para `cobranca emitir --aguardar` (cobrança não emitida; tempo esgotado).
+- Os códigos de saída 5 e 8 valem também para `cobranca emitir --aguardar` (cobrança não emitida; tempo esgotado), e o 9, para uma consulta que falha durante a espera de um jeito que esperar não resolve. Nos dois casos, o erro traz o código da cobrança solicitada e o comando que a acompanha; `429`, `5xx` e falhas de rede durante a espera só adiam a próxima consulta.
 
 ## [0.4.0] - 2026-09-23
 

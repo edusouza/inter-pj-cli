@@ -744,6 +744,69 @@ async fn emitida_sem_pix_avisa_e_termina_bem() {
     );
 }
 
+/// Once the charge is requested, its code and how to follow it go to
+/// stderr: with the image on the standard output, nothing else would say
+/// which charge it was when the wait ends badly.
+#[tokio::test(flavor = "multi_thread")]
+async fn o_codigo_da_cobranca_solicitada_nunca_se_perde() {
+    let vencimento = daqui_a(30);
+    for (situacao, codigo_de_saida, erro) in [
+        (
+            "EM_PROCESSAMENTO",
+            8,
+            "mas o tempo de espera acabou (1 s) com ela ainda em processamento",
+        ),
+        (
+            "FALHA_EMISSAO",
+            5,
+            "a cobrança não foi emitida: falha na emissão",
+        ),
+    ] {
+        let env = env().await;
+        env.mount_token("boleto-cobranca.write boleto-cobranca.read", None)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/cobranca/v3/cobrancas"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(json!({"codigoSolicitacao": CODIGO})),
+            )
+            .expect(1)
+            .mount(&env.server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(format!("/cobranca/v3/cobrancas/{CODIGO}")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "cobranca": {"codigoSolicitacao": CODIGO, "situacao": situacao}
+            })))
+            .mount(&env.server)
+            .await;
+        let assert = env
+            .cmd()
+            .args(opcoes(&vencimento))
+            .args([
+                "--sim",
+                "--aguardar",
+                "--timeout",
+                "1s",
+                "--qrcode-png",
+                "-",
+            ])
+            .assert()
+            .code(codigo_de_saida);
+        assert_eq!(stdout_of(&assert), "", "{situacao}");
+        let stderr = stderr_of(&assert);
+        for linha in [
+            format!(
+                "Cobrança solicitada: código {CODIGO}. Acompanhe com: inter-pj cobranca consultar {CODIGO}"
+            ),
+            erro.to_owned(),
+        ] {
+            assert!(stderr.contains(&linha), "{linha}\n{stderr}");
+        }
+        assert!(!stderr.contains("--timeout"), "{stderr}");
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn simulacao_da_emissao_nao_envia_nada() {
     let env = env().await;
