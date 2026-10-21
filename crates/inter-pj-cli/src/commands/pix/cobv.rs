@@ -16,7 +16,7 @@ use serde_json::json;
 use super::encargos::{self, Encargos};
 use super::{
     Filtros, alteravel, antes_e_depois, copia_e_cola_ativa, descrever_status, incerta, paginacao,
-    pessoa, tabela_pix,
+    pessoa, revisao_incerta, tabela_pix,
 };
 use crate::arquivo;
 use crate::chamada::chamada;
@@ -365,7 +365,11 @@ async fn revisar(
     };
     confirmar(terminal, args.sim, pergunta)?;
 
-    let revisada = client.pix().revisar_cobv(&args.txid, &revisao).await?;
+    let revisada = client
+        .pix()
+        .revisar_cobv(&args.txid, &revisao)
+        .await
+        .map_err(|err| revisao_incerta(err, "cobv", &args.txid, revisao.remover))?;
     match context.formato() {
         Formato::Json => output::print_json(&revisada),
         // `commands::run` refuses csv for this command.

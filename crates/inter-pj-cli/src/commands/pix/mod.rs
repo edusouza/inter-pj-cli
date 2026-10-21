@@ -147,6 +147,21 @@ fn incerta(err: InterError, tipo: &'static str, txid: &Txid) -> CliError {
     }
 }
 
+/// The error of a change or removal: with an unknown outcome, how to check
+/// it before repeating it.
+fn revisao_incerta(err: InterError, tipo: &'static str, txid: &Txid, remocao: bool) -> CliError {
+    if err.may_have_been_processed() {
+        CliError::RevisaoPixIncerta {
+            source: err,
+            tipo,
+            txid: txid.to_string(),
+            remocao,
+        }
+    } else {
+        err.into()
+    }
+}
+
 /// Refuses what can no longer change: a charge paid or removed.
 fn alteravel(status: Option<&StatusCob>) -> Result<(), CliError> {
     let motivo = match status {

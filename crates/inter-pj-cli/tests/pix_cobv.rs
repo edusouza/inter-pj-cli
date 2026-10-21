@@ -570,7 +570,8 @@ async fn revisa_e_remove_a_cobranca() {
         .expect(1)
         .mount(&env.server)
         .await;
-    // A discount without a date lasts until the current due date.
+    // A discount without a date lasts until the day before the current
+    // due date.
     Mock::given(method("PATCH"))
         .and(path(cobv_path.clone()))
         .and(body_json(json!({
@@ -642,6 +643,65 @@ async fn revisa_e_remove_a_cobranca() {
             .starts_with("Cobrança Pix com vencimento removida: ela não pode mais ser paga."),
         "{}",
         stdout_of(&assert)
+    );
+}
+
+/// A change or a removal with an unknown outcome (a `5xx` after the PATCH)
+/// may have been applied: the error says how to check it and exits with
+/// 9. A refusal of the API (4xx) is an ordinary error.
+#[tokio::test(flavor = "multi_thread")]
+async fn revisao_incerta_orienta_a_conferir() {
+    let env = env().await;
+    env.mount_token("cobv.write cobv.read", None).await;
+    let cobv_path = format!("/pix/v2/cobv/{TXID}");
+    Mock::given(method("GET"))
+        .and(path(cobv_path.clone()))
+        .respond_with(ResponseTemplate::new(200).set_body_json(cobv("ATIVA")))
+        .mount(&env.server)
+        .await;
+    Mock::given(method("PATCH"))
+        .and(path(cobv_path.clone()))
+        .respond_with(ResponseTemplate::new(503))
+        .up_to_n_times(2)
+        .expect(2)
+        .mount(&env.server)
+        .await;
+    let revisar = |extra: &[&'static str]| {
+        let mut args = vec!["pix", "cobv", "revisar", TXID];
+        args.extend_from_slice(extra);
+        args.extend(["--sim", "--sem-retentativa"]);
+        args
+    };
+    for (extra, situacao) in [
+        (&["--remover"][..], "a cobrança pode ter sido removida"),
+        (&["--valor", "160"][..], "a alteração pode ter sido feita"),
+    ] {
+        let assert = env.cmd().args(revisar(extra)).assert().code(9);
+        let stderr = stderr_of(&assert);
+        assert!(
+            stderr.contains(&format!(
+                "dica: {situacao}: confira com inter-pj pix cobv consultar {TXID} antes de repetir o comando"
+            )),
+            "{stderr}"
+        );
+    }
+    Mock::given(method("PATCH"))
+        .and(path(cobv_path))
+        .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+            "title": "Requisição inválida", "status": 400, "detail": "valor inválido"
+        })))
+        .expect(1)
+        .mount(&env.server)
+        .await;
+    let assert = env
+        .cmd()
+        .args(revisar(&["--valor", "160"]))
+        .assert()
+        .code(5);
+    assert!(
+        !stderr_of(&assert).contains("pode ter sido feita"),
+        "{}",
+        stderr_of(&assert)
     );
 }
 
