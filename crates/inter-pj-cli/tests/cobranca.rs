@@ -8,8 +8,8 @@ use std::fs;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
-use chrono::{Days, Local};
-use common::{TestEnv, stderr_of, stdout_of};
+use chrono::Days;
+use common::{CLIENT_SECRET, TOKEN, TestEnv, hoje, stderr_of, stdout_of};
 use serde_json::{Value, json};
 use wiremock::matchers::{
     any, body_json, body_partial_json, method, path, query_param, query_param_is_missing,
@@ -511,9 +511,9 @@ async fn filtros_invalidos_nao_chamam_a_api() {
 
 // --- emitir -------------------------------------------------------------------------
 
+/// `dias` after today in Brasília, as the CLI counts.
 fn daqui_a(dias: u64) -> String {
-    Local::now()
-        .date_naive()
+    hoje()
         .checked_add_days(Days::new(dias))
         .unwrap()
         .format("%Y-%m-%d")
@@ -804,6 +804,110 @@ async fn o_codigo_da_cobranca_solicitada_nunca_se_perde() {
             assert!(stderr.contains(&linha), "{linha}\n{stderr}");
         }
         assert!(!stderr.contains("--timeout"), "{stderr}");
+    }
+}
+
+/// The answer of the API in `--json`, with and without `--aguardar`, and
+/// the exit codes of the issue in the binary: the secret and the token
+/// never show, even with `-vv`.
+#[tokio::test(flavor = "multi_thread")]
+async fn emissao_em_json_e_codigos_de_saida_sem_vazar_segredo() {
+    let vencimento = daqui_a(30);
+    let sem_segredo = |assert: &assert_cmd::assert::Assert| {
+        let saida = format!("{}{}", stdout_of(assert), stderr_of(assert));
+        for segredo in [CLIENT_SECRET, TOKEN] {
+            assert!(!saida.contains(segredo), "{segredo:?} vazou:\n{saida}");
+        }
+    };
+    let pedido = |status: u16| {
+        Mock::given(method("POST"))
+            .and(path("/cobranca/v3/cobrancas"))
+            .respond_with(
+                ResponseTemplate::new(status).set_body_json(json!({"codigoSolicitacao": CODIGO})),
+            )
+            .expect(1)
+    };
+
+    // The request alone: the answer of the API, as it came.
+    let env = self::env().await;
+    env.mount_token("boleto-cobranca.write", None).await;
+    pedido(200).mount(&env.server).await;
+    let assert = env
+        .cmd()
+        .arg("-vv")
+        .args(opcoes(&vencimento))
+        .args(["--sim", "--json"])
+        .assert()
+        .success();
+    sem_segredo(&assert);
+    let json: Value = serde_json::from_str(&stdout_of(&assert)).unwrap();
+    assert_eq!(json, json!({"codigoSolicitacao": CODIGO}));
+    assert!(
+        stderr_of(&assert).contains("POST /cobranca/v3/cobrancas → 200"),
+        "{}",
+        stderr_of(&assert)
+    );
+
+    // With --aguardar, the charge issued.
+    let env = self::env().await;
+    env.mount_token("boleto-cobranca.write boleto-cobranca.read", None)
+        .await;
+    pedido(200).mount(&env.server).await;
+    mount_cobranca(&env, cobranca(true), 1).await;
+    let assert = env
+        .cmd()
+        .arg("-vv")
+        .args(opcoes(&vencimento))
+        .args(["--sim", "--json", "--aguardar"])
+        .assert()
+        .success();
+    sem_segredo(&assert);
+    let json: Value = serde_json::from_str(&stdout_of(&assert)).unwrap();
+    assert_eq!(json, cobranca(true));
+
+    // Refused for lack of permission (4), and an uncertain result (9).
+    for (status, codigo_de_saida) in [(403, 4), (503, 9)] {
+        let env = self::env().await;
+        env.mount_token("boleto-cobranca.write", None).await;
+        pedido(status).mount(&env.server).await;
+        let assert = env
+            .cmd()
+            .arg("-vv")
+            .args(opcoes(&vencimento))
+            .arg("--sim")
+            .assert()
+            .code(codigo_de_saida);
+        sem_segredo(&assert);
+        assert_eq!(stdout_of(&assert), "", "{status}");
+    }
+
+    // Not issued (5) and the time running out (8), in text.
+    for (situacao, codigo_de_saida) in [("FALHA_EMISSAO", 5), ("EM_PROCESSAMENTO", 8)] {
+        let env = self::env().await;
+        env.mount_token("boleto-cobranca.write boleto-cobranca.read", None)
+            .await;
+        pedido(200).mount(&env.server).await;
+        Mock::given(method("GET"))
+            .and(path(format!("/cobranca/v3/cobrancas/{CODIGO}")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "cobranca": {"codigoSolicitacao": CODIGO, "seuNumero": "NF-123", "situacao": situacao}
+            })))
+            .mount(&env.server)
+            .await;
+        let assert = env
+            .cmd()
+            .arg("-vv")
+            .args(opcoes(&vencimento))
+            .args(["--sim", "--aguardar", "--timeout", "1s"])
+            .assert()
+            .code(codigo_de_saida);
+        sem_segredo(&assert);
+        // The charge, as it stands, on stdout.
+        assert!(
+            stdout_of(&assert).starts_with("Cobrança NF-123"),
+            "{situacao}: {}",
+            stdout_of(&assert)
+        );
     }
 }
 
