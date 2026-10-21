@@ -4,10 +4,13 @@
 
 mod common;
 
+use std::fs;
+use std::path::PathBuf;
+
 use common::{COPIA_E_COLA, TestEnv, ler_qr_code, stderr_of, stdout_of};
 use serde_json::{Value, json};
 use wiremock::matchers::{any, body_json, method, path, path_regex, query_param};
-use wiremock::{Mock, ResponseTemplate};
+use wiremock::{Mock, Request, Respond, ResponseTemplate};
 
 const TXID: &str = "7978c0c97ea847e78e8849634473c1f1";
 const CHAVE: &str = "pix@empresa.example";
@@ -113,6 +116,118 @@ async fn cria_com_o_txid_e_desenha_o_qr_code() {
     }
 }
 
+/// Creates the charge and, before answering, a file where the PNG would go:
+/// the write of the image fails after the creation.
+struct CriaEOcupaOArquivo(PathBuf);
+
+impl Respond for CriaEOcupaOArquivo {
+    fn respond(&self, _: &Request) -> ResponseTemplate {
+        fs::write(&self.0, "outro").unwrap();
+        ResponseTemplate::new(201).set_body_json(cob("ATIVA"))
+    }
+}
+
+/// Once the charge exists, a QR Code that cannot be made or saved does not
+/// turn the creation into an error: a script would read exit 2 as "nothing
+/// was created" and create another charge. The charge is shown, and a
+/// warning says how to save the image later.
+#[tokio::test(flavor = "multi_thread")]
+async fn falha_do_qr_code_depois_da_criacao_e_so_um_aviso() {
+    let env = env().await;
+    env.mount_token("cob.write", None).await;
+    let cob_path = format!("/pix/v2/cob/{TXID}");
+    let mut sem_copia_e_cola = cob("ATIVA");
+    sem_copia_e_cola["pixCopiaECola"] = Value::Null;
+    Mock::given(method("PUT"))
+        .and(path(cob_path.clone()))
+        .respond_with(ResponseTemplate::new(201).set_body_json(sem_copia_e_cola))
+        .up_to_n_times(1)
+        .expect(1)
+        .mount(&env.server)
+        .await;
+    let png = env.path("qr.png");
+    let assert = env
+        .cmd()
+        .args(criar())
+        .args(["--txid", TXID, "--sim", "--qrcode-png"])
+        .arg(&png)
+        .assert()
+        .success();
+    let stdout = stdout_of(&assert);
+    assert!(
+        stdout.starts_with(&format!("Cobrança Pix criada.\n\nCobrança Pix {TXID}\n")),
+        "{stdout}"
+    );
+    let stderr = stderr_of(&assert);
+    for aviso in [
+        "aviso: a cobrança foi criada, mas o QR Code não foi gravado: a API não informou o copia e cola desta cobrança".to_owned(),
+        format!(
+            "aviso: para gravá-lo, use: inter-pj pix cob consultar {TXID} --qrcode-png {}",
+            png.display()
+        ),
+    ] {
+        assert!(stderr.contains(&aviso), "{aviso}\n{stderr}");
+    }
+    assert!(!png.exists());
+
+    // An invalid "copia e cola" with the image on the standard output: the
+    // charge, with its txid, goes to stderr.
+    let mut invalida = cob("ATIVA");
+    invalida["pixCopiaECola"] = json!(COPIA_E_COLA.replace("63041D3D", "63040000"));
+    Mock::given(method("PUT"))
+        .and(path(cob_path.clone()))
+        .respond_with(ResponseTemplate::new(201).set_body_json(invalida))
+        .up_to_n_times(1)
+        .expect(1)
+        .mount(&env.server)
+        .await;
+    let assert = env
+        .cmd()
+        .args(criar())
+        .args(["--txid", TXID, "--sim", "--qrcode-png", "-"])
+        .assert()
+        .success();
+    assert_eq!(stdout_of(&assert), "");
+    let stderr = stderr_of(&assert);
+    for linha in [
+        format!("Cobrança Pix criada.\n\nCobrança Pix {TXID}\n"),
+        "aviso: a cobrança foi criada, mas o QR Code não foi gravado: Pix copia e cola inválido"
+            .to_owned(),
+        format!("aviso: para gravá-lo, use: inter-pj pix cob consultar {TXID} --qrcode-png -"),
+    ] {
+        assert!(stderr.contains(&linha), "{linha}\n{stderr}");
+    }
+
+    // The file appears between the check and the write.
+    Mock::given(method("PUT"))
+        .and(path(cob_path))
+        .respond_with(CriaEOcupaOArquivo(png.clone()))
+        .expect(1)
+        .mount(&env.server)
+        .await;
+    let assert = env
+        .cmd()
+        .args(criar())
+        .args(["--txid", TXID, "--sim", "--qrcode-png"])
+        .arg(&png)
+        .assert()
+        .success();
+    assert!(
+        stdout_of(&assert).starts_with("Cobrança Pix criada."),
+        "{}",
+        stdout_of(&assert)
+    );
+    let stderr = stderr_of(&assert);
+    assert!(
+        stderr.contains(&format!(
+            "aviso: a cobrança foi criada, mas o QR Code não foi gravado: o arquivo {} já existe",
+            png.display()
+        )),
+        "{stderr}"
+    );
+    assert_eq!(fs::read_to_string(&png).unwrap(), "outro");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn sem_txid_gera_um_e_o_mostra() {
     let env = env().await;
@@ -182,7 +297,8 @@ async fn criacao_invalida_ou_sem_confirmacao_nao_chama_a_api() {
 }
 
 /// With an unknown outcome, the error says how to check and how to repeat
-/// without creating two charges.
+/// without creating two charges, and exits with its own code: a script that
+/// repeats on 6 would create another charge with another txid.
 #[tokio::test(flavor = "multi_thread")]
 async fn resultado_incerto_orienta_a_repetir_com_o_mesmo_txid() {
     let env = env().await;
@@ -198,7 +314,7 @@ async fn resultado_incerto_orienta_a_repetir_com_o_mesmo_txid() {
         .args(criar())
         .args(["--txid", TXID, "--sim"])
         .assert()
-        .code(6);
+        .code(9);
     let stderr = stderr_of(&assert);
     for dica in [
         "dica: a cobrança pode ter sido criada; com o mesmo txid, a API não cria outra".to_owned(),
@@ -207,6 +323,108 @@ async fn resultado_incerto_orienta_a_repetir_com_o_mesmo_txid() {
     ] {
         assert!(stderr.contains(&dica), "{dica}\n{stderr}");
     }
+
+    // A `429` was not processed: it keeps the code of "try later".
+    let limite = self::env().await;
+    limite.mount_token("cob.write", Some(1)).await;
+    Mock::given(method("PUT"))
+        .and(path(format!("/pix/v2/cob/{TXID}")))
+        .respond_with(ResponseTemplate::new(429))
+        .expect(1)
+        .mount(&limite.server)
+        .await;
+    let assert = limite
+        .cmd()
+        .args(criar())
+        .args(["--txid", TXID, "--sim", "--sem-retentativa"])
+        .assert()
+        .code(6);
+    let stderr = stderr_of(&assert);
+    assert!(!stderr.contains("pode ter sido criada"), "{stderr}");
+}
+
+/// The commands suggested after a creation run on its account: with the
+/// profile, the file, the environment or the account of the command line,
+/// a check on the default profile would find nothing and invite a second
+/// charge. One chosen in the environment stays in the shell by itself.
+#[tokio::test(flavor = "multi_thread")]
+async fn os_comandos_sugeridos_sao_da_mesma_conta() {
+    let env = TestEnv::new().await;
+    env.write_config(&format!(
+        "\n[perfis.filial]\nambiente = \"sandbox\"\nclient_id = \"id-da-filial\"\ncertificado = '{}'\nchave_privada = '{}'",
+        env.path("certificado.crt").display(),
+        env.path("chave.key").display()
+    ));
+    env.mount_token("cob.write", None).await;
+    Mock::given(method("PUT"))
+        .and(path(format!("/pix/v2/cob/{TXID}")))
+        .respond_with(ResponseTemplate::new(503))
+        .up_to_n_times(5)
+        .expect(5)
+        .mount(&env.server)
+        .await;
+    let config = env.config_path().display().to_string();
+    let casos = [
+        (vec!["-p", "filial"], None, "inter-pj -p filial".to_owned()),
+        (vec![], Some("filial"), "inter-pj".to_owned()),
+        (
+            vec!["--config", config.as_str(), "--perfil", "filial"],
+            None,
+            format!("inter-pj --config {config} -p filial"),
+        ),
+        (
+            vec!["--ambiente", "sandbox"],
+            None,
+            "inter-pj --ambiente sandbox".to_owned(),
+        ),
+        (
+            vec!["--conta-corrente", "12345678"],
+            None,
+            "inter-pj --conta-corrente 12345678".to_owned(),
+        ),
+    ];
+    for (opcoes, no_ambiente, chamada) in &casos {
+        let mut cmd = env.cmd();
+        if let Some(perfil) = no_ambiente {
+            cmd.env("INTER_PERFIL", perfil);
+        }
+        let assert = cmd
+            .args(opcoes)
+            .args(criar())
+            .args(["--txid", TXID, "--sim", "--sem-retentativa"])
+            .assert()
+            .code(9);
+        let stderr = stderr_of(&assert);
+        assert!(
+            stderr.contains(&format!(
+                "dica: confira com: {chamada} pix cob consultar {TXID}"
+            )),
+            "{opcoes:?}: {stderr}"
+        );
+    }
+
+    // After the 503s, the charge is created: how to follow it keeps the
+    // account too.
+    Mock::given(method("PUT"))
+        .and(path(format!("/pix/v2/cob/{TXID}")))
+        .respond_with(ResponseTemplate::new(201).set_body_json(cob("ATIVA")))
+        .expect(1)
+        .mount(&env.server)
+        .await;
+    let assert = env
+        .cmd()
+        .args(["-p", "filial"])
+        .args(criar())
+        .args(["--txid", TXID, "--sim"])
+        .assert()
+        .success();
+    let stdout = stdout_of(&assert);
+    assert!(
+        stdout.contains(&format!(
+            "Acompanhe com: inter-pj -p filial pix cob consultar {TXID}"
+        )),
+        "{stdout}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -330,6 +548,89 @@ async fn cobranca_paga_nao_e_revisada_nem_tem_qr_code() {
         "{}",
         stderr_of(&assert)
     );
+}
+
+/// The txid and the names of the additional information come from the API:
+/// a line break in them cannot fake a line of the charge, nor a
+/// bidirectional mark reverse one.
+#[tokio::test(flavor = "multi_thread")]
+async fn textos_da_api_nao_forjam_linhas() {
+    let env = env().await;
+    env.mount_token("cob.read", None).await;
+    let mut forjada = cob("ATIVA");
+    forjada["txid"] = json!("X\n  Valor        R$ 1,00");
+    forjada["infoAdicionais"] =
+        json!([{"nome": "Pedido\n  Status       paga\u{202E}", "valor": "1"}]);
+    Mock::given(method("GET"))
+        .and(path(format!("/pix/v2/cob/{TXID}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(forjada))
+        .expect(1)
+        .mount(&env.server)
+        .await;
+    let texto = stdout_of(
+        &env.cmd()
+            .args(["pix", "cob", "consultar", TXID])
+            .assert()
+            .success(),
+    );
+    assert!(
+        texto.starts_with("Cobrança Pix X\u{FFFD}  Valor        R$ 1,00\n  Status       ativa\n"),
+        "{texto}"
+    );
+    let comecam = |inicio: &str| {
+        texto
+            .lines()
+            .filter(|linha| linha.starts_with(inicio))
+            .count()
+    };
+    assert_eq!(comecam("  Valor"), 1, "{texto}");
+    assert_eq!(comecam("  Status"), 1, "{texto}");
+    assert!(!texto.contains('\u{202E}'), "{texto}");
+}
+
+/// The status stays `ATIVA` after the expiration, but the Pix is no longer
+/// accepted: no image of a QR Code that cannot be paid.
+#[tokio::test(flavor = "multi_thread")]
+async fn cobranca_expirada_nao_tem_qr_code() {
+    let env = env().await;
+    env.mount_token("cob.read", None).await;
+    // Created on 23/09/2026 for 1 hour.
+    Mock::given(method("GET"))
+        .and(path(format!("/pix/v2/cob/{TXID}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(cob("ATIVA")))
+        .up_to_n_times(1)
+        .expect(1)
+        .mount(&env.server)
+        .await;
+    let png = env.path("qr.png");
+    let assert = env
+        .cmd()
+        .args(["pix", "cob", "consultar", TXID, "--qrcode-png"])
+        .arg(&png)
+        .assert()
+        .code(2);
+    assert!(
+        stderr_of(&assert).contains("a cobrança expirou em 23/09/2026"),
+        "{}",
+        stderr_of(&assert)
+    );
+    assert!(!png.exists());
+
+    // Created now, for 1 hour: the image is saved.
+    let mut vigente = cob("ATIVA");
+    vigente["calendario"]["criacao"] = json!(chrono::Utc::now().to_rfc3339());
+    Mock::given(method("GET"))
+        .and(path(format!("/pix/v2/cob/{TXID}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(vigente))
+        .expect(1)
+        .mount(&env.server)
+        .await;
+    env.cmd()
+        .args(["pix", "cob", "consultar", TXID, "--qrcode-png"])
+        .arg(&png)
+        .assert()
+        .success();
+    assert!(fs::read(&png).unwrap().starts_with(b"\x89PNG"));
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -19,7 +19,7 @@ use crate::commands::{Context, simulacao};
 use crate::confirmacao::{
     Stdio, Terminal, confirmar, descrever_ambiente, pode_confirmar, verificar_limite,
 };
-use crate::error::{CliError, resultado_incerto};
+use crate::error::CliError;
 use crate::output::{self, horario_em, secao};
 use crate::valor::por_extenso;
 
@@ -248,7 +248,7 @@ fn resumo(
 /// The error of a refund: with an unknown outcome, how to check and
 /// repeat it with the same id.
 fn incerta(err: InterError, e2e: &str, id: &IdDevolucao) -> CliError {
-    if resultado_incerto(&err) {
+    if err.may_have_been_processed() {
         CliError::DevolucaoIncerta {
             source: err,
             e2e: e2e.to_owned(),

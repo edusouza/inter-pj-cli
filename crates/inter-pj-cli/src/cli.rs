@@ -23,6 +23,10 @@ use rust_decimal::Decimal;
 use crate::tabela::Separador;
 use crate::valor::{parse_valor, parse_valor_ou_zero};
 
+mod erro;
+
+pub(crate) use erro::Portugues;
+
 mod pix;
 
 pub(crate) use pix::{
@@ -1269,6 +1273,10 @@ pub(crate) struct LoteEnviarArgs {
     #[arg(long, value_name = "TEXTO", help_heading = "Lote")]
     pub(crate) identificador: Option<String>,
 
+    /// Envia mesmo com pagamentos repetidos no arquivo (o mesmo código, ou o mesmo DARF), que sem ela são recusados
+    #[arg(long, help_heading = "Segurança")]
+    pub(crate) permitir_repetidos: bool,
+
     /// Confirma sem perguntar (para scripts)
     #[arg(long, conflicts_with = "simular", help_heading = "Segurança")]
     pub(crate) sim: bool,
@@ -1333,24 +1341,17 @@ pub(crate) enum DarfCommand {
     Listar(DarfListarArgs),
 }
 
+// Which options go together is checked by the command, which says what to
+// do (`commands::pagamento::darf`): a rule of clap would ask a `--arquivo`
+// with `--multa` for the options the file replaces.
 #[derive(Debug, Args)]
-#[command(group(
-    ArgGroup::new("origem")
-        .required(true)
-        .args(["arquivo", "codigo_receita"])
-))]
 pub(crate) struct DarfPagarArgs {
     /// Arquivo JSON com o DARF, nos campos da API ("-" para a entrada padrão)
     #[arg(long, value_name = "ARQUIVO", help_heading = "Origem (escolha uma)")]
     pub(crate) arquivo: Option<PathBuf>,
 
     /// Código da receita, 4 dígitos (ex.: 0220)
-    #[arg(
-        long,
-        value_name = "CODIGO",
-        requires_all = ["contribuinte", "nome_empresa", "periodo_apuracao", "vencimento", "valor_principal", "referencia", "descricao"],
-        help_heading = "Origem (escolha uma)"
-    )]
+    #[arg(long, value_name = "CODIGO", help_heading = "Origem (escolha uma)")]
     pub(crate) codigo_receita: Option<String>,
 
     /// CPF ou CNPJ do contribuinte
@@ -1358,27 +1359,16 @@ pub(crate) struct DarfPagarArgs {
         long,
         value_name = "CPF/CNPJ",
         value_parser = parse_documento,
-        requires = "codigo_receita",
         help_heading = "DARF"
     )]
     pub(crate) contribuinte: Option<Documento>,
 
     /// Nome do contribuinte (até 100 caracteres)
-    #[arg(
-        long,
-        value_name = "NOME",
-        requires = "codigo_receita",
-        help_heading = "DARF"
-    )]
+    #[arg(long, value_name = "NOME", help_heading = "DARF")]
     pub(crate) nome_empresa: Option<String>,
 
     /// Telefone do contribuinte (opcional, até 50 caracteres)
-    #[arg(
-        long,
-        value_name = "TELEFONE",
-        requires = "codigo_receita",
-        help_heading = "DARF"
-    )]
+    #[arg(long, value_name = "TELEFONE", help_heading = "DARF")]
     pub(crate) telefone: Option<String>,
 
     /// Período de apuração (AAAA-MM-DD)
@@ -1386,7 +1376,6 @@ pub(crate) struct DarfPagarArgs {
         long,
         value_name = "AAAA-MM-DD",
         value_parser = parse_data,
-        requires = "codigo_receita",
         help_heading = "DARF"
     )]
     pub(crate) periodo_apuracao: Option<NaiveDate>,
@@ -1396,27 +1385,16 @@ pub(crate) struct DarfPagarArgs {
         long,
         value_name = "AAAA-MM-DD",
         value_parser = parse_data,
-        requires = "codigo_receita",
         help_heading = "DARF"
     )]
     pub(crate) vencimento: Option<NaiveDate>,
 
     /// Número de referência (só dígitos, até 30)
-    #[arg(
-        long,
-        value_name = "NUMERO",
-        requires = "codigo_receita",
-        help_heading = "DARF"
-    )]
+    #[arg(long, value_name = "NUMERO", help_heading = "DARF")]
     pub(crate) referencia: Option<String>,
 
     /// Descrição do pagamento (até 1000 caracteres)
-    #[arg(
-        long,
-        value_name = "TEXTO",
-        requires = "codigo_receita",
-        help_heading = "DARF"
-    )]
+    #[arg(long, value_name = "TEXTO", help_heading = "DARF")]
     pub(crate) descricao: Option<String>,
 
     /// Valor principal: 150,00, 1.500,00 ou 150.00
@@ -1424,7 +1402,6 @@ pub(crate) struct DarfPagarArgs {
         long,
         value_name = "VALOR",
         value_parser = parse_valor,
-        requires = "codigo_receita",
         help_heading = "Valores"
     )]
     pub(crate) valor_principal: Option<Decimal>,
@@ -1434,7 +1411,6 @@ pub(crate) struct DarfPagarArgs {
         long,
         value_name = "VALOR",
         value_parser = parse_valor_ou_zero,
-        requires = "codigo_receita",
         help_heading = "Valores"
     )]
     pub(crate) multa: Option<Decimal>,
@@ -1444,7 +1420,6 @@ pub(crate) struct DarfPagarArgs {
         long,
         value_name = "VALOR",
         value_parser = parse_valor_ou_zero,
-        requires = "codigo_receita",
         help_heading = "Valores"
     )]
     pub(crate) juros: Option<Decimal>,
@@ -2297,22 +2272,17 @@ mod tests {
         };
         assert_eq!(args.arquivo, Some(PathBuf::from("darf.json")));
 
-        // No origin, both origins, options without the revenue code, missing options.
+        // Which options go together is the command's to say, in Portuguese
+        // (`commands::pagamento::darf`); the parser only refuses --sim with
+        // --simular.
         for args in [
             &["pagar"][..],
-            &[
-                "pagar",
-                "--arquivo",
-                "darf.json",
-                "--codigo-receita",
-                "0220",
-            ],
             &["pagar", "--arquivo", "darf.json", "--multa", "1"],
             &opcoes[..opcoes.len() - 6],
-            &["pagar", "--arquivo", "darf.json", "--sim", "--simular"],
         ] {
-            assert!(parse(args).is_err(), "{args:?}");
+            assert!(parse(args).is_ok(), "{args:?}");
         }
+        assert!(parse(&["pagar", "--arquivo", "darf.json", "--sim", "--simular"]).is_err());
 
         let cli = parse(&[
             "listar",

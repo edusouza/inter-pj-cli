@@ -139,7 +139,10 @@ fn desconto_de(
                 "--desconto: use só percentuais (2%) ou só valores (10,00) nas datas".to_owned(),
             ));
         };
-        datas.push(DescontoData::new(desconto.ate.unwrap_or(vencimento), valor));
+        // Without a date, until the day before the due date: the API
+        // refuses a discount on the due date itself.
+        let vespera = vencimento.pred_opt().unwrap_or(vencimento);
+        datas.push(DescontoData::new(desconto.ate.unwrap_or(vespera), valor));
     }
     Ok(Some(if percentual {
         DescontoCobv::PercentualAteDatas(datas)
@@ -375,7 +378,7 @@ mod tests {
             serde_json::to_value(&encargos.desconto).unwrap(),
             json!({"modalidade": 1, "descontoDataFixa": [
                 {"data": "2026-10-15", "valorPerc": "10.00"},
-                {"data": "2026-10-20", "valorPerc": "5.00"}
+                {"data": "2026-10-19", "valorPerc": "5.00"}
             ]})
         );
         assert_eq!(

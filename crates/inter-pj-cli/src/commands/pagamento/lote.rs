@@ -9,16 +9,17 @@ use inter_pj::banking::{
     StatusDarfDoLote, StatusLote,
 };
 use inter_pj::boleto::TipoCodigo;
-use inter_pj::{Environment, InterClient, endpoint};
+use inter_pj::{ApiErrorKind, Environment, Error as InterError, InterClient, endpoint};
 
 use super::{darf, pagar};
 use crate::arquivo::{self, ArquivoLote, MODELO_CSV, MODELO_JSON};
+use crate::chamada::{argumento, chamada};
 use crate::cli::{
     Formato, LoteCommand, LoteConsultarArgs, LoteEnviarArgs, LoteModeloArgs, TipoArquivo,
 };
 use crate::commands::{Context, hoje, simulacao};
 use crate::confirmacao::{Terminal, confirmar, descrever_ambiente, verificar_limite};
-use crate::error::{CliError, resultado_incerto};
+use crate::error::CliError;
 use crate::output::{self, data_hora_br};
 use crate::tabela::{Celula, Coluna, Tabela};
 use crate::valor::por_extenso;
@@ -61,6 +62,14 @@ async fn enviar(
     };
     lote.validar()
         .map_err(|err| CliError::Usage(err.to_string()))?;
+    // With --sim, a warning would not stop a payment made twice.
+    let repetidos = repetidos(&arquivo.pagamentos);
+    if !repetidos.is_empty() && !args.permitir_repetidos {
+        return Err(CliError::PagamentosRepetidos {
+            arquivo: arquivo::nome(&args.arquivo),
+            repetidos,
+        });
+    }
     let settings = context.settings()?;
     // The limit is per payment, as for single payments.
     for (onde, item) in &arquivo.pagamentos {
@@ -93,24 +102,34 @@ async fn enviar(
     );
     confirmar(terminal, args.sim, &pergunta)?;
     let solicitacao = client.banking().enviar_lote(&lote).await.map_err(|err| {
-        if resultado_incerto(&err) {
+        if err.may_have_been_processed() {
             CliError::PagamentoIncerto {
                 source: err,
                 situacao: "o lote pode ter sido recebido e pago",
                 // No endpoint lists batches: their payments show up in the
                 // listings of each kind.
-                consulta: "inter-pj pagamento boleto listar e inter-pj pagamento darf listar"
-                    .to_owned(),
+                consulta: format!(
+                    "{0} pagamento boleto listar e {0} pagamento darf listar",
+                    chamada()
+                ),
+                // Both listings ask for the scope of payments by barcode.
+                escopos: "pagamento-boleto.read",
             }
         } else {
             err.into()
         }
     })?;
     match context.formato() {
-        Formato::Json => output::print_json(&solicitacao),
+        Formato::Json => output::print_json(&solicitacao)?,
         // `commands::run` refuses csv for this command.
-        Formato::Texto | Formato::Csv => output::print(&render_envio(&solicitacao)),
+        Formato::Texto | Formato::Csv => output::print(&render_envio(&solicitacao))?,
     }
+    if solicitacao.status == Some(StatusLote::ProcessadoComErro) {
+        return Err(CliError::LoteComErro {
+            detalhe: "a resposta do envio diz que houve erro: confira cada pagamento antes de qualquer reenvio".to_owned(),
+        });
+    }
+    Ok(())
 }
 
 /// The batch about to be sent: totals by kind, every payment and what
@@ -274,8 +293,13 @@ fn render_envio(solicitacao: &SolicitacaoLote) -> String {
         .as_ref()
         .map_or_else(|| "sem status".to_owned(), descrever_status_lote);
     let mut texto = format!("Lote recebido: {quantos}, {status}.");
+    // The id of the API goes cleaned, and quoted into the command to paste.
+    let id = solicitacao
+        .id_lote
+        .as_deref()
+        .map(|id| output::limpo(id).into_owned());
     let mut linhas = Vec::new();
-    if let Some(id) = &solicitacao.id_lote {
+    if let Some(id) = &id {
         linhas.push(("Identificador do lote", id.clone()));
     }
     if let Some(identificador) = &solicitacao.meu_identificador {
@@ -284,10 +308,12 @@ fn render_envio(solicitacao: &SolicitacaoLote) -> String {
     if !linhas.is_empty() {
         let _ = write!(texto, "\n{}", output::key_values_left(&linhas));
     }
-    if let Some(id) = &solicitacao.id_lote {
+    if let Some(id) = &id {
         let _ = write!(
             texto,
-            "\n\nAcompanhe com: inter-pj pagamento lote consultar {id} --aguardar"
+            "\n\nAcompanhe com: {} pagamento lote consultar {} --aguardar",
+            chamada(),
+            argumento(id)
         );
     }
     texto
@@ -303,92 +329,259 @@ async fn consultar(context: &Context, args: &LoteConsultarArgs) -> Result<(), Cl
         let lote = client.banking().consultar_lote(id).await?;
         return mostrar(context, &lote);
     }
-    let (lote, processado) = aguardar(&client, id, args.timeout, INTERVALO).await?;
+    let (lote, terminou) = match aguardar(&client, id, args.timeout, INTERVALO).await {
+        Ok(espera) => espera,
+        Err((ultimo, err)) => {
+            // What was known before the error: the batch may be paying.
+            if let Some(lote) = ultimo {
+                mostrar(context, &lote)?;
+            }
+            return Err(err);
+        }
+    };
     mostrar(context, &lote)?;
-    let status = lote
-        .status
-        .as_ref()
-        .map_or_else(|| "sem status".to_owned(), descrever_status_lote);
-    match (processado, &lote.status) {
-        (true, Some(StatusLote::ProcessadoSemErro)) => Ok(()),
-        (true, _) => Err(CliError::LoteComErro {
-            detalhe: falhas(&lote),
-        }),
-        (false, _) => Err(CliError::TempoEsgotado {
+    let contagem = Contagem::de(&lote);
+    if !terminou {
+        let status = if lote.status.as_ref().is_some_and(StatusLote::is_final) {
+            format!(
+                "com {} de {} pagamentos aguardando aprovação ou em processamento",
+                contagem.pendentes,
+                contagem.total()
+            )
+        } else {
+            lote.status
+                .as_ref()
+                .map_or_else(|| "sem status".to_owned(), descrever_status_lote)
+        };
+        return Err(CliError::TempoEsgotado {
             oque: "o lote",
             status,
             segundos: args.timeout.as_secs(),
-        }),
+        });
     }
+    if contagem.nao_feitos > 0 || lote.status == Some(StatusLote::ProcessadoComErro) {
+        return Err(CliError::LoteComErro {
+            detalhe: falhas(&contagem),
+        });
+    }
+    if contagem.agendados > 0 {
+        let (um, varios) = ("pagamento agendado sai", "pagamentos agendados saem");
+        eprintln!(
+            "aviso: {} {} da conta na data do agendamento",
+            contagem.agendados,
+            if contagem.agendados == 1 { um } else { varios }
+        );
+    }
+    Ok(())
 }
 
-/// Queries every `intervalo` until the batch is processed or `timeout`
-/// passes; the last query happens at the deadline. Status changes are
-/// reported on stderr.
+/// Queries every `intervalo` until the batch is processed and none of its
+/// payments is still pending, or `timeout` passes; the last query happens
+/// at the deadline. Status changes are reported on stderr.
+///
+/// A query that fails for a while (a `429`, a `5xx`, the network) does not
+/// end the wait: the batch goes on being paid, and the next query may
+/// answer. Any other error ends it, with the last batch seen.
 async fn aguardar(
     client: &InterClient,
     id: &str,
     timeout: Duration,
     intervalo: Duration,
-) -> Result<(Lote, bool), CliError> {
+) -> Result<(Lote, bool), (Option<Box<Lote>>, CliError)> {
     let prazo = Instant::now() + timeout;
-    let mut anterior: Option<StatusLote> = None;
+    let mut anterior: Option<String> = None;
+    let mut ultimo: Option<Lote> = None;
     loop {
-        let lote = client.banking().consultar_lote(id).await?;
-        if lote.status.as_ref().is_some_and(StatusLote::is_final) {
-            return Ok((lote, true));
-        }
+        let resposta = client.banking().consultar_lote(id).await;
         let agora = Instant::now();
-        if agora >= prazo {
-            return Ok((lote, false));
-        }
-        if lote.status != anterior {
-            let texto = lote
-                .status
-                .as_ref()
-                .map_or_else(|| "sem status".to_owned(), descrever_status_lote);
-            eprintln!("aguardando: {texto}");
-            anterior.clone_from(&lote.status);
+        match resposta {
+            Ok(lote) => {
+                if terminou(&lote) {
+                    return Ok((lote, true));
+                }
+                if agora >= prazo {
+                    return Ok((lote, false));
+                }
+                let texto = descrever_espera(&lote);
+                if anterior.as_ref() != Some(&texto) {
+                    eprintln!("aguardando: {texto}");
+                    anterior = Some(texto);
+                }
+                ultimo = Some(lote);
+            }
+            Err(err) if passageiro(&err) => {
+                if agora >= prazo {
+                    return match ultimo {
+                        Some(lote) => Ok((lote, false)),
+                        None => Err((None, err.into())),
+                    };
+                }
+                eprintln!(
+                    "aguardando: a consulta falhou ({}); nova tentativa em {} s",
+                    output::limpo(&err.to_string()),
+                    intervalo.min(prazo - agora).as_secs()
+                );
+            }
+            Err(err) => return Err((ultimo.map(Box::new), err.into())),
         }
         tokio::time::sleep(intervalo.min(prazo - agora)).await;
     }
 }
 
-/// How many payments of a processed batch were not made.
-fn falhas(lote: &Lote) -> String {
-    let falharam = lote
-        .pagamentos
-        .iter()
-        .filter(|pagamento| falhou(pagamento))
-        .count();
-    match falharam {
-        0 => "confira o status de cada pagamento".to_owned(),
-        1 => format!("1 de {} pagamentos não foi feito", lote.pagamentos.len()),
-        n => format!(
-            "{n} de {} pagamentos não foram feitos",
-            lote.pagamentos.len()
+/// An error after which the next query may answer: the rate limit, the
+/// service, the network.
+fn passageiro(err: &InterError) -> bool {
+    match err {
+        InterError::Api(api) => matches!(
+            api.kind(),
+            ApiErrorKind::RateLimited | ApiErrorKind::Unavailable | ApiErrorKind::Server
         ),
+        InterError::Transport(_) | InterError::TokenTransport(_) => true,
+        _ => false,
     }
 }
 
-fn falhou(pagamento: &PagamentoDoLote) -> bool {
+/// Whether the wait is over: the batch is processed, and none of its
+/// payments is still waiting for an approval or being processed.
+fn terminou(lote: &Lote) -> bool {
+    lote.status.as_ref().is_some_and(StatusLote::is_final) && Contagem::de(lote).pendentes == 0
+}
+
+/// The status of a batch still awaited, for the progress on stderr.
+fn descrever_espera(lote: &Lote) -> String {
+    let status = lote
+        .status
+        .as_ref()
+        .map_or_else(|| "sem status".to_owned(), descrever_status_lote);
+    let pendentes = Contagem::de(lote).pendentes;
+    if lote.status.as_ref().is_some_and(StatusLote::is_final) && pendentes > 0 {
+        format!("{status}, {pendentes} pagamentos aguardando aprovação ou em processamento")
+    } else {
+        status
+    }
+}
+
+/// Where a payment of the batch stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Situacao {
+    /// Paid.
+    Pago,
+    /// Scheduled: it leaves the account on its day.
+    Agendado,
+    /// Not paid yet: being processed, approved but not paid, or waiting
+    /// for an approval in the Internet Banking.
+    Pendente,
+    /// Not paid: an error, refused, cancelled, expired, not cleared.
+    NaoFeito,
+    /// A status the CLI does not know, or none: not confirmed.
+    Desconhecida,
+}
+
+fn situacao(pagamento: &PagamentoDoLote) -> Situacao {
+    use StatusBoletoDoLote as B;
+    use StatusDarfDoLote as D;
     match pagamento {
-        PagamentoDoLote::Boleto(boleto) => matches!(
-            boleto.status,
+        PagamentoDoLote::Boleto(boleto) => match &boleto.status {
+            Some(B::Realizado | B::Pago | B::AgendadoRealizado) => Situacao::Pago,
+            Some(B::Agendado | B::PagamentoAgendado | B::PagamentoCobrancaAgendado) => {
+                Situacao::Agendado
+            }
             Some(
-                StatusBoletoDoLote::Erro
-                    | StatusBoletoDoLote::ErroPagamento
-                    | StatusBoletoDoLote::Reprovado
-                    | StatusBoletoDoLote::AprovacaoExpirada
-                    | StatusBoletoDoLote::AgendadoNaoRealizado
-                    | StatusBoletoDoLote::NaoCompensado
-            )
-        ),
-        PagamentoDoLote::Darf(darf) => matches!(
-            darf.status,
-            Some(StatusDarfDoLote::ErroPagamento | StatusDarfDoLote::NaoCompensado)
-        ),
-        _ => false,
+                B::EmProcessamento
+                | B::AguardandoAprovacao
+                | B::Aprovado
+                | B::AprovadoNovoPagamento
+                | B::AprovadoAguardoRetentativa,
+            ) => Situacao::Pendente,
+            Some(
+                B::Cancelado
+                | B::Reprovado
+                | B::Erro
+                | B::NaoCompensado
+                | B::AgendadoNaoRealizado
+                | B::AgendadoCancelado
+                | B::AprovacaoExpirada
+                | B::ErroPagamento,
+            ) => Situacao::NaoFeito,
+            _ => Situacao::Desconhecida,
+        },
+        PagamentoDoLote::Darf(darf) => match &darf.status {
+            Some(D::Pago) => Situacao::Pago,
+            Some(D::PagamentoAgendado) => Situacao::Agendado,
+            Some(D::EmProcessamento | D::AguardandoAprovacao | D::Aprovado) => Situacao::Pendente,
+            Some(D::AgendamentoCancelado | D::NaoCompensado | D::ErroPagamento | D::Cancelado) => {
+                Situacao::NaoFeito
+            }
+            _ => Situacao::Desconhecida,
+        },
+        _ => Situacao::Desconhecida,
+    }
+}
+
+/// How many payments of the batch stand where.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct Contagem {
+    pagos: usize,
+    agendados: usize,
+    /// Still being processed or waiting for an approval, and those the API
+    /// counted (`qtdePagamentos`) but did not list yet.
+    pendentes: usize,
+    /// Not paid, or of a status not known.
+    nao_feitos: usize,
+    desconhecidos: usize,
+}
+
+impl Contagem {
+    fn de(lote: &Lote) -> Self {
+        let mut contagem = Self::default();
+        for pagamento in &lote.pagamentos {
+            match situacao(pagamento) {
+                Situacao::Pago => contagem.pagos += 1,
+                Situacao::Agendado => contagem.agendados += 1,
+                Situacao::Pendente => contagem.pendentes += 1,
+                Situacao::NaoFeito => contagem.nao_feitos += 1,
+                Situacao::Desconhecida => {
+                    contagem.nao_feitos += 1;
+                    contagem.desconhecidos += 1;
+                }
+            }
+        }
+        let listados = lote.pagamentos.len();
+        let contados = lote
+            .qtde_pagamentos
+            .and_then(|n| usize::try_from(n).ok())
+            .unwrap_or(listados);
+        contagem.pendentes += contados.saturating_sub(listados);
+        contagem
+    }
+
+    fn total(&self) -> usize {
+        self.pagos + self.agendados + self.pendentes + self.nao_feitos
+    }
+}
+
+/// How many payments of a processed batch were not made, or not confirmed.
+fn falhas(contagem: &Contagem) -> String {
+    let total = contagem.total();
+    let feitos = match contagem.nao_feitos - contagem.desconhecidos {
+        0 => None,
+        1 => Some(format!("1 de {total} pagamentos não foi feito")),
+        n => Some(format!("{n} de {total} pagamentos não foram feitos")),
+    };
+    let desconhecidos = match contagem.desconhecidos {
+        0 => None,
+        1 => Some("1 tem um status que a CLI não conhece".to_owned()),
+        n => Some(format!("{n} têm um status que a CLI não conhece")),
+    };
+    match (feitos, desconhecidos) {
+        (None, None) => "a API diz que houve erro: confira o status de cada pagamento".to_owned(),
+        (Some(feitos), None) => feitos,
+        (None, Some(desconhecidos)) => {
+            format!("de {total} pagamentos, {desconhecidos}: confira no Internet Banking")
+        }
+        (Some(feitos), Some(desconhecidos)) => {
+            format!("{feitos}, e {desconhecidos}: confira no Internet Banking")
+        }
     }
 }
 
@@ -630,7 +823,7 @@ Lote a enviar
             ]
         );
         let (_dir, arquivo) = ler(CSV);
-        assert!(repetidos(&arquivo.pagamentos).is_empty());
+        assert_eq!(repetidos(&arquivo.pagamentos), Vec::<String>::new());
     }
 
     #[test]
@@ -687,7 +880,10 @@ PIX"
         );
         // The account of the batch is the user's own: never shown.
         assert!(!texto.contains("7654321"), "{texto}");
-        assert_eq!(falhas(&lote), "1 de 3 pagamentos não foi feito");
+        assert_eq!(
+            falhas(&Contagem::de(&lote)),
+            "1 de 3 pagamentos não foi feito, e 1 tem um status que a CLI não conhece: confira no Internet Banking"
+        );
     }
 
     #[test]
@@ -729,7 +925,13 @@ PIX"
         let chave = dir.path().join("chave.key");
         fs::write(&certificado, cert.pem()).unwrap();
         fs::write(&chave, signing_key.serialize_pem()).unwrap();
-        fs::write(dir.path().join("lote.csv"), CSV).unwrap();
+        // The command takes today from the clock: the scheduling of the file
+        // goes to tomorrow, never to a day already past.
+        let amanha = (crate::commands::hoje() + chrono::Days::new(1))
+            .format("%Y-%m-%d")
+            .to_string();
+        let csv = CSV.replace("2026-10-10;2026-10-09", &format!("{amanha};{amanha}"));
+        fs::write(dir.path().join("lote.csv"), csv).unwrap();
         let config = dir.path().join("config.toml");
         fs::write(
             &config,
@@ -866,67 +1068,199 @@ PIX"
     }
 
     fn lote_com(status: &str) -> serde_json::Value {
-        json!({
-            "idLote": ID_LOTE,
-            "status": status,
-            "pagamentos": [{"tipoPagamento": "DARF", "status": "ERRO_PAGAMENTO"}]
-        })
+        consulta_com(status, &[("DARF", "ERRO_PAGAMENTO")])
+    }
+
+    fn consulta_com(status: &str, pagamentos: &[(&str, &str)]) -> serde_json::Value {
+        let pagamentos: Vec<_> = pagamentos
+            .iter()
+            .map(|(tipo, status)| json!({"tipoPagamento": tipo, "status": status}))
+            .collect();
+        json!({"idLote": ID_LOTE, "status": status, "pagamentos": pagamentos})
+    }
+
+    async fn mount_consulta(cenario: &Cenario, resposta: ResponseTemplate, vezes: Option<u64>) {
+        let mock = Mock::given(method("GET"))
+            .and(path(format!("/banking/v2/pagamento/lote/{ID_LOTE}")))
+            .respond_with(resposta);
+        match vezes {
+            Some(vezes) => mock.up_to_n_times(vezes).mount(&cenario.server).await,
+            None => mock.mount(&cenario.server).await,
+        }
+    }
+
+    async fn esperar(
+        cenario: &Cenario,
+        timeout: Duration,
+    ) -> Result<(Lote, bool), (Option<Box<Lote>>, CliError)> {
+        let client = cenario
+            .context
+            .client(&cenario.context.settings().unwrap())
+            .unwrap();
+        aguardar(&client, ID_LOTE, timeout, Duration::from_millis(10)).await
     }
 
     #[tokio::test]
     async fn waiting_ends_with_the_processing() {
         let cenario = cenario(&["consultar", ID_LOTE, "--aguardar"]).await;
-        Mock::given(method("GET"))
-            .and(path(format!("/banking/v2/pagamento/lote/{ID_LOTE}")))
-            .respond_with(ResponseTemplate::new(200).set_body_json(lote_com("EMPROCESSAMENTO")))
-            .up_to_n_times(1)
-            .expect(1)
-            .mount(&cenario.server)
-            .await;
-        Mock::given(method("GET"))
-            .and(path(format!("/banking/v2/pagamento/lote/{ID_LOTE}")))
-            .respond_with(ResponseTemplate::new(200).set_body_json(lote_com("PROCESSADOCOMERRO")))
-            .expect(1)
-            .mount(&cenario.server)
-            .await;
-        let client = cenario
-            .context
-            .client(&cenario.context.settings().unwrap())
-            .unwrap();
-        let (lote, processado) = aguardar(
-            &client,
-            ID_LOTE,
-            Duration::from_secs(5),
-            Duration::from_millis(10),
-        )
-        .await
-        .unwrap();
-        assert!(processado);
+        let ok = |corpo| ResponseTemplate::new(200).set_body_json(corpo);
+        mount_consulta(&cenario, ok(lote_com("EMPROCESSAMENTO")), Some(1)).await;
+        mount_consulta(&cenario, ok(lote_com("PROCESSADOCOMERRO")), None).await;
+        let (lote, terminou) = esperar(&cenario, Duration::from_secs(5)).await.unwrap();
+        assert!(terminou);
         assert_eq!(lote.status, Some(StatusLote::ProcessadoComErro));
-        assert_eq!(falhas(&lote), "1 de 1 pagamentos não foi feito");
+        assert_eq!(
+            falhas(&Contagem::de(&lote)),
+            "1 de 1 pagamentos não foi feito"
+        );
     }
 
     #[tokio::test]
     async fn waiting_stops_at_the_deadline() {
         let cenario = cenario(&["consultar", ID_LOTE, "--aguardar"]).await;
-        Mock::given(method("GET"))
-            .and(path(format!("/banking/v2/pagamento/lote/{ID_LOTE}")))
-            .respond_with(ResponseTemplate::new(200).set_body_json(lote_com("EMPROCESSAMENTO")))
-            .mount(&cenario.server)
-            .await;
-        let client = cenario
-            .context
-            .client(&cenario.context.settings().unwrap())
-            .unwrap();
-        let (lote, processado) = aguardar(
-            &client,
-            ID_LOTE,
-            Duration::from_millis(50),
-            Duration::from_millis(20),
+        let corpo = lote_com("EMPROCESSAMENTO");
+        mount_consulta(
+            &cenario,
+            ResponseTemplate::new(200).set_body_json(corpo),
+            None,
         )
-        .await
-        .unwrap();
-        assert!(!processado);
+        .await;
+        let (lote, terminou) = esperar(&cenario, Duration::from_millis(50)).await.unwrap();
+        assert!(!terminou);
         assert_eq!(lote.status, Some(StatusLote::EmProcessamento));
+    }
+
+    /// A processed batch with a payment still waiting for an approval has
+    /// not paid it: the wait goes on until the deadline.
+    #[tokio::test]
+    async fn a_pending_payment_keeps_the_wait() {
+        let cenario = cenario(&["consultar", ID_LOTE, "--aguardar"]).await;
+        let corpo = consulta_com(
+            "PROCESSADOSEMERRO",
+            &[("BOLETO", "PAGO"), ("DARF", "AGUARDANDO_APROVACAO")],
+        );
+        mount_consulta(
+            &cenario,
+            ResponseTemplate::new(200).set_body_json(corpo),
+            None,
+        )
+        .await;
+        let (lote, terminou) = esperar(&cenario, Duration::from_millis(50)).await.unwrap();
+        assert!(!terminou);
+        assert_eq!(Contagem::de(&lote).pendentes, 1);
+    }
+
+    /// A query that fails past the retries of the library (a 503 here, with
+    /// --sem-retentativa) does not end the wait; the batch goes on.
+    #[tokio::test]
+    async fn a_failed_query_does_not_end_the_wait() {
+        let args = ["consultar", ID_LOTE, "--aguardar", "--sem-retentativa"];
+        let primeiro = cenario(&args).await;
+        let ok = |corpo| ResponseTemplate::new(200).set_body_json(corpo);
+        mount_consulta(&primeiro, ok(lote_com("EMPROCESSAMENTO")), Some(1)).await;
+        mount_consulta(&primeiro, ResponseTemplate::new(503), Some(2)).await;
+        let pago = consulta_com("PROCESSADOSEMERRO", &[("BOLETO", "PAGO"), ("DARF", "PAGO")]);
+        mount_consulta(&primeiro, ok(pago), None).await;
+        let (lote, terminou) = esperar(&primeiro, Duration::from_secs(5)).await.unwrap();
+        assert!(terminou);
+        assert_eq!(Contagem::de(&lote).pagos, 2);
+
+        // Until the deadline: the last batch seen.
+        let segundo = cenario(&args).await;
+        mount_consulta(&segundo, ok(lote_com("EMPROCESSAMENTO")), Some(1)).await;
+        mount_consulta(&segundo, ResponseTemplate::new(429), None).await;
+        let (lote, terminou) = esperar(&segundo, Duration::from_millis(80)).await.unwrap();
+        assert!(!terminou);
+        assert_eq!(lote.status, Some(StatusLote::EmProcessamento));
+
+        // Another error ends the wait at once, with the last batch seen.
+        let terceiro = cenario(&args).await;
+        mount_consulta(&terceiro, ok(lote_com("EMPROCESSAMENTO")), Some(1)).await;
+        mount_consulta(&terceiro, ResponseTemplate::new(404), None).await;
+        let (ultimo, err) = esperar(&terceiro, Duration::from_secs(5))
+            .await
+            .unwrap_err();
+        assert_eq!(ultimo.unwrap().status, Some(StatusLote::EmProcessamento));
+        assert_eq!(err.exit_code(), crate::error::exit::REJECTED);
+    }
+
+    /// Every status of the documentation has a place; only the unknown ones
+    /// are "not confirmed".
+    #[test]
+    fn every_status_of_a_payment_has_its_place() {
+        let boleto = |status: &str| {
+            situacao(
+                &serde_json::from_value(json!({"tipoPagamento": "BOLETO", "status": status}))
+                    .unwrap(),
+            )
+        };
+        let darf = |status: &str| {
+            situacao(
+                &serde_json::from_value(json!({"tipoPagamento": "DARF", "status": status}))
+                    .unwrap(),
+            )
+        };
+        for status in StatusBoletoDoLote::DOCUMENTADOS {
+            assert_ne!(boleto(status.as_str()), Situacao::Desconhecida, "{status}");
+        }
+        for status in StatusDarfDoLote::DOCUMENTADOS {
+            assert_ne!(darf(status.as_str()), Situacao::Desconhecida, "{status}");
+        }
+        for (status, esperada) in [
+            ("PAGO", Situacao::Pago),
+            ("AGENDADO_REALIZADO", Situacao::Pago),
+            ("AGENDADO", Situacao::Agendado),
+            ("AGUARDANDO_APROVACAO", Situacao::Pendente),
+            ("APROVADO", Situacao::Pendente),
+            ("CANCELADO", Situacao::NaoFeito),
+            ("AGENDADO_CANCELADO", Situacao::NaoFeito),
+            ("ERRO_PAGAMENTO", Situacao::NaoFeito),
+            ("NOVO", Situacao::Desconhecida),
+        ] {
+            assert_eq!(boleto(status), esperada, "{status}");
+        }
+        for (status, esperada) in [
+            ("PAGO", Situacao::Pago),
+            ("PAGAMENTO_AGENDADO", Situacao::Agendado),
+            ("AGUARDANDO_APROVACAO", Situacao::Pendente),
+            ("AGENDAMENTO_CANCELADO", Situacao::NaoFeito),
+            ("CANCELADO", Situacao::NaoFeito),
+        ] {
+            assert_eq!(darf(status), esperada, "{status}");
+        }
+        let sem_status: PagamentoDoLote =
+            serde_json::from_value(json!({"tipoPagamento": "BOLETO"})).unwrap();
+        assert_eq!(situacao(&sem_status), Situacao::Desconhecida);
+    }
+
+    #[test]
+    fn the_failures_say_how_many_and_which() {
+        let contagem = |status: &str, pagamentos: &[(&str, &str)]| {
+            Contagem::de(&serde_json::from_value(consulta_com(status, pagamentos)).unwrap())
+        };
+        let cancelados = contagem(
+            "PROCESSADOCOMERRO",
+            &[("BOLETO", "CANCELADO"), ("DARF", "AGENDAMENTO_CANCELADO")],
+        );
+        assert_eq!(falhas(&cancelados), "2 de 2 pagamentos não foram feitos");
+        let estranho = contagem(
+            "PROCESSADOSEMERRO",
+            &[("BOLETO", "PAGO"), ("BOLETO", "NOVO")],
+        );
+        assert_eq!(
+            falhas(&estranho),
+            "de 2 pagamentos, 1 tem um status que a CLI não conhece: confira no Internet Banking"
+        );
+        assert_eq!(
+            falhas(&contagem("PROCESSADOCOMERRO", &[("BOLETO", "PAGO")])),
+            "a API diz que houve erro: confira o status de cada pagamento"
+        );
+        // Counted by the API but not listed: still pending.
+        let mut lote: Lote =
+            serde_json::from_value(consulta_com("PROCESSADOSEMERRO", &[("BOLETO", "PAGO")]))
+                .unwrap();
+        lote.qtde_pagamentos = Some(3);
+        assert_eq!(Contagem::de(&lote).pendentes, 2);
+        assert!(!terminou(&lote));
     }
 }

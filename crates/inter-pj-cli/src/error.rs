@@ -5,6 +5,8 @@ use std::io;
 use inter_pj::banking::PeriodoError;
 use inter_pj::{ApiError, ApiErrorKind, Error as InterError};
 
+use crate::chamada::chamada;
+
 /// Documented exit codes.
 pub(crate) mod exit {
     pub(crate) const UNEXPECTED: u8 = 1;
@@ -15,6 +17,9 @@ pub(crate) mod exit {
     pub(crate) const UNAVAILABLE: u8 = 6;
     pub(crate) const CANCELLED: u8 = 7;
     pub(crate) const WAIT_TIMEOUT: u8 = 8;
+    /// The operation may have been processed (timeout, `5xx`, an
+    /// unreadable success): check before any new attempt.
+    pub(crate) const UNCERTAIN: u8 = 9;
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -22,6 +27,14 @@ pub(crate) enum CliError {
     /// Invalid usage detected after argument parsing.
     #[error("{0}")]
     Usage(String),
+    /// `pagamento lote enviar`: the same payment more than once in the
+    /// file, which `--permitir-repetidos` allows.
+    #[error("pagamentos repetidos em {arquivo}:\n  {}", .repetidos.join("\n  "))]
+    PagamentosRepetidos {
+        arquivo: String,
+        /// Where each payment repeats, and why it matters.
+        repetidos: Vec<String>,
+    },
     /// Invalid statement period.
     #[error("{erro}")]
     Periodo {
@@ -52,6 +65,9 @@ pub(crate) enum CliError {
         situacao: &'static str,
         /// Command that finds the payment, to run before trying again.
         consulta: String,
+        /// Scopes that command needs, which the payment did not: the
+        /// reading of the payments.
+        escopos: &'static str,
     },
     /// A charge whose issue is unknown: it may have been issued. The API
     /// refuses an identical one for 30 minutes, but not after that.
@@ -82,6 +98,17 @@ pub(crate) enum CliError {
     /// `pix devolucao ... --aguardar`: the refund was not made.
     #[error("a devolução não foi feita: {motivo}")]
     DevolucaoNaoRealizada { motivo: String },
+    /// A change or the removal of a Pix charge whose outcome is unknown: it
+    /// may have been applied.
+    #[error("{source}")]
+    RevisaoPixIncerta {
+        source: InterError,
+        /// `cob` or `cobv`, as in the commands.
+        tipo: &'static str,
+        txid: String,
+        /// Whether it was the removal of the charge.
+        remocao: bool,
+    },
     /// `cobranca emitir --aguardar`: the API could not issue the charge.
     #[error("a cobrança não foi emitida: {situacao}")]
     CobrancaNaoEmitida { situacao: String },
@@ -94,9 +121,9 @@ pub(crate) enum CliError {
     /// `pix consultar --aguardar`: the payment ended without being paid.
     #[error("o Pix terminou sem ser pago: {status}")]
     PixNaoPago { status: String },
-    /// `pagamento lote consultar --aguardar`: some payments of the batch
-    /// were not made.
-    #[error("o lote foi processado com erro: {detalhe}")]
+    /// `pagamento lote consultar --aguardar`, or `enviar`: some payments of
+    /// the batch were not made, or the API says it had errors.
+    #[error("o lote foi processado, mas {detalhe}")]
     LoteComErro { detalhe: String },
     /// `--aguardar`: no final status before the time limit.
     #[error("tempo de espera esgotado ({segundos} s): {oque} ainda está {status}")]
@@ -132,7 +159,7 @@ impl CliError {
 
     pub(crate) fn exit_code(&self) -> u8 {
         match self {
-            Self::Usage(_) | Self::Periodo { .. } => exit::USAGE,
+            Self::Usage(_) | Self::PagamentosRepetidos { .. } | Self::Periodo { .. } => exit::USAGE,
             Self::Config(_) | Self::ConfigFile { .. } => exit::CONFIG,
             Self::Io { .. } => exit::UNEXPECTED,
             Self::Cancelado => exit::CANCELLED,
@@ -142,12 +169,15 @@ impl CliError {
             | Self::EdicaoNaoFeita { .. }
             | Self::DevolucaoNaoRealizada { .. } => exit::REJECTED,
             Self::TempoEsgotado { .. } => exit::WAIT_TIMEOUT,
-            Self::Inter(err)
-            | Self::ResultadoIncerto { source: err, .. }
-            | Self::PagamentoIncerto { source: err, .. }
-            | Self::EmissaoIncerta { source: err, .. }
-            | Self::CobrancaPixIncerta { source: err, .. }
-            | Self::DevolucaoIncerta { source: err, .. } => match err {
+            // Built only when the request may have been processed: a script
+            // must not repeat them blindly, unlike a `429` or a refused
+            // connection (6).
+            Self::ResultadoIncerto { .. }
+            | Self::PagamentoIncerto { .. }
+            | Self::EmissaoIncerta { .. }
+            | Self::CobrancaPixIncerta { .. }
+            | Self::RevisaoPixIncerta { .. } => exit::UNCERTAIN,
+            Self::Inter(err) | Self::DevolucaoIncerta { source: err, .. } => match err {
                 InterError::InvalidInput(_) => exit::USAGE,
                 InterError::Config(_) | InterError::Identity(_) => exit::CONFIG,
                 InterError::Auth(_) => exit::AUTH,
@@ -156,65 +186,102 @@ impl CliError {
                     ApiErrorKind::RateLimited
                     | ApiErrorKind::Unavailable
                     | ApiErrorKind::Server => exit::UNAVAILABLE,
-                    _ if api.status >= 500 => exit::UNAVAILABLE,
                     _ => exit::REJECTED,
                 },
-                InterError::Transport(_) => exit::UNAVAILABLE,
+                InterError::Transport(_) | InterError::TokenTransport(_) => exit::UNAVAILABLE,
                 _ => exit::UNEXPECTED,
             },
         }
     }
 
-    /// Suggestions shown after the error message.
-    pub(crate) fn hints(&self) -> Vec<String> {
-        let err = match self {
-            Self::Inter(err) => err,
-            Self::Periodo {
-                dica: Some(dica), ..
-            } => return vec![(*dica).to_owned()],
-            Self::TempoEsgotado { .. } => {
-                return vec!["consulte de novo mais tarde, ou aumente o --timeout".to_owned()];
-            }
+    /// The hints of an outcome that may have been processed: what may have
+    /// happened, and how to check it before trying again.
+    fn dicas_de_resultado_incerto(&self) -> Option<Vec<String>> {
+        Some(match self {
             Self::ResultadoIncerto { id_idempotente, .. } => {
-                return vec![
+                vec![
                     "o pagamento pode ter sido feito: confira o extrato antes de tentar de novo"
                         .to_owned(),
                     format!(
                         "para repetir sem risco de pagar duas vezes, use a mesma chave: --id-idempotente {id_idempotente}"
                     ),
-                ];
+                ]
             }
             Self::PagamentoIncerto {
-                situacao, consulta, ..
+                situacao,
+                consulta,
+                escopos,
+                ..
             } => {
-                return vec![
+                vec![
                     format!(
                         "{situacao}, e esta API não tem chave de idempotência: repetir o comando pode pagar duas vezes"
                     ),
                     format!("confira antes de tentar de novo: {consulta}"),
-                ];
+                    format!(
+                        "a consulta precisa da permissão de leitura dos pagamentos ({escopos}), e uma lista vazia logo depois do erro não prova que nada foi pago: espere alguns minutos e confira também o extrato e os agendamentos no Internet Banking"
+                    ),
+                ]
             }
             Self::CobrancaPixIncerta { tipo, txid, .. } => {
-                return vec![
+                vec![
                     "a cobrança pode ter sido criada; com o mesmo txid, a API não cria outra"
                         .to_owned(),
-                    format!("confira com: inter-pj pix {tipo} consultar {txid}"),
+                    format!("confira com: {} pix {tipo} consultar {txid}", chamada()),
                     format!("ou repita o comando com --txid {txid}"),
-                ];
+                ]
+            }
+            Self::RevisaoPixIncerta {
+                tipo,
+                txid,
+                remocao,
+                ..
+            } => {
+                let situacao = if *remocao {
+                    "a cobrança pode ter sido removida"
+                } else {
+                    "a alteração pode ter sido feita"
+                };
+                vec![format!(
+                    "{situacao}: confira com {} pix {tipo} consultar {txid} antes de repetir o comando",
+                    chamada()
+                )]
             }
             Self::DevolucaoIncerta { e2e, id, .. } => {
-                return vec![
+                vec![
                     "a devolução pode ter sido feita; com o mesmo id, a API não devolve de novo"
                         .to_owned(),
                     format!("confira com: inter-pj pix devolucao consultar {e2e} {id}"),
                     format!("ou repita o comando com --id {id}"),
-                ];
+                ]
             }
             Self::EmissaoIncerta { consulta, .. } => {
-                return vec![
+                vec![
                     "a cobrança pode ter sido emitida; por 30 minutos, a API recusa outra com o mesmo seu número, valor, vencimento e pagador".to_owned(),
                     format!("confira antes de tentar de novo: {consulta}"),
+                ]
+            }
+            _ => return None,
+        })
+    }
+
+    /// Suggestions shown after the error message.
+    pub(crate) fn hints(&self) -> Vec<String> {
+        if let Some(dicas) = self.dicas_de_resultado_incerto() {
+            return dicas;
+        }
+        let err = match self {
+            Self::Inter(err) => err,
+            Self::Periodo {
+                dica: Some(dica), ..
+            } => return vec![(*dica).to_owned()],
+            Self::PagamentosRepetidos { .. } => {
+                return vec![
+                    "se forem mesmo pagamentos distintos, use --permitir-repetidos".to_owned(),
                 ];
+            }
+            Self::TempoEsgotado { .. } => {
+                return vec!["consulte de novo mais tarde, ou aumente o --timeout".to_owned()];
             }
             _ => return Vec::new(),
         };
@@ -244,24 +311,12 @@ impl CliError {
                 ],
                 _ => Vec::new(),
             },
-            InterError::Transport(_) => vec![
+            InterError::Transport(_) | InterError::TokenTransport(_) => vec![
                 "confira a conexão/proxy e se o certificado (.crt) e a chave (.key) da integração estão válidos",
             ],
             _ => Vec::new(),
         };
         hints.into_iter().map(str::to_owned).collect()
-    }
-}
-
-/// Whether a payment may have been made despite the error: the request
-/// may have reached the API (timeout, dropped connection, `5xx`, an
-/// unreadable success). A refused connection never reached it.
-pub(crate) fn resultado_incerto(err: &InterError) -> bool {
-    match err {
-        InterError::Transport(source) => !source.is_connect(),
-        InterError::Api(api) => api.status >= 500,
-        InterError::Decode { .. } => true,
-        _ => false,
     }
 }
 
@@ -284,5 +339,45 @@ pub(crate) fn report(err: &CliError) {
     }
     for hint in err.hints() {
         eprintln!("dica: {hint}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_uncertain_outcome_exits_with_9_whatever_the_cause() {
+        let ilegivel = || InterError::Decode {
+            operation: "POST /banking/v2/pagamento".to_owned(),
+            message: "formato inesperado".to_owned(),
+        };
+        let pagamento = CliError::PagamentoIncerto {
+            source: ilegivel(),
+            situacao: "o pagamento pode ter sido feito",
+            consulta: "inter-pj pagamento boleto listar --codigo 0".to_owned(),
+            escopos: "pagamento-boleto.read",
+        };
+        assert_eq!(pagamento.exit_code(), exit::UNCERTAIN);
+        let pix = CliError::ResultadoIncerto {
+            source: ilegivel(),
+            id_idempotente: "9b2f6c1e-5d0a-4c1b-8f3e-2a7d4e6b8c90".to_owned(),
+        };
+        assert_eq!(pix.exit_code(), exit::UNCERTAIN);
+        let cobranca = CliError::CobrancaPixIncerta {
+            source: ilegivel(),
+            tipo: "cob",
+            txid: "7978c0c97ea847e78e8849634473c1f1".to_owned(),
+        };
+        assert_eq!(cobranca.exit_code(), exit::UNCERTAIN);
+        let revisao = CliError::RevisaoPixIncerta {
+            source: ilegivel(),
+            tipo: "cobv",
+            txid: "7978c0c97ea847e78e8849634473c1f1".to_owned(),
+            remocao: true,
+        };
+        assert_eq!(revisao.exit_code(), exit::UNCERTAIN);
+        // Outside an uncertain outcome, the error keeps its category.
+        assert_eq!(CliError::Inter(ilegivel()).exit_code(), exit::UNEXPECTED);
     }
 }

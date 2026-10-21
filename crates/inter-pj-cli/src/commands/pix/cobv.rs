@@ -16,9 +16,10 @@ use serde_json::json;
 use super::encargos::{self, Encargos};
 use super::{
     Filtros, alteravel, antes_e_depois, copia_e_cola_ativa, descrever_status, incerta, paginacao,
-    pessoa, tabela_pix,
+    pessoa, revisao_incerta, tabela_pix,
 };
 use crate::arquivo;
+use crate::chamada::chamada;
 use crate::cli::{
     DevedorCobvArgs, Formato, PixCobvCommand, PixCobvConsultarArgs, PixCobvCriarArgs,
     PixCobvListarArgs, PixCobvRevisarArgs,
@@ -91,11 +92,19 @@ async fn criar(
         .criar_cobv(&txid, &cobv)
         .await
         .map_err(|err| incerta(err, "cobv", &txid))?;
+    let consulta = format!("{} pix cobv consultar {txid}", chamada());
     let texto = format!(
-        "Cobrança Pix com vencimento criada.\n\n{}\n\nAcompanhe com: inter-pj pix cobv consultar {txid}",
+        "Cobrança Pix com vencimento criada.\n\n{}\n\nAcompanhe com: {consulta}",
         render_cobv(&criada)
     );
-    opcoes.mostrar(context, &settings, &texto, &criada, &copia_e_cola(&criada))
+    opcoes.mostrar_criada(
+        context,
+        &settings,
+        &texto,
+        &criada,
+        &copia_e_cola(&criada),
+        &consulta,
+    )
 }
 
 /// The charge of the options, checked as the API would.
@@ -356,7 +365,11 @@ async fn revisar(
     };
     confirmar(terminal, args.sim, pergunta)?;
 
-    let revisada = client.pix().revisar_cobv(&args.txid, &revisao).await?;
+    let revisada = client
+        .pix()
+        .revisar_cobv(&args.txid, &revisao)
+        .await
+        .map_err(|err| revisao_incerta(err, "cobv", &args.txid, revisao.remover))?;
     match context.formato() {
         Formato::Json => output::print_json(&revisada),
         // `commands::run` refuses csv for this command.
@@ -491,10 +504,10 @@ fn revisao_das_opcoes(
         .is_some_and(|valor| valor.desconto.is_some());
     if let Some(novo) = args.vencimento
         && !desconto_novo
-        && let Some(data) = atual.datas_do_desconto.iter().find(|data| **data > novo)
+        && let Some(data) = atual.datas_do_desconto.iter().find(|data| **data >= novo)
     {
         return Err(CliError::Usage(format!(
-            "--vencimento: o desconto atual vale até {}, depois do novo vencimento; informe também o novo --desconto",
+            "--vencimento: o desconto atual vale até {}, que não é antes do novo vencimento; informe também o novo --desconto",
             data.format("%d/%m/%Y")
         )));
     }
@@ -761,7 +774,7 @@ async fn listar(context: &Context, args: &PixCobvListarArgs) -> Result<(), CliEr
     };
     match context.formato() {
         Formato::Json => output::print_json(&json!({ "cobs": cobs })),
-        Formato::Csv => output::print_raw(&csv(&cobs).csv(context.separador())),
+        Formato::Csv => output::print_csv(&csv(&cobs), context.separador()),
         Formato::Texto => {
             context.warn_if_sandbox(&settings);
             let lote: Vec<String> = args
@@ -821,14 +834,33 @@ fn tabela(cobs: &[Cobv]) -> Tabela {
     tabela
 }
 
-/// `3 cobranças · R$ 450,00 · pagas R$ 150,00`.
+/// `3 cobranças · R$ 450,00 · recebido R$ 153,00`: the original amounts,
+/// and what the Pix that paid the charges brought, which fines, interest,
+/// rebates and discounts make differ from the original amounts. When the
+/// API did not list the Pix of a charge paid, the original amount of the
+/// paid ones, said so.
 fn totais(cobs: &[Cobv]) -> String {
-    super::totais(cobs.iter().map(|cobv| {
-        (
-            cobv.valor.as_ref().and_then(|valor| valor.original),
-            cobv.status.as_ref(),
-        )
-    }))
+    let original = |cobv: &Cobv| cobv.valor.as_ref().and_then(|valor| valor.original);
+    let mut texto = super::totais(cobs.iter().map(|cobv| (original(cobv), None)));
+    let pagas: Vec<&Cobv> = cobs
+        .iter()
+        .filter(|cobv| cobv.status == Some(StatusCob::Concluida))
+        .collect();
+    if pagas.is_empty() {
+        return texto;
+    }
+    if pagas.iter().all(|cobv| !cobv.pix.is_empty()) {
+        let recebido: Decimal = pagas
+            .iter()
+            .flat_map(|cobv| &cobv.pix)
+            .filter_map(|pix| pix.valor)
+            .sum();
+        let _ = write!(texto, " · recebido {}", output::brl(recebido));
+    } else {
+        let valor: Decimal = pagas.iter().copied().filter_map(original).sum();
+        let _ = write!(texto, " · pagas {} (valor original)", output::brl(valor));
+    }
+    texto
 }
 
 /// Every field, with the API's names (nested ones with a dot) and codes;
@@ -1067,6 +1099,16 @@ aviso: o prazo do desconto até 15/10/2026 já passou"
     }
 
     #[test]
+    fn the_due_date_is_checked_against_today_in_brasilia() {
+        let hoje = |agora: &str| crate::commands::hoje_em(agora.parse().unwrap());
+        let vencimento = NaiveDate::from_ymd_opt(2026, 10, 20).unwrap();
+        // 22:30 of 20/10 in Brasília, 01:30 of 21/10 in UTC.
+        assert!(vencimento_valido(vencimento, hoje("2026-10-21T01:30:00Z")).is_ok());
+        // 00:30 of 21/10 in Brasília: the 20th has passed.
+        assert!(vencimento_valido(vencimento, hoje("2026-10-21T03:30:00Z")).is_err());
+    }
+
+    #[test]
     fn validity_in_words() {
         let vencimento = dia("2026-10-20");
         assert_eq!(
@@ -1135,6 +1177,7 @@ Copia e cola  00020101021226"
             serde_json::to_value(&revisao).unwrap(),
             json!({"calendario": {"dataDeVencimento": "2026-10-20", "validadeAposVencimento": 5}})
         );
+        // Without a date, the discount ends the day before the new due date.
         let revisao = revisao_das_opcoes(
             &revisar_args(&["--vencimento", "2026-10-25", "--desconto", "3%"]),
             &atual,
@@ -1145,7 +1188,7 @@ Copia e cola  00020101021226"
             serde_json::to_value(&revisao).unwrap(),
             json!({
                 "calendario": {"dataDeVencimento": "2026-10-25", "validadeAposVencimento": 10},
-                "valor": {"desconto": {"modalidade": 2, "descontoDataFixa": [{"data": "2026-10-25", "valorPerc": "3.00"}]}}
+                "valor": {"desconto": {"modalidade": 2, "descontoDataFixa": [{"data": "2026-10-24", "valorPerc": "3.00"}]}}
             })
         );
         // Before the lookup, only what does not depend on the charge.
@@ -1238,9 +1281,41 @@ Cobrança Pix com vencimento {TXID} a alterar
     }
 
     #[test]
+    fn the_csv_for_a_terminal_has_no_escape_sequence() {
+        let mut forjada = cobv("ATIVA");
+        if let Some(devedor) = forjada.devedor.as_mut() {
+            devedor.nome = Some("Fulano\u{1b}]52;c;ZXZpbA==\u{7}\u{9b}2J".to_owned());
+        }
+        let tabela = csv(&[forjada]);
+        let terminal = tabela.csv_para_terminal(crate::tabela::Separador::PontoEVirgula);
+        assert!(
+            !terminal.contains(['\u{1b}', '\u{7}', '\u{9b}']),
+            "{terminal}"
+        );
+        assert_eq!(terminal.split("\r\n").count(), 3, "{terminal}");
+        // In a file, the text as the API sent it.
+        assert!(
+            tabela
+                .csv(crate::tabela::Separador::PontoEVirgula)
+                .contains('\u{1b}')
+        );
+    }
+
+    #[test]
     fn listings_add_up() {
         let cobs = [cobv("CONCLUIDA"), cobv("ATIVA")];
-        assert_eq!(totais(&cobs), "2 cobranças · R$ 300,00 · pagas R$ 150,00");
+        // Paid with the discount: R$ 140,00 of R$ 150,00.
+        assert_eq!(
+            totais(&cobs),
+            "2 cobranças · R$ 300,00 · recebido R$ 140,00"
+        );
+        let mut sem_pix = cobv("CONCLUIDA");
+        sem_pix.pix.clear();
+        assert_eq!(
+            totais(&[sem_pix, cobv("ATIVA")]),
+            "2 cobranças · R$ 300,00 · pagas R$ 150,00 (valor original)"
+        );
+        assert_eq!(totais(&[cobv("ATIVA")]), "1 cobrança · R$ 150,00");
         let csv = csv(&cobs).csv(crate::tabela::Separador::PontoEVirgula);
         assert!(
             csv.contains(";CONCLUIDA;0;2026-09-23T20:15:00.358Z;2026-10-20;10;150,00;2;2,00;;;;;1;;12345678909;;Fulano de Tal;"),
