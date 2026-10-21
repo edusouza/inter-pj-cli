@@ -4,11 +4,12 @@
 use std::fmt::Write as _;
 
 use chrono::{Local, TimeZone};
-use inter_pj::Environment;
 use inter_pj::pix::{FiltroLocs, LocationPix, TipoCob};
+use inter_pj::{Environment, Error as InterError};
 use serde_json::json;
 
 use super::{paginacao, periodo};
+use crate::chamada::chamada;
 use crate::cli::{
     Formato, PixLocCommand, PixLocConsultarArgs, PixLocCriarArgs, PixLocDesvincularArgs,
     PixLocListarArgs,
@@ -49,7 +50,13 @@ async fn criar(context: &Context, args: &PixLocCriarArgs) -> Result<(), CliError
     let settings = context.settings()?;
     let client = context.client(&settings)?;
     let tipo = TipoCob::from(args.tipo);
-    let loc = client.pix().criar_loc(&tipo).await?;
+    let loc = client.pix().criar_loc(&tipo).await.map_err(|err| {
+        incerta(
+            err,
+            "a location pode ter sido criada",
+            format!("{} pix loc listar --sem-cobranca", chamada()),
+        )
+    })?;
     match context.formato() {
         Formato::Json => output::print_json(&loc),
         // `commands::run` refuses csv for this command.
@@ -220,7 +227,13 @@ async fn desvincular(
     let ambiente = settings.ambiente.as_ref().map(|setting| setting.value);
     eprintln!("{}", resumo(&atual, txid, ambiente));
     confirmar(terminal, args.sim, "Desvincular a cobrança?")?;
-    let loc = client.pix().desvincular_loc(args.id).await?;
+    let loc = client.pix().desvincular_loc(args.id).await.map_err(|err| {
+        incerta(
+            err,
+            "a cobrança pode ter sido desvinculada",
+            format!("{} pix loc consultar {}", chamada(), args.id),
+        )
+    })?;
     match context.formato() {
         Formato::Json => output::print_json(&loc),
         // `commands::run` refuses csv for this command.
@@ -228,6 +241,20 @@ async fn desvincular(
             "Cobrança {txid} desvinculada: a location está livre.\n\n{}",
             render(&loc)
         )),
+    }
+}
+
+/// The error of a creation or a change: with an unknown outcome, how to
+/// check it before repeating it.
+fn incerta(err: InterError, situacao: &'static str, consulta: String) -> CliError {
+    if err.may_have_been_processed() {
+        CliError::LocIncerta {
+            source: err,
+            situacao,
+            consulta,
+        }
+    } else {
+        err.into()
     }
 }
 

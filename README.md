@@ -716,7 +716,7 @@ Cobrança cobvexemplo0000000000000000001 desvinculada: a location está livre.
 ...
 ```
 
-A listagem filtra por `--tipo cob` ou `cobv` e por `--com-cobranca` ou `--sem-cobranca`. `desvincular` consulta a location antes, recusa sem nenhuma alteração uma location sem cobrança e pede confirmação (sem terminal, `--sim`), porque o QR Code impresso deixa de levar à cobrança. Os escopos são `payloadlocation.write` e `payloadlocation.read`.
+A listagem filtra por `--tipo cob` ou `cobv` e por `--com-cobranca` ou `--sem-cobranca`. `desvincular` consulta a location antes, recusa sem nenhuma alteração uma location sem cobrança e pede confirmação (sem terminal, `--sim`), porque o QR Code impresso deixa de levar à cobrança. Se o resultado de `criar` ou de `desvincular` ficar incerto (tempo esgotado, erro 5xx), a operação pode ter sido feita: a CLI sai com o código 9 e indica o comando que a confere (`pix loc listar --sem-cobranca` ou `pix loc consultar <id>`) antes de repetir. Os escopos são `payloadlocation.write` e `payloadlocation.read`.
 
 ### Pix recebidos e devoluções
 
