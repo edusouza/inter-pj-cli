@@ -148,8 +148,9 @@ impl CliError {
             // connection (6).
             Self::ResultadoIncerto { .. }
             | Self::PagamentoIncerto { .. }
-            | Self::EmissaoIncerta { .. } => exit::UNCERTAIN,
-            Self::Inter(err) | Self::CobrancaPixIncerta { source: err, .. } => match err {
+            | Self::EmissaoIncerta { .. }
+            | Self::CobrancaPixIncerta { .. } => exit::UNCERTAIN,
+            Self::Inter(err) => match err {
                 InterError::InvalidInput(_) => exit::USAGE,
                 InterError::Config(_) | InterError::Identity(_) => exit::CONFIG,
                 InterError::Auth(_) => exit::AUTH,
@@ -301,6 +302,12 @@ mod tests {
             id_idempotente: "9b2f6c1e-5d0a-4c1b-8f3e-2a7d4e6b8c90".to_owned(),
         };
         assert_eq!(pix.exit_code(), exit::UNCERTAIN);
+        let cobranca = CliError::CobrancaPixIncerta {
+            source: ilegivel(),
+            tipo: "cob",
+            txid: "7978c0c97ea847e78e8849634473c1f1".to_owned(),
+        };
+        assert_eq!(cobranca.exit_code(), exit::UNCERTAIN);
         // Outside an uncertain outcome, the error keeps its category.
         assert_eq!(CliError::Inter(ilegivel()).exit_code(), exit::UNEXPECTED);
     }

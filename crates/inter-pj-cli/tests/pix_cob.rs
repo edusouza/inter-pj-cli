@@ -182,7 +182,8 @@ async fn criacao_invalida_ou_sem_confirmacao_nao_chama_a_api() {
 }
 
 /// With an unknown outcome, the error says how to check and how to repeat
-/// without creating two charges.
+/// without creating two charges, and exits with its own code: a script that
+/// repeats on 6 would create another charge with another txid.
 #[tokio::test(flavor = "multi_thread")]
 async fn resultado_incerto_orienta_a_repetir_com_o_mesmo_txid() {
     let env = env().await;
@@ -198,7 +199,7 @@ async fn resultado_incerto_orienta_a_repetir_com_o_mesmo_txid() {
         .args(criar())
         .args(["--txid", TXID, "--sim"])
         .assert()
-        .code(6);
+        .code(9);
     let stderr = stderr_of(&assert);
     for dica in [
         "dica: a cobrança pode ter sido criada; com o mesmo txid, a API não cria outra".to_owned(),
@@ -207,6 +208,24 @@ async fn resultado_incerto_orienta_a_repetir_com_o_mesmo_txid() {
     ] {
         assert!(stderr.contains(&dica), "{dica}\n{stderr}");
     }
+
+    // A `429` was not processed: it keeps the code of "try later".
+    let limite = self::env().await;
+    limite.mount_token("cob.write", Some(1)).await;
+    Mock::given(method("PUT"))
+        .and(path(format!("/pix/v2/cob/{TXID}")))
+        .respond_with(ResponseTemplate::new(429))
+        .expect(1)
+        .mount(&limite.server)
+        .await;
+    let assert = limite
+        .cmd()
+        .args(criar())
+        .args(["--txid", TXID, "--sim", "--sem-retentativa"])
+        .assert()
+        .code(6);
+    let stderr = stderr_of(&assert);
+    assert!(!stderr.contains("pode ter sido criada"), "{stderr}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
