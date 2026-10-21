@@ -655,7 +655,7 @@ pub(crate) struct PixDevolucaoSolicitarArgs {
     #[arg(long, value_name = "TEXTO")]
     pub(crate) descricao: Option<String>,
 
-    /// id da devolução, de 1 a 35 letras e dígitos [padrão: gerado]; repetir o comando com o mesmo id não devolve de novo
+    /// id da devolução, de 1 a 35 letras e dígitos [padrão: gerado]; repetir o comando com o mesmo id não devolve de novo, então um script que repete o comando passa um id fixo
     #[arg(long, value_name = "ID", value_parser = parse_id_devolucao)]
     pub(crate) id: Option<IdDevolucao>,
 

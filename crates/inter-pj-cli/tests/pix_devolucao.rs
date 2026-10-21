@@ -357,7 +357,8 @@ async fn simulacao_mostra_a_requisicao() {
 }
 
 /// With an unknown outcome, the error says how to check and how to repeat
-/// without refunding twice; the request is not repeated by itself.
+/// without refunding twice, and exits with 9: a script that repeats on 6
+/// without --id would refund again. The request is not repeated by itself.
 #[tokio::test(flavor = "multi_thread")]
 async fn resultado_incerto_orienta_a_repetir_com_o_mesmo_id() {
     let env = env("").await;
@@ -383,7 +384,7 @@ async fn resultado_incerto_orienta_a_repetir_com_o_mesmo_id() {
             "--sim",
         ])
         .assert()
-        .code(6);
+        .code(9);
     let stderr = stderr_of(&assert);
     for dica in [
         "dica: a devolução pode ter sido feita; com o mesmo id, a API não devolve de novo"
@@ -393,6 +394,38 @@ async fn resultado_incerto_orienta_a_repetir_com_o_mesmo_id() {
     ] {
         assert!(stderr.contains(&dica), "{dica}\n{stderr}");
     }
+
+    // A `429` was not processed: it keeps the code of "try later".
+    let limite = self::env("").await;
+    limite.mount_token("pix.write pix.read", None).await;
+    mount_pix(&limite, &json!([]), 1).await;
+    Mock::given(method("PUT"))
+        .and(path(format!("/pix/v2/pix/{E2E}/devolucao/{ID}")))
+        .respond_with(ResponseTemplate::new(429))
+        .expect(1)
+        .mount(&limite.server)
+        .await;
+    let assert = limite
+        .cmd()
+        .args([
+            "pix",
+            "devolucao",
+            "solicitar",
+            E2E,
+            "--valor",
+            "10",
+            "--id",
+            ID,
+            "--sim",
+            "--sem-retentativa",
+        ])
+        .assert()
+        .code(6);
+    assert!(
+        !stderr_of(&assert).contains("pode ter sido feita"),
+        "{}",
+        stderr_of(&assert)
+    );
 }
 
 /// Repeating with the id of a refund already requested sends nothing.

@@ -176,8 +176,9 @@ impl CliError {
             | Self::PagamentoIncerto { .. }
             | Self::EmissaoIncerta { .. }
             | Self::CobrancaPixIncerta { .. }
-            | Self::RevisaoPixIncerta { .. } => exit::UNCERTAIN,
-            Self::Inter(err) | Self::DevolucaoIncerta { source: err, .. } => match err {
+            | Self::RevisaoPixIncerta { .. }
+            | Self::DevolucaoIncerta { .. } => exit::UNCERTAIN,
+            Self::Inter(err) => match err {
                 InterError::InvalidInput(_) => exit::USAGE,
                 InterError::Config(_) | InterError::Identity(_) => exit::CONFIG,
                 InterError::Auth(_) => exit::AUTH,
@@ -377,6 +378,12 @@ mod tests {
             remocao: true,
         };
         assert_eq!(revisao.exit_code(), exit::UNCERTAIN);
+        let devolucao = CliError::DevolucaoIncerta {
+            source: ilegivel(),
+            e2e: "E12345678202609232020abcdef12345".to_owned(),
+            id: "D1".to_owned(),
+        };
+        assert_eq!(devolucao.exit_code(), exit::UNCERTAIN);
         // Outside an uncertain outcome, the error keeps its category.
         assert_eq!(CliError::Inter(ilegivel()).exit_code(), exit::UNEXPECTED);
     }
