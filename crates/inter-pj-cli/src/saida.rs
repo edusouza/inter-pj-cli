@@ -12,14 +12,25 @@ use crate::files::{create_private, write_private};
 pub(crate) struct Saida {
     caminho: PathBuf,
     sobrescrever: bool,
+    arquivo: &'static str,
+    opcao: &'static str,
 }
 
 impl Saida {
-    /// `-` is the standard output.
-    pub(crate) fn new(caminho: PathBuf, sobrescrever: bool) -> Self {
+    /// `-` is the standard output. When it is a terminal, the message
+    /// suggests a redirection to `arquivo` (`extrato.pdf`) or the option of
+    /// the command that names the file, `opcao` (`--saida`).
+    pub(crate) fn new(
+        caminho: PathBuf,
+        sobrescrever: bool,
+        arquivo: &'static str,
+        opcao: &'static str,
+    ) -> Self {
         Self {
             caminho,
             sobrescrever,
+            arquivo,
+            opcao,
         }
     }
 
@@ -36,10 +47,7 @@ impl Saida {
     /// the file already exists. The write itself is checked again, atomically.
     pub(crate) fn conferir(&self) -> Result<(), CliError> {
         if self.stdout() && io::stdout().is_terminal() {
-            return Err(CliError::Usage(format!(
-                "a saída padrão é um terminal: redirecione (> arquivo.{}) ou use --saida ARQUIVO",
-                self.extensao()
-            )));
+            return Err(self.terminal());
         }
         if !self.stdout() && !self.sobrescrever && self.caminho.exists() {
             return Err(self.ja_existe());
@@ -77,11 +85,11 @@ impl Saida {
         ))
     }
 
-    fn extensao(&self) -> &str {
-        self.caminho
-            .extension()
-            .and_then(|extensao| extensao.to_str())
-            .unwrap_or("pdf")
+    fn terminal(&self) -> CliError {
+        CliError::Usage(format!(
+            "a saída padrão é um terminal: redirecione (> {}) ou use {} ARQUIVO",
+            self.arquivo, self.opcao
+        ))
     }
 }
 
@@ -104,7 +112,7 @@ mod tests {
     fn files_are_not_overwritten_by_accident() {
         let dir = tempfile::tempdir().unwrap();
         let caminho = dir.path().join("doc.pdf");
-        let saida = Saida::new(caminho.clone(), false);
+        let saida = Saida::new(caminho.clone(), false, "doc.pdf", "--saida");
         saida.conferir().unwrap();
         saida.gravar(b"%PDF-1").unwrap();
         let erro = saida.conferir().unwrap_err().to_string();
@@ -115,10 +123,37 @@ mod tests {
         assert!(saida.gravar(b"%PDF-2").is_err());
         assert_eq!(std::fs::read(&caminho).unwrap(), b"%PDF-1");
 
-        let sobrescrever = Saida::new(caminho.clone(), true);
+        let sobrescrever = Saida::new(caminho.clone(), true, "doc.pdf", "--saida");
         sobrescrever.conferir().unwrap();
         sobrescrever.gravar(b"%PDF-2").unwrap();
         assert_eq!(std::fs::read(&caminho).unwrap(), b"%PDF-2");
+    }
+
+    #[test]
+    fn a_terminal_suggests_the_file_and_the_option_of_the_command() {
+        for (arquivo, opcao, sugestao) in [
+            (
+                "extrato.pdf",
+                "--saida",
+                "(> extrato.pdf) ou use --saida ARQUIVO",
+            ),
+            (
+                "cobranca.pdf",
+                "--saida",
+                "(> cobranca.pdf) ou use --saida ARQUIVO",
+            ),
+            (
+                "qrcode.png",
+                "--qrcode-png",
+                "(> qrcode.png) ou use --qrcode-png ARQUIVO",
+            ),
+        ] {
+            let saida = Saida::new(PathBuf::from("-"), false, arquivo, opcao);
+            assert_eq!(
+                saida.terminal().to_string(),
+                format!("a saída padrão é um terminal: redirecione {sugestao}")
+            );
+        }
     }
 
     #[test]

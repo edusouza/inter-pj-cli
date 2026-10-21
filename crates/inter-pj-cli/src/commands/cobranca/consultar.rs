@@ -20,7 +20,7 @@ pub(super) async fn consultar(
     let png = args
         .qrcode_png
         .clone()
-        .map(|caminho| Saida::new(caminho, args.sobrescrever));
+        .map(|caminho| Saida::new(caminho, args.sobrescrever, "qrcode.png", "--qrcode-png"));
     let png_no_stdout = png.as_ref().is_some_and(Saida::stdout);
     if args.qrcode && (context.formato() == Formato::Json || png_no_stdout) {
         return Err(CliError::Usage(
@@ -99,7 +99,7 @@ pub(super) async fn pdf(context: &Context, args: &CobrancaPdfArgs) -> Result<(),
         .saida
         .clone()
         .unwrap_or_else(|| PathBuf::from(format!("cobranca-{nome}.pdf")));
-    let saida = Saida::new(caminho, args.sobrescrever);
+    let saida = Saida::new(caminho, args.sobrescrever, "cobranca.pdf", "--saida");
     saida.conferir()?;
 
     let settings = context.settings()?;
