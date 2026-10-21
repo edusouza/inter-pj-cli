@@ -11,10 +11,11 @@ use serde_json::json;
 
 use super::{data, data_br, descrever_status};
 use crate::arquivo::{self, CAMPOS_DARF, Campos};
+use crate::chamada::argumento;
 use crate::cli::{DarfCommand, DarfListarArgs, DarfPagarArgs, Formato, PeriodoArgs};
 use crate::commands::{Context, hoje, intervalo, simulacao};
 use crate::confirmacao::{Terminal, confirmar, descrever_ambiente, verificar_limite};
-use crate::error::{CliError, resultado_incerto};
+use crate::error::CliError;
 use crate::output;
 use crate::tabela::{Celula, Coluna, Tabela};
 use crate::valor::por_extenso;
@@ -60,7 +61,7 @@ async fn pagar(
     };
     confirmar(terminal, args.sim, "Confirmar o pagamento do DARF?")?;
     let solicitacao = client.banking().pagar_darf(&darf).await.map_err(|err| {
-        if resultado_incerto(&err) {
+        if err.may_have_been_processed() {
             CliError::PagamentoIncerto {
                 source: err,
                 situacao: "o pagamento pode ter sido feito",
@@ -68,6 +69,8 @@ async fn pagar(
                     "inter-pj pagamento darf listar --codigo-receita {}",
                     darf.codigo_receita
                 ),
+                // The API lists DARFs under the scope of payments by barcode.
+                escopos: "pagamento-boleto.read",
             }
         } else {
             err.into()
@@ -82,12 +85,13 @@ async fn pagar(
 
 /// The DARF of the file or of the options, validated.
 fn darf(args: &DarfPagarArgs) -> Result<PagamentoDarf, CliError> {
+    origem(args)?;
     if let Some(caminho) = &args.arquivo {
         let valor = arquivo::ler_json(caminho)?;
         let onde = arquivo::nome(caminho);
         return arquivo::darf(&Campos::de(&valor, &onde, &CAMPOS_DARF)?);
     }
-    // clap requires every mandatory option along with --codigo-receita.
+    // `origem` checked that every mandatory option is here.
     let obrigatorio = |valor: Option<&String>, opcao: &str| {
         valor
             .map(|texto| texto.trim().to_owned())
@@ -99,10 +103,7 @@ fn darf(args: &DarfPagarArgs) -> Result<PagamentoDarf, CliError> {
         args.vencimento,
         args.valor_principal,
     ) else {
-        return Err(CliError::Usage(
-            "informe o DARF por --arquivo ou pelas opções --codigo-receita, --contribuinte, --nome-empresa, --periodo-apuracao, --vencimento, --referencia, --descricao e --valor-principal"
-                .to_owned(),
-        ));
+        return Err(CliError::Usage(SEM_ORIGEM.to_owned()));
     };
     let darf = PagamentoDarf {
         cnpj_cpf,
@@ -125,6 +126,111 @@ fn darf(args: &DarfPagarArgs) -> Result<PagamentoDarf, CliError> {
     darf.validar()
         .map_err(|err| CliError::Usage(err.to_string()))?;
     Ok(darf)
+}
+
+const SEM_ORIGEM: &str = "informe o DARF por --arquivo ou pelas opções --codigo-receita, --contribuinte, --nome-empresa, --periodo-apuracao, --vencimento, --referencia, --descricao e --valor-principal";
+
+/// The DARF comes from `--arquivo` or from the options, never from both:
+/// with the file, an option of the DARF goes in the file, under the name
+/// of its field; without it, every mandatory option must be given.
+fn origem(args: &DarfPagarArgs) -> Result<(), CliError> {
+    // (option, field of the file, mandatory, given)
+    let opcoes = [
+        (
+            "--codigo-receita",
+            "codigoReceita",
+            true,
+            args.codigo_receita.is_some(),
+        ),
+        (
+            "--contribuinte",
+            "cnpjCpf",
+            true,
+            args.contribuinte.is_some(),
+        ),
+        (
+            "--nome-empresa",
+            "nomeEmpresa",
+            true,
+            args.nome_empresa.is_some(),
+        ),
+        (
+            "--telefone",
+            "telefoneEmpresa",
+            false,
+            args.telefone.is_some(),
+        ),
+        (
+            "--periodo-apuracao",
+            "periodoApuracao",
+            true,
+            args.periodo_apuracao.is_some(),
+        ),
+        (
+            "--vencimento",
+            "dataVencimento",
+            true,
+            args.vencimento.is_some(),
+        ),
+        (
+            "--referencia",
+            "referencia",
+            true,
+            args.referencia.is_some(),
+        ),
+        ("--descricao", "descricao", true, args.descricao.is_some()),
+        (
+            "--valor-principal",
+            "valorPrincipal",
+            true,
+            args.valor_principal.is_some(),
+        ),
+        ("--multa", "valorMulta", false, args.multa.is_some()),
+        ("--juros", "valorJuros", false, args.juros.is_some()),
+    ];
+    let dadas: Vec<_> = opcoes.iter().filter(|(.., dada)| *dada).collect();
+    if args.arquivo.is_some() {
+        if dadas.is_empty() {
+            return Ok(());
+        }
+        let nomes: Vec<&str> = dadas.iter().map(|(opcao, ..)| *opcao).collect();
+        let campos: Vec<&str> = dadas.iter().map(|(_, campo, ..)| *campo).collect();
+        let (verbo, onde) = if dadas.len() == 1 {
+            ("não vale", "o campo")
+        } else {
+            ("não valem", "os campos")
+        };
+        return Err(CliError::Usage(format!(
+            "com --arquivo, o DARF vem todo do arquivo: {} {verbo} com ele; ponha {onde} {} no arquivo",
+            juntar(&nomes),
+            juntar(&campos)
+        )));
+    }
+    if dadas.is_empty() {
+        return Err(CliError::Usage(SEM_ORIGEM.to_owned()));
+    }
+    let faltam: Vec<&str> = opcoes
+        .iter()
+        .filter(|(_, _, obrigatoria, dada)| *obrigatoria && !dada)
+        .map(|(opcao, ..)| *opcao)
+        .collect();
+    if faltam.is_empty() {
+        Ok(())
+    } else {
+        Err(CliError::Usage(format!(
+            "faltam opções do DARF: {} (ou informe o DARF por --arquivo)",
+            juntar(&faltam)
+        )))
+    }
+}
+
+/// `a`, `a e b`, `a, b e c`.
+fn juntar(itens: &[&str]) -> String {
+    match itens {
+        [] => String::new(),
+        [unico] => (*unico).to_owned(),
+        [inicio @ .., ultimo] => format!("{} e {ultimo}", inicio.join(", ")),
+    }
 }
 
 /// What is about to be paid, for the person to check before confirming.
@@ -185,8 +291,17 @@ pub(super) fn avisos(darf: &PagamentoDarf, hoje: NaiveDate) -> Vec<String> {
     }
 }
 
+/// The outcome of the payment. The texts of the API go cleaned: a line
+/// break in one of them would print a line of its own, like `DARF pago.`.
 fn render(solicitacao: &SolicitacaoDarf) -> String {
-    let data = solicitacao.data_pagamento.as_deref().map(data_br);
+    let data = solicitacao
+        .data_pagamento
+        .as_deref()
+        .map(|data| output::limpo(&data_br(data)).into_owned());
+    let codigo = solicitacao
+        .codigo_solicitacao
+        .as_deref()
+        .map(|codigo| output::limpo(codigo).into_owned());
     let titulo = match &solicitacao.tipo_retorno {
         Some(TipoRetornoDarf::Pagamento) => "DARF pago.".to_owned(),
         Some(TipoRetornoDarf::Agendamento) => match &data {
@@ -197,18 +312,21 @@ fn render(solicitacao: &SolicitacaoDarf) -> String {
             "DARF aguardando aprovação no Internet Banking (Aprovar > Gestão de Aprovações): só será pago depois de aprovado."
                 .to_owned()
         }
-        Some(outro) => format!("DARF registrado (retorno da API: {outro})."),
+        Some(outro) => format!(
+            "DARF registrado (retorno da API: {}).",
+            output::limpo(&outro.to_string())
+        ),
         None => "DARF registrado.".to_owned(),
     };
     let mut linhas = Vec::new();
-    if let Some(codigo) = &solicitacao.codigo_solicitacao {
+    if let Some(codigo) = &codigo {
         linhas.push(("Código da solicitação", codigo.clone()));
     }
     if let Some(data) = data {
         linhas.push(("Data do pagamento", data));
     }
     if let Some(autenticacao) = &solicitacao.autenticacao {
-        linhas.push(("Autenticação", autenticacao.clone()));
+        linhas.push(("Autenticação", output::limpo(autenticacao).into_owned()));
     }
     if let Some(aprovadores) = solicitacao.quantidade_aprovadores.filter(|n| *n > 0) {
         linhas.push(("Aprovações necessárias", aprovadores.to_string()));
@@ -217,10 +335,11 @@ fn render(solicitacao: &SolicitacaoDarf) -> String {
     if !linhas.is_empty() {
         let _ = write!(texto, "\n{}", output::key_values_left(&linhas));
     }
-    if let Some(codigo) = &solicitacao.codigo_solicitacao {
+    if let Some(codigo) = &codigo {
         let _ = write!(
             texto,
-            "\n\nAcompanhe com: inter-pj pagamento darf listar --codigo-solicitacao {codigo}"
+            "\n\nAcompanhe com: inter-pj pagamento darf listar --codigo-solicitacao {}",
+            argumento(codigo)
         );
     }
     texto
@@ -235,7 +354,7 @@ async fn listar(context: &Context, args: &DarfListarArgs) -> Result<(), CliError
     let darfs = client.banking().darfs(&filtro).await?;
     match context.formato() {
         Formato::Json => output::print_json(&json!({ "darfs": darfs })),
-        Formato::Csv => output::print_raw(&csv(&darfs).csv(context.separador())),
+        Formato::Csv => output::print_csv(&csv(&darfs), context.separador()),
         Formato::Texto => {
             context.warn_if_sandbox(&settings);
             output::print(&render_lista(&filtro, &darfs))
@@ -534,6 +653,75 @@ Acompanhe com: inter-pj pagamento darf listar --codigo-solicitacao 8bbdede4-35db
         assert_eq!(render(&SolicitacaoDarf::default()), "DARF registrado.");
     }
 
+    /// The file and the options do not mix, and the options come all
+    /// together: each mistake says what to do, without reading any file.
+    #[test]
+    fn origin_mistakes_say_what_to_do() {
+        let erro = |extra: &[&str]| {
+            let mut full = vec!["inter-pj", "pagamento", "darf", "pagar"];
+            full.extend_from_slice(extra);
+            let Command::Pagamento(PagamentoCommand::Darf(DarfCommand::Pagar(args))) =
+                Cli::try_parse_from(full).unwrap().command
+            else {
+                unreachable!("pagamento darf pagar");
+            };
+            darf(&args).unwrap_err().to_string()
+        };
+        assert_eq!(erro(&[]), SEM_ORIGEM);
+        assert_eq!(
+            erro(&["--arquivo", "nao-existe.json", "--multa", "1"]),
+            "com --arquivo, o DARF vem todo do arquivo: --multa não vale com ele; ponha o campo valorMulta no arquivo"
+        );
+        assert_eq!(
+            erro(&[
+                "--arquivo",
+                "nao-existe.json",
+                "--codigo-receita",
+                "0220",
+                "--juros",
+                "1"
+            ]),
+            "com --arquivo, o DARF vem todo do arquivo: --codigo-receita e --juros não valem com ele; ponha os campos codigoReceita e valorJuros no arquivo"
+        );
+        assert_eq!(
+            erro(&["--codigo-receita", "0220", "--multa", "1"]),
+            "faltam opções do DARF: --contribuinte, --nome-empresa, --periodo-apuracao, --vencimento, --referencia, --descricao e --valor-principal (ou informe o DARF por --arquivo)"
+        );
+        assert_eq!(
+            // Up to --descricao: no amount.
+            erro(&OPCOES[..14]),
+            "faltam opções do DARF: --valor-principal (ou informe o DARF por --arquivo)"
+        );
+        assert_eq!(juntar(&["a"]), "a");
+        assert_eq!(juntar(&["a", "b"]), "a e b");
+    }
+
+    /// A line break or an escape sequence in a text of the API cannot print
+    /// a line of its own, nor reach the terminal.
+    #[test]
+    fn texts_of_the_api_stay_on_their_lines() {
+        let solicitacao: SolicitacaoDarf = serde_json::from_value(json!({
+            "tipoRetorno": "NOVO\nDARF pago.",
+            "codigoSolicitacao": "8bbdede4\nDARF pago.",
+            "dataPagamento": "amanhã\nDARF pago.",
+            "autenticacao": "AUT\u{1b}[2J"
+        }))
+        .unwrap();
+        let texto = render(&solicitacao);
+        assert_eq!(texto.lines().count(), 6, "{texto}");
+        assert!(
+            !texto.lines().any(|linha| linha.trim() == "DARF pago."),
+            "{texto}"
+        );
+        assert!(!texto.contains('\u{1b}'), "{texto}");
+        assert!(
+            texto.contains(
+                "Acompanhe com: inter-pj pagamento darf listar --codigo-solicitacao '8bbdede4\u{fffd}DARF pago.'"
+            ),
+            "{texto}"
+        );
+    }
+
     fn darfs() -> Vec<Darf> {
         serde_json::from_value(json!([{
             "codigoSolicitacao": "8bbdede4-35db-4ec9-b652-e176841e62c8",
@@ -590,6 +778,21 @@ Pagamento   Receita  Apuração    Vencimento  Status     Total  Código da soli
             render_lista(&sem_datas, &[]),
             "DARFs incluídos nos últimos 30 dias\nCódigo da receita: 0220\n\nNenhum DARF encontrado."
         );
+    }
+
+    /// In a terminal, the CSV goes through the filter of the text output; in
+    /// a file, with the text as sent.
+    #[test]
+    fn csv_in_a_terminal_is_cleaned() {
+        let mut darfs = darfs();
+        darfs[0].referencia = Some("1\u{1b}[2J\u{1b}[1;1HTudo certo\nDARF pago".to_owned());
+        let tabela = csv(&darfs);
+        let terminal = tabela.csv_para_terminal(crate::tabela::Separador::PontoEVirgula);
+        assert!(!terminal.contains('\u{1b}'), "{terminal}");
+        assert!(!terminal.starts_with('\u{feff}'), "{terminal}");
+        assert_eq!(terminal.split("\r\n").count(), 3, "{terminal}");
+        let arquivo = tabela.csv(crate::tabela::Separador::PontoEVirgula);
+        assert!(arquivo.contains("1\u{1b}[2J"), "{arquivo}");
     }
 
     #[test]
