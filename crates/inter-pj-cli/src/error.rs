@@ -94,6 +94,9 @@ pub(crate) enum CliError {
         /// End-to-end id of the Pix refunded.
         e2e: String,
         id: String,
+        /// Whether the API accepted the refund and what failed was the
+        /// wait for its end (`--aguardar`).
+        aceita: bool,
     },
     /// `pix devolucao ... --aguardar`: the refund was not made.
     #[error("a devolução não foi feita: {motivo}")]
@@ -248,11 +251,20 @@ impl CliError {
                     chamada()
                 )]
             }
-            Self::DevolucaoIncerta { e2e, id, .. } => {
-                vec![
+            Self::DevolucaoIncerta {
+                e2e, id, aceita, ..
+            } => {
+                let situacao = if *aceita {
+                    "a devolução foi solicitada, mas o acompanhamento falhou: ela pode estar em processamento ou já ter sido feita"
+                } else {
                     "a devolução pode ter sido feita; com o mesmo id, a API não devolve de novo"
-                        .to_owned(),
-                    format!("confira com: inter-pj pix devolucao consultar {e2e} {id}"),
+                };
+                vec![
+                    situacao.to_owned(),
+                    format!(
+                        "confira com: {} pix devolucao consultar {e2e} {id}",
+                        chamada()
+                    ),
                     format!("ou repita o comando com --id {id}"),
                 ]
             }
@@ -382,6 +394,7 @@ mod tests {
             source: ilegivel(),
             e2e: "E12345678202609232020abcdef12345".to_owned(),
             id: "D1".to_owned(),
+            aceita: false,
         };
         assert_eq!(devolucao.exit_code(), exit::UNCERTAIN);
         // Outside an uncertain outcome, the error keeps its category.

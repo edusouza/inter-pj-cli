@@ -88,10 +88,13 @@ async fn solicitar(
             .as_ref()
             .is_some_and(StatusDevolucao::is_final);
         if args.espera.aguardar && !terminou {
-            let (atual, terminou) =
-                aguardar(&client, &args.e2e, &id, args.espera.timeout, intervalo).await?;
-            mostrar(context, &args.e2e, &id, &atual)?;
-            return desfecho(&atual, terminou, args.espera.timeout);
+            let espera = Espera {
+                e2e: &args.e2e,
+                id: &id,
+                timeout: args.espera.timeout,
+                intervalo,
+            };
+            return espera.ate_o_fim(context, &client, existente).await;
         }
         mostrar(context, &args.e2e, &id, existente)?;
         return desfecho(existente, true, args.espera.timeout);
@@ -114,10 +117,15 @@ async fn solicitar(
         .map_err(|err| incerta(err, &args.e2e, &id))?;
     let terminou = feita.status.as_ref().is_some_and(StatusDevolucao::is_final);
     if args.espera.aguardar && !terminou {
-        let (atual, terminou) =
-            aguardar(&client, &args.e2e, &id, args.espera.timeout, intervalo).await?;
-        mostrar(context, &args.e2e, &id, &atual)?;
-        return desfecho(&atual, terminou, args.espera.timeout);
+        // The id, before the wait: an interrupted wait does not lose it.
+        eprintln!("devolução {id} solicitada; aguardando o fim");
+        let espera = Espera {
+            e2e: &args.e2e,
+            id: &id,
+            timeout: args.espera.timeout,
+            intervalo,
+        };
+        return espera.ate_o_fim(context, &client, &feita).await;
     }
     match context.formato() {
         Formato::Json => output::print_json(&feita)?,
@@ -253,6 +261,7 @@ fn incerta(err: InterError, e2e: &str, id: &IdDevolucao) -> CliError {
             source: err,
             e2e: e2e.to_owned(),
             id: id.to_string(),
+            aceita: false,
         }
     } else {
         err.into()
@@ -277,6 +286,45 @@ async fn consultar(
         aguardar(&client, &args.e2e, &args.id, args.espera.timeout, intervalo).await?;
     mostrar(context, &args.e2e, &args.id, &devolucao)?;
     desfecho(&devolucao, terminou, args.espera.timeout)
+}
+
+/// The wait for the end of a refund the API has accepted.
+struct Espera<'a> {
+    e2e: &'a str,
+    id: &'a IdDevolucao,
+    timeout: Duration,
+    intervalo: Duration,
+}
+
+impl Espera<'_> {
+    /// Waits for the end of the refund and shows it. A query that fails
+    /// does not lose it: the refund as accepted is shown, and the error,
+    /// which may come after the money left, says how to follow it.
+    async fn ate_o_fim(
+        &self,
+        context: &Context,
+        client: &InterClient,
+        aceita: &Devolucao,
+    ) -> Result<(), CliError> {
+        match aguardar(client, self.e2e, self.id, self.timeout, self.intervalo).await {
+            Ok((atual, terminou)) => {
+                mostrar(context, self.e2e, self.id, &atual)?;
+                desfecho(&atual, terminou, self.timeout)
+            }
+            Err(err) => {
+                mostrar(context, self.e2e, self.id, aceita)?;
+                Err(match err {
+                    CliError::Inter(source) => CliError::DevolucaoIncerta {
+                        source,
+                        e2e: self.e2e.to_owned(),
+                        id: self.id.to_string(),
+                        aceita: true,
+                    },
+                    outro => outro,
+                })
+            }
+        }
+    }
 }
 
 /// Queries every `intervalo` until the refund ends or `timeout` passes; the
