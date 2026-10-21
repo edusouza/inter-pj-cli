@@ -491,10 +491,10 @@ fn revisao_das_opcoes(
         .is_some_and(|valor| valor.desconto.is_some());
     if let Some(novo) = args.vencimento
         && !desconto_novo
-        && let Some(data) = atual.datas_do_desconto.iter().find(|data| **data > novo)
+        && let Some(data) = atual.datas_do_desconto.iter().find(|data| **data >= novo)
     {
         return Err(CliError::Usage(format!(
-            "--vencimento: o desconto atual vale até {}, depois do novo vencimento; informe também o novo --desconto",
+            "--vencimento: o desconto atual vale até {}, que não é antes do novo vencimento; informe também o novo --desconto",
             data.format("%d/%m/%Y")
         )));
     }
@@ -1130,6 +1130,7 @@ Copia e cola  00020101021226"
             serde_json::to_value(&revisao).unwrap(),
             json!({"calendario": {"dataDeVencimento": "2026-10-20", "validadeAposVencimento": 5}})
         );
+        // Without a date, the discount ends the day before the new due date.
         let revisao = revisao_das_opcoes(
             &revisar_args(&["--vencimento", "2026-10-25", "--desconto", "3%"]),
             &atual,
@@ -1140,7 +1141,7 @@ Copia e cola  00020101021226"
             serde_json::to_value(&revisao).unwrap(),
             json!({
                 "calendario": {"dataDeVencimento": "2026-10-25", "validadeAposVencimento": 10},
-                "valor": {"desconto": {"modalidade": 2, "descontoDataFixa": [{"data": "2026-10-25", "valorPerc": "3.00"}]}}
+                "valor": {"desconto": {"modalidade": 2, "descontoDataFixa": [{"data": "2026-10-24", "valorPerc": "3.00"}]}}
             })
         );
         // Before the lookup, only what does not depend on the charge.

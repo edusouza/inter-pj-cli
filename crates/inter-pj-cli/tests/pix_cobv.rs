@@ -263,6 +263,19 @@ async fn simulacao_mostra_o_txid_na_url() {
         format!("{}/pix/v2/cobv/{TXID}", env.server.uri())
     );
     assert_eq!(json["corpo"], corpo());
+
+    // Without a date, the discount ends the day before the due date.
+    let assert = env
+        .cmd()
+        .args(criar_com("--desconto", "10,00"))
+        .args(["--txid", TXID, "--simular", "--json"])
+        .assert()
+        .success();
+    let json: Value = serde_json::from_str(&stdout_of(&assert)).unwrap();
+    assert_eq!(
+        json["corpo"]["valor"]["desconto"]["descontoDataFixa"],
+        json!([{"data": "2099-10-19", "valorPerc": "10.00"}])
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -276,7 +289,12 @@ async fn cobranca_invalida_nao_chama_a_api() {
         ),
         (
             criar_com("--desconto", "10,00@2099-10-25"),
-            "--desconto: o desconto vale até uma data no vencimento ou antes dele",
+            "--desconto: o desconto vale até uma data antes do vencimento",
+        ),
+        // The API refuses a discount on the due date itself.
+        (
+            criar_com("--desconto", "10,00@2099-10-20"),
+            "--desconto: o desconto vale até uma data antes do vencimento",
         ),
         (
             [criar(), vec!["--desconto", "2%"]].concat(),
@@ -447,7 +465,7 @@ async fn revisa_e_remove_a_cobranca() {
     Mock::given(method("PATCH"))
         .and(path(cobv_path.clone()))
         .and(body_json(json!({
-            "valor": {"desconto": {"modalidade": 2, "descontoDataFixa": [{"data": "2099-10-20", "valorPerc": "5.00"}]}}
+            "valor": {"desconto": {"modalidade": 2, "descontoDataFixa": [{"data": "2099-10-19", "valorPerc": "5.00"}]}}
         })))
         .respond_with(ResponseTemplate::new(200).set_body_json(revisada))
         .expect(1)
@@ -500,7 +518,7 @@ async fn revisa_e_remove_a_cobranca() {
         .assert()
         .success();
     assert!(
-        stderr_of(&assert).contains("R$ 10,00 até 15/10/2099 → 5% até 20/10/2099"),
+        stderr_of(&assert).contains("R$ 10,00 até 15/10/2099 → 5% até 19/10/2099"),
         "{}",
         stderr_of(&assert)
     );
@@ -527,7 +545,7 @@ async fn revisao_confere_a_cobranca_atual() {
     Mock::given(method("GET"))
         .and(path(format!("/pix/v2/cobv/{TXID}")))
         .respond_with(ResponseTemplate::new(200).set_body_json(cobv("ATIVA")))
-        .expect(2)
+        .expect(3)
         .mount(&env.server)
         .await;
     Mock::given(method("GET"))
@@ -544,7 +562,12 @@ async fn revisao_confere_a_cobranca_atual() {
     let casos = [
         (
             &["--vencimento", "2099-10-10"][..],
-            "--vencimento: o desconto atual vale até 15/10/2099, depois do novo vencimento",
+            "--vencimento: o desconto atual vale até 15/10/2099, que não é antes do novo vencimento",
+        ),
+        // A due date on the last day of the discount: the API refuses it.
+        (
+            &["--vencimento", "2099-10-15"][..],
+            "--vencimento: o desconto atual vale até 15/10/2099, que não é antes do novo vencimento",
         ),
         (
             &["--abatimento", "200,00"][..],
