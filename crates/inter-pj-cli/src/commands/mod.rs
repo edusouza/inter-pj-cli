@@ -2,6 +2,7 @@
 
 mod auth;
 mod config;
+mod conta;
 mod extrato;
 mod pagamento;
 mod pix;
@@ -59,6 +60,7 @@ pub(crate) async fn run(cli: Cli, matches: &ArgMatches) -> Result<(), CliError> 
     let context = Context::new(cli.global, matches, &SystemEnv)?;
     match cli.command {
         Command::Saldo(args) => saldo::run(&context, &args).await,
+        Command::Conta => conta::run(&context),
         Command::Extrato(args) => extrato::run(&context, args).await,
         Command::Pix(command) => pix::run(&context, command).await,
         Command::Pagamento(command) => pagamento::run(&context, command).await,

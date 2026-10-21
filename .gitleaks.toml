@@ -23,9 +23,9 @@ keywords = ["client_id", "client-id", "clientid"]
 [[rules]]
 id = "inter-conta-corrente"
 description = "Número de conta corrente em configuração, variável ou cabeçalho"
-regex = '''(?i)(?:conta[_-]?corrente|contacorrente)["']?\s*[:=,]\s*["']?(\d{5,})'''
+regex = '''(?i)(?:conta[_-]?corrente|contacorrente|numero[_-]?conta)["']?\s*[:=,]\s*["']?(\d{5,})'''
 secretGroup = 1
-keywords = ["conta_corrente", "conta-corrente", "contacorrente"]
+keywords = ["conta_corrente", "conta-corrente", "contacorrente", "numero_conta", "numero-conta", "numeroconta"]
 
   [[rules.allowlists]]
   description = "Valores fictícios usados nos testes e nos exemplos da documentação oficial"

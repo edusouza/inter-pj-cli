@@ -35,6 +35,8 @@ chave_privada = '~/inter/chave.key'
 | `certificado` | perfil | o certificado (`.crt`) baixado com a integração |
 | `chave_privada` | perfil | a chave privada (`.key`); não pode ter senha |
 | `conta_corrente` | perfil | só dígitos; só é preciso se a integração tiver mais de uma conta |
+| `numero_conta` | perfil | o número da conta, só dígitos e sem o dígito verificador; mostrado por `inter-pj conta` |
+| `digito_conta` | perfil | o dígito verificador da conta, um só dígito; vai junto com `numero_conta` |
 | `escopos` | perfil | escopos pedidos em todo token, além dos de cada comando; todos precisam estar habilitados na integração |
 
 !!! warning "Uma chave desconhecida invalida o arquivo"
@@ -65,7 +67,8 @@ As opções valem para todos os comandos e podem vir antes ou depois deles.
 | Diretório de cache | — | `INTER_CACHE_DIR` |
 
 O `client_secret` **não tem opção de linha de comando**, de propósito: ela ficaria no
-histórico do shell e na lista de processos.
+histórico do shell e na lista de processos. Já `numero_conta`, `digito_conta`, `escopos` e
+`limite_por_operacao` só existem no arquivo.
 
 Outras opções que não têm variável: `--formato`, `--json` e `--separador` (veja os
 [formatos de saída](../guias/formatos-de-saida.md)), `--sem-retentativa`, `--sem-cache` e

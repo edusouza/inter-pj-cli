@@ -84,6 +84,8 @@ client_id = "<seu client_id>"
 certificado = '~/inter/certificado.crt'
 chave_privada = '~/inter/chave.key'
 # conta_corrente = "<numero>"     # só se a integração tiver mais de uma conta
+# numero_conta = "<numero>"       # opcional: número da conta, sem o dígito (`inter-pj conta`)
+# digito_conta = "<digito>"       # opcional: dígito verificador da conta
 # escopos = ["extrato.read"]      # opcional: escopos pedidos em todo token
 # limite_por_operacao = "1.000,00" # opcional: valor máximo de cada Pix ou pagamento
 ```
@@ -170,6 +172,7 @@ Locais padrão: configuração em `~/.config/inter-pj/config.toml` (Windows: `%A
 $ inter-pj saldo                        # saldo atual, bloqueios e limite
 $ inter-pj saldo --data 2026-08-31      # saldo disponível ao fim do dia
 $ inter-pj saldo --json                 # JSON com os nomes de campo da API
+$ inter-pj conta                        # banco, agência e conta (número e dígito do perfil)
 
 $ inter-pj auth token --escopo extrato.read      # valida credenciais e mostra a validade
 $ inter-pj auth limpar                           # apaga os tokens em cache do perfil

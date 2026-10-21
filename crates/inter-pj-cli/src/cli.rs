@@ -276,6 +276,8 @@ pub(crate) enum Formato {
 pub(crate) enum Command {
     /// Consulta o saldo da conta
     Saldo(SaldoArgs),
+    /// Mostra banco, agência e conta (número e dígito do perfil)
+    Conta,
     /// Extrato da conta: movimentações de um período (até 90 dias por consulta)
     #[command(
         args_conflicts_with_subcommands = true,
@@ -323,7 +325,9 @@ impl Command {
                 | PagamentoCommand::Darf(DarfCommand::Listar(_)),
             ) => true,
             Self::Extrato(args) => !matches!(args.comando, Some(ExtratoCommand::Pdf(_))),
-            Self::Pix(_) | Self::Pagamento(_) | Self::Auth(_) | Self::Config(_) => false,
+            Self::Conta | Self::Pix(_) | Self::Pagamento(_) | Self::Auth(_) | Self::Config(_) => {
+                false
+            }
         }
     }
 }

@@ -25,6 +25,8 @@ client_id = "<seu client_id>"
 certificado = '~/inter/certificado.crt'
 chave_privada = '~/inter/chave.key'
 # conta_corrente = "<numero>"     # só se a integração tiver mais de uma conta
+# numero_conta = "<numero>"       # opcional: número da conta, sem o dígito (`inter-pj conta`)
+# digito_conta = "<digito>"       # opcional: dígito verificador da conta
 # escopos = ["extrato.read"]      # opcional: escopos pedidos em todo token
 ```
 
