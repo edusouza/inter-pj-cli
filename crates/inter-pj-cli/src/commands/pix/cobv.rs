@@ -1071,6 +1071,16 @@ aviso: o prazo do desconto até 15/10/2026 já passou"
     }
 
     #[test]
+    fn the_due_date_is_checked_against_today_in_brasilia() {
+        let hoje = |agora: &str| crate::commands::hoje_em(agora.parse().unwrap());
+        let vencimento = NaiveDate::from_ymd_opt(2026, 10, 20).unwrap();
+        // 22:30 of 20/10 in Brasília, 01:30 of 21/10 in UTC.
+        assert!(vencimento_valido(vencimento, hoje("2026-10-21T01:30:00Z")).is_ok());
+        // 00:30 of 21/10 in Brasília: the 20th has passed.
+        assert!(vencimento_valido(vencimento, hoje("2026-10-21T03:30:00Z")).is_err());
+    }
+
+    #[test]
     fn validity_in_words() {
         let vencimento = dia("2026-10-20");
         assert_eq!(

@@ -9,13 +9,13 @@ mod enviar;
 
 use std::fmt::Write as _;
 
-use chrono::{DateTime, Days, FixedOffset, Local, NaiveDate, NaiveTime, TimeZone};
+use chrono::{DateTime, Days, FixedOffset, NaiveDate, NaiveTime, TimeZone, Utc};
 use inter_pj::Error as InterError;
 use inter_pj::documento::Documento;
 use inter_pj::pix::{ParametrosConsulta, PeriodoPix, PessoaPix, PixRecebido, StatusCob, Txid};
 use rust_decimal::Decimal;
 
-use super::Context;
+use super::{BRASILIA, Context};
 use crate::cli::{Momento, PeriodoPixArgs, PixCobListarArgs, PixCommand, StatusCobArg};
 use crate::confirmacao::Stdio;
 use crate::error::CliError;
@@ -35,10 +35,11 @@ pub(super) async fn run(context: &Context, command: PixCommand) -> Result<(), Cl
     }
 }
 
-/// The period of the arguments, in the local time zone: by default, from
-/// the start of the day 30 days ago (today included) to now.
+/// The period of the arguments, with the days of Brasília, the bank's
+/// calendar, whatever the time zone of the machine: by default, from the
+/// start of the day 30 days ago (today included) to now.
 fn periodo(args: PeriodoPixArgs) -> Result<PeriodoPix, CliError> {
-    periodo_em(args, Local::now().fixed_offset(), &Local)
+    periodo_em(args, Utc::now().with_timezone(&BRASILIA), &BRASILIA)
 }
 
 fn periodo_em<Tz: TimeZone>(
@@ -291,7 +292,22 @@ mod tests {
     }
 
     #[test]
-    fn periods_are_whole_days_in_the_local_time_zone() {
+    fn periods_are_whole_days_of_brasilia() {
+        // At 22:30 in Brasília, already the next day in UTC, the default
+        // period ends on the day of Brasília.
+        let noite = momento("2026-10-21T01:30:00Z").with_timezone(&BRASILIA);
+        let padrao = periodo_em(
+            PeriodoPixArgs {
+                inicio: None,
+                fim: None,
+            },
+            noite,
+            &BRASILIA,
+        )
+        .unwrap();
+        assert_eq!(padrao.inicio, momento("2026-09-21T00:00:00-03:00"));
+        assert_eq!(padrao.fim, momento("2026-10-20T22:30:00-03:00"));
+
         let brasilia = FixedOffset::west_opt(3 * 3600).unwrap();
         let agora = momento("2026-09-23T15:00:00-03:00");
         let padrao = periodo_em(
