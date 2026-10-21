@@ -378,6 +378,77 @@ async fn cobranca_invalida_nao_chama_a_api() {
     env.cmd().args(criar()).write_stdin("s\n").assert().code(2);
 }
 
+/// The commands suggested after a creation run on its account: with the
+/// profile, the file, the environment or the account of the command line,
+/// a check on the default profile would find nothing and invite a second
+/// charge.
+#[tokio::test(flavor = "multi_thread")]
+async fn os_comandos_sugeridos_sao_da_mesma_conta() {
+    let env = TestEnv::new().await;
+    env.write_config(&format!(
+        "\n[perfis.filial]\nambiente = \"sandbox\"\nclient_id = \"id-da-filial\"\ncertificado = '{}'\nchave_privada = '{}'",
+        env.path("certificado.crt").display(),
+        env.path("chave.key").display()
+    ));
+    env.mount_token("cobv.write", None).await;
+    Mock::given(method("PUT"))
+        .and(path(format!("/pix/v2/cobv/{TXID}")))
+        .respond_with(ResponseTemplate::new(503))
+        .up_to_n_times(3)
+        .expect(3)
+        .mount(&env.server)
+        .await;
+    let config = env.config_path().display().to_string();
+    let casos = [
+        (vec!["-p", "filial"], "inter-pj -p filial".to_owned()),
+        (
+            vec!["--config", config.as_str(), "--ambiente", "sandbox"],
+            format!("inter-pj --config {config} --ambiente sandbox"),
+        ),
+        (
+            vec!["--conta-corrente", "12345678"],
+            "inter-pj --conta-corrente 12345678".to_owned(),
+        ),
+    ];
+    for (opcoes, chamada) in &casos {
+        let assert = env
+            .cmd()
+            .args(opcoes)
+            .args(criar())
+            .args(["--txid", TXID, "--sim", "--sem-retentativa"])
+            .assert()
+            .code(9);
+        let stderr = stderr_of(&assert);
+        assert!(
+            stderr.contains(&format!(
+                "dica: confira com: {chamada} pix cobv consultar {TXID}"
+            )),
+            "{opcoes:?}: {stderr}"
+        );
+    }
+
+    Mock::given(method("PUT"))
+        .and(path(format!("/pix/v2/cobv/{TXID}")))
+        .respond_with(ResponseTemplate::new(201).set_body_json(cobv("ATIVA")))
+        .expect(1)
+        .mount(&env.server)
+        .await;
+    let assert = env
+        .cmd()
+        .args(["-p", "filial"])
+        .args(criar())
+        .args(["--txid", TXID, "--sim"])
+        .assert()
+        .success();
+    let stdout = stdout_of(&assert);
+    assert!(
+        stdout.contains(&format!(
+            "Acompanhe com: inter-pj -p filial pix cobv consultar {TXID}"
+        )),
+        "{stdout}"
+    );
+}
+
 /// With an unknown outcome, the error says how to check and how to repeat
 /// without creating two charges, and exits with 9, like `pix cob criar`.
 #[tokio::test(flavor = "multi_thread")]
