@@ -13,6 +13,7 @@ use inter_pj::{Environment, Error as InterError, InterClient, endpoint};
 use super::consultar::{OpcoesQr, mostrar, mostrar_emitida};
 use super::{descrever_situacao, percentual};
 use crate::arquivo;
+use crate::chamada::{argumento, chamada};
 use crate::cli::{CobrancaEmitirArgs, FormaArg, Formato, TaxaOuValor};
 use crate::commands::{Context, hoje, simulacao};
 use crate::confirmacao::{Terminal, confirmar, descrever_ambiente};
@@ -124,22 +125,13 @@ async fn emitir_com(
     Err(erro)
 }
 
-/// The command that finds the charge by its seu número.
+/// The command that finds the charge by its seu número, on this account.
 fn procurar(cobranca: &EmissaoCobranca) -> String {
     format!(
-        "inter-pj cobranca listar --filtrar-por emissao --seu-numero {}",
+        "{} cobranca listar --filtrar-por emissao --seu-numero {}",
+        chamada(),
         argumento(&cobranca.seu_numero)
     )
-}
-
-/// `texto` as one argument of a shell command: quoted when it has to be.
-fn argumento(texto: &str) -> String {
-    let simples = |c: char| c.is_ascii_alphanumeric() || "-_./:,+=@%".contains(c);
-    if !texto.is_empty() && texto.chars().all(simples) {
-        texto.to_owned()
-    } else {
-        format!("'{}'", texto.replace('\'', r"'\''"))
-    }
 }
 
 /// The charge of the options. clap requires the mandatory ones together
@@ -415,7 +407,8 @@ fn formas(formas: &[FormaRecebimento]) -> String {
 fn render_solicitacao(codigo: Option<&str>, cobranca: &EmissaoCobranca) -> String {
     match codigo {
         Some(codigo) => format!(
-            "Cobrança solicitada: a emissão termina em instantes.\nCódigo  {codigo}\n\nAcompanhe com: inter-pj cobranca consultar {}",
+            "Cobrança solicitada: a emissão termina em instantes.\nCódigo  {codigo}\n\nAcompanhe com: {} cobranca consultar {}",
+            chamada(),
             argumento(codigo)
         ),
         // The API documents the code as always present.
@@ -868,10 +861,6 @@ Cobrança a emitir
 
     #[test]
     fn hints_can_be_pasted_in_a_shell() {
-        assert_eq!(argumento("NF-123"), "NF-123");
-        assert_eq!(argumento("NF 123"), "'NF 123'");
-        assert_eq!(argumento("D'Ávila"), r"'D'\''Ávila'");
-        assert_eq!(argumento("$(x)"), "'$(x)'");
         let mut cobranca = das_opcoes(&args(&OPCOES)).unwrap();
         cobranca.seu_numero = "NF 123".to_owned();
         assert_eq!(

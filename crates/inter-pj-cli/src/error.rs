@@ -203,6 +203,7 @@ impl CliError {
                 return vec![
                     "a cobrança pode ter sido emitida; por 30 minutos, a API recusa outra com o mesmo seu número, valor, vencimento e pagador".to_owned(),
                     format!("confira antes de tentar de novo: {consulta}"),
+                    "a consulta precisa da permissão de leitura das cobranças (boleto-cobranca.read), e uma lista vazia logo depois do erro não prova que nada foi emitido: a emissão termina depois da resposta; espere alguns minutos e confira o valor, o vencimento e o pagador das cobranças encontradas".to_owned(),
                 ];
             }
             _ => return Vec::new(),

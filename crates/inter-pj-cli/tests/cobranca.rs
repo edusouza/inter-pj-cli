@@ -855,6 +855,91 @@ async fn emissao_invalida_ou_sem_confirmacao_nao_chama_a_api() {
     }
 }
 
+/// The commands the issue suggests run on the same account: the global
+/// options given on the command line go into them, the ones in the
+/// environment stay there.
+#[tokio::test(flavor = "multi_thread")]
+async fn as_dicas_da_emissao_sao_da_mesma_conta() {
+    let env = TestEnv::new().await;
+    env.write_config(&format!(
+        "\n[perfis.filial]\nambiente = \"sandbox\"\nclient_id = \"id-da-filial\"\ncertificado = '{}'\nchave_privada = '{}'",
+        env.path("certificado.crt").display(),
+        env.path("chave.key").display()
+    ));
+    env.mount_token("boleto-cobranca.write", None).await;
+    Mock::given(method("POST"))
+        .and(path("/cobranca/v3/cobrancas"))
+        .respond_with(ResponseTemplate::new(503))
+        .up_to_n_times(4)
+        .expect(4)
+        .mount(&env.server)
+        .await;
+    let config = env.config_path().display().to_string();
+    let casos = [
+        (vec!["-p", "filial"], None, "inter-pj -p filial".to_owned()),
+        (vec![], Some("filial"), "inter-pj".to_owned()),
+        (
+            vec!["--config", config.as_str(), "--perfil", "filial"],
+            None,
+            format!("inter-pj --config {config} -p filial"),
+        ),
+        (
+            vec!["--ambiente", "sandbox"],
+            None,
+            "inter-pj --ambiente sandbox".to_owned(),
+        ),
+    ];
+    let vencimento = daqui_a(30);
+    for (globais, no_ambiente, chamada) in &casos {
+        let mut cmd = env.cmd();
+        if let Some(perfil) = no_ambiente {
+            cmd.env("INTER_PERFIL", perfil);
+        }
+        let assert = cmd
+            .args(globais)
+            .args(opcoes(&vencimento))
+            .arg("--sim")
+            .assert()
+            .code(9);
+        let stderr = stderr_of(&assert);
+        assert!(
+            stderr.contains(&format!(
+                "dica: confira antes de tentar de novo: {chamada} cobranca listar --filtrar-por emissao --seu-numero NF-123"
+            )),
+            "{globais:?}: {stderr}"
+        );
+        assert!(
+            stderr.contains("(boleto-cobranca.read), e uma lista vazia logo depois do erro não prova que nada foi emitido"),
+            "{stderr}"
+        );
+    }
+
+    // After the 503s, the charge is requested: how to follow it keeps the
+    // account too.
+    Mock::given(method("POST"))
+        .and(path("/cobranca/v3/cobrancas"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"codigoSolicitacao": CODIGO})),
+        )
+        .expect(1)
+        .mount(&env.server)
+        .await;
+    let assert = env
+        .cmd()
+        .args(["-p", "filial"])
+        .args(opcoes(&vencimento))
+        .arg("--sim")
+        .assert()
+        .success();
+    let stdout = stdout_of(&assert);
+    assert!(
+        stdout.contains(&format!(
+            "Acompanhe com: inter-pj -p filial cobranca consultar {CODIGO}"
+        )),
+        "{stdout}"
+    );
+}
+
 /// The API refuses a repeated charge for 30 minutes, but a charge that may
 /// have been issued is not repeated: the error says how to find it first.
 #[tokio::test(flavor = "multi_thread")]
