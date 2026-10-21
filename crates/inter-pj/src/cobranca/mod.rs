@@ -134,7 +134,11 @@ impl<'a> Cobranca<'a> {
     ///
     /// # Errors
     ///
-    /// Same as [`listar`](Self::listar).
+    /// Same as [`listar`](Self::listar); and a listing that ends before
+    /// every charge its pages announce (`totalElementos`), or that goes on
+    /// past 10 000 pages, is an [`Error::Decode`], never a partial list.
+    /// Without that total, the listing ends at the page the API marks as
+    /// the last or at an empty page.
     pub async fn listar_todas(&self, filtro: &FiltroCobrancas) -> Result<Vec<CobrancaDetalhada>> {
         let itens = Some(ITENS_POR_PAGINA_MAXIMO);
         let mut cobrancas = Vec::new();
@@ -142,13 +146,10 @@ impl<'a> Cobranca<'a> {
         loop {
             let mut pagina = self.listar(filtro, numero, itens).await?;
             let recebidas = pagina.cobrancas.len();
-            let tem_mais = pagina.tem_mais(numero);
+            let mais = ler_mais(&pagina, numero, cobrancas.len() + recebidas, MAX_PAGINAS);
             cobrancas.append(&mut pagina.cobrancas);
             tracing::info!("cobranças: página {} com {recebidas}", numero + 1);
-            let completo = pagina
-                .total_elementos
-                .is_some_and(|total| cobrancas.len() as u64 >= total);
-            if completo || recebidas == 0 || !tem_mais || numero + 1 >= MAX_PAGINAS {
+            if !mais? {
                 return Ok(cobrancas);
             }
             numero += 1;
@@ -296,9 +297,85 @@ fn codigo(codigo: &str) -> Result<String> {
     }
 }
 
+/// Whether [`Cobranca::listar_todas`] reads the page after `pagina` (page
+/// `numero`, 0-based), with `lidas` charges read up to it. The listing is
+/// complete once every charge its pages announce arrived: ending short of
+/// that total, or going on past `max_paginas`, is an error.
+fn ler_mais(pagina: &PaginaCobrancas, numero: u32, lidas: usize, max_paginas: u32) -> Result<bool> {
+    let lidas = lidas as u64;
+    let total = pagina.total_elementos;
+    if total.is_some_and(|total| lidas >= total) {
+        return Ok(false);
+    }
+    if pagina.cobrancas.is_empty() || !pagina.tem_mais(numero) {
+        return match total {
+            Some(total) => Err(listagem_error(format!(
+                "a listagem terminou com {lidas} de {total} cobranças; execute o comando novamente"
+            ))),
+            None => Ok(false),
+        };
+    }
+    if numero + 1 >= max_paginas {
+        return Err(listagem_error(format!(
+            "a API indicou mais cobranças depois de {max_paginas} páginas ({lidas} cobranças); \
+             execute o comando novamente"
+        )));
+    }
+    Ok(true)
+}
+
+fn listagem_error(message: String) -> Error {
+    Error::Decode {
+        operation: endpoint::cobranca::LISTAR.to_string(),
+        message,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn pagina(valor: serde_json::Value) -> PaginaCobrancas {
+        serde_json::from_value(valor).unwrap()
+    }
+
+    #[test]
+    fn a_listing_ends_only_with_every_charge_it_announces() {
+        let item = json!({"cobranca": {"seuNumero": "NF-1"}});
+        // The total arrived: complete, whatever the page says.
+        let completa =
+            pagina(json!({"totalElementos": 2, "ultimaPagina": false, "cobrancas": [item]}));
+        assert!(!ler_mais(&completa, 1, 2, MAX_PAGINAS).unwrap());
+        // Without a total, the last page or an empty one ends the listing.
+        let ultima = pagina(json!({"ultimaPagina": true, "cobrancas": [item]}));
+        assert!(!ler_mais(&ultima, 0, 1, MAX_PAGINAS).unwrap());
+        let vazia = pagina(json!({"cobrancas": []}));
+        assert!(!ler_mais(&vazia, 3, 3000, MAX_PAGINAS).unwrap());
+        let seguinte = pagina(json!({"ultimaPagina": false, "cobrancas": [item]}));
+        assert!(ler_mais(&seguinte, 0, 1, MAX_PAGINAS).unwrap());
+
+        // Ending short of the total is an error, also on an empty page.
+        let curta =
+            pagina(json!({"totalElementos": 2500, "ultimaPagina": true, "cobrancas": [item]}));
+        let erro = ler_mais(&curta, 0, 1000, MAX_PAGINAS).unwrap_err();
+        assert!(matches!(erro, Error::Decode { .. }), "{erro:?}");
+        assert!(
+            erro.to_string().contains("1000 de 2500 cobranças"),
+            "{erro}"
+        );
+        let vazia = pagina(json!({"totalElementos": 2500, "ultimaPagina": false, "cobrancas": []}));
+        assert!(ler_mais(&vazia, 1, 1000, MAX_PAGINAS).is_err());
+
+        // So is going on past the ceiling, with or without a total.
+        for total in [json!(null), json!(5000)] {
+            let sem_fim = pagina(
+                json!({"totalElementos": total, "ultimaPagina": false, "cobrancas": [item]}),
+            );
+            assert!(ler_mais(&sem_fim, 1, 2, 3).unwrap());
+            let erro = ler_mais(&sem_fim, 2, 3, 3).unwrap_err();
+            assert!(erro.to_string().contains("depois de 3 páginas"), "{erro}");
+        }
+    }
 
     #[test]
     fn codes_are_uuids_even_malformed_ones() {
