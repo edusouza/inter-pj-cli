@@ -47,7 +47,8 @@ impl OpcoesQr {
         png: Option<PathBuf>,
         sobrescrever: bool,
     ) -> Result<Self, CliError> {
-        let png = png.map(|caminho| Saida::new(caminho, sobrescrever));
+        let png =
+            png.map(|caminho| Saida::new(caminho, sobrescrever, "qrcode.png", "--qrcode-png"));
         if qrcode && (context.formato() == Formato::Json || png.as_ref().is_some_and(Saida::stdout))
         {
             return Err(CliError::Usage(
@@ -65,18 +66,70 @@ impl OpcoesQr {
     pub(super) fn png_no_stdout(&self) -> bool {
         self.png.as_ref().is_some_and(Saida::stdout)
     }
+
+    /// Whether a QR Code was asked for.
+    fn pedido(&self) -> bool {
+        self.qrcode || self.png.is_some()
+    }
 }
 
-/// The charge, then its QR Code in the terminal and in a PNG, as asked.
+/// The charge, then its QR Code in the terminal and in a PNG, as asked. A
+/// QR Code that cannot be made fails the command before anything is shown,
+/// whichever option asked for it: a script must not read the charge and
+/// miss the image.
 pub(super) fn mostrar(
     context: &Context,
     settings: &Settings,
     cobranca: &CobrancaDetalhada,
     opcoes: &OpcoesQr,
 ) -> Result<(), CliError> {
+    let qr = if opcoes.pedido() {
+        Some(qr_code(cobranca)?)
+    } else {
+        None
+    };
+    exibir(context, settings, cobranca, opcoes, qr.as_ref())
+}
+
+/// [`mostrar`] for a charge just issued: a QR Code that cannot be made is
+/// a warning, and the charge is shown without it, because an error would
+/// read as "not issued" and a script would issue the charge again. With the
+/// image on the standard output, the charge goes to `stderr`.
+pub(super) fn mostrar_emitida(
+    context: &Context,
+    settings: &Settings,
+    cobranca: &CobrancaDetalhada,
+    opcoes: &OpcoesQr,
+) -> Result<(), CliError> {
+    let qr = if opcoes.pedido() {
+        match qr_code(cobranca) {
+            Ok(qr) => Some(qr),
+            Err(err) => {
+                eprintln!("aviso: a cobrança foi emitida, mas sem o QR Code: {err}");
+                if opcoes.png_no_stdout() {
+                    eprintln!("{}", output::sem_controle(&render_cobranca(cobranca)));
+                    return Ok(());
+                }
+                return exibir(context, settings, cobranca, &OpcoesQr::default(), None);
+            }
+        }
+    } else {
+        None
+    };
+    exibir(context, settings, cobranca, opcoes, qr.as_ref())
+}
+
+/// The charge and the QR Code `qr`, made for what `opcoes` asks.
+fn exibir(
+    context: &Context,
+    settings: &Settings,
+    cobranca: &CobrancaDetalhada,
+    opcoes: &OpcoesQr,
+    qr: Option<&QrPix>,
+) -> Result<(), CliError> {
     // The image alone goes to the standard output.
-    if let Some(png) = opcoes.png.as_ref().filter(|png| png.stdout()) {
-        return png.gravar(&qr_code(cobranca)?.png());
+    if let (Some(png), Some(qr)) = (opcoes.png.as_ref().filter(|png| png.stdout()), qr) {
+        return png.gravar(&qr.png());
     }
     match context.formato() {
         Formato::Json => output::print_json(cobranca)?,
@@ -86,14 +139,11 @@ pub(super) fn mostrar(
             output::print(&render_cobranca(cobranca))?;
         }
     }
-    if opcoes.qrcode {
-        match qr_code(cobranca) {
-            Ok(qr) => output::print_raw(&format!("\n{}", qr.terminal(qr::cores())))?,
-            Err(err) => eprintln!("aviso: {err}"),
-        }
+    if let Some(qr) = qr.filter(|_| opcoes.qrcode) {
+        output::print_raw(&format!("\n{}", qr.terminal(qr::cores())))?;
     }
-    if let Some(png) = &opcoes.png {
-        let imagem = qr_code(cobranca)?.png();
+    if let (Some(png), Some(qr)) = (&opcoes.png, qr) {
+        let imagem = qr.png();
         png.gravar(&imagem)?;
         eprintln!(
             "QR Code salvo em {} ({})",
@@ -117,11 +167,11 @@ fn qr_code(cobranca: &CobrancaDetalhada) -> Result<QrPix, CliError> {
         } else {
             "a conta não tinha chave Pix quando a cobrança foi emitida, ou ela só aceita boleto"
         };
-        return Err(CliError::Usage(format!(
+        return Err(CliError::SemQrCode(format!(
             "a cobrança não tem Pix copia e cola: {motivo}"
         )));
     };
-    QrPix::new(copia_e_cola).map_err(CliError::Usage)
+    QrPix::new(copia_e_cola).map_err(CliError::SemQrCode)
 }
 
 pub(super) async fn pdf(context: &Context, args: &CobrancaPdfArgs) -> Result<(), CliError> {
@@ -135,7 +185,7 @@ pub(super) async fn pdf(context: &Context, args: &CobrancaPdfArgs) -> Result<(),
         .saida
         .clone()
         .unwrap_or_else(|| PathBuf::from(format!("cobranca-{nome}.pdf")));
-    let saida = Saida::new(caminho, args.sobrescrever);
+    let saida = Saida::new(caminho, args.sobrescrever, "cobranca.pdf", "--saida");
     saida.conferir()?;
 
     let settings = context.settings()?;

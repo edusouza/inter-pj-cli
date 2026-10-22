@@ -11,6 +11,7 @@ use inter_pj::cobranca::{
     Desconto, EdicaoCobranca, EmissaoCobranca, EmissaoCobrancaError, FiltrarDataPor,
     FiltroCobrancas, OrdenarCobrancasPor, Pagador, PagarCom, SituacaoCobranca, StatusEdicao, Uf,
 };
+use inter_pj::documento::Documento;
 use inter_pj::{Environment, Error};
 use serde_json::json;
 use wiremock::matchers::{
@@ -108,6 +109,19 @@ async fn invalid_requests_never_reach_the_api() {
         source.downcast_ref(),
         Some(&EmissaoCobrancaError::Cep {
             campo: "pagador.cep"
+        })
+    );
+    // A document built by hand is checked again.
+    invalida = cobranca();
+    invalida.pagador.cpf_cnpj = Documento::Cnpj("12345678000196".to_owned());
+    let err = client.cobranca().emitir(&invalida).await.unwrap_err();
+    let Error::InvalidInput(source) = &err else {
+        panic!("{err:?}");
+    };
+    assert_eq!(
+        source.downcast_ref(),
+        Some(&EmissaoCobrancaError::Documento {
+            campo: "pagador.cpfCnpj"
         })
     );
     assert!(matches!(
@@ -297,6 +311,58 @@ async fn reads_every_page() {
         .map(|c| c.cobranca.seu_numero.as_deref().unwrap())
         .collect();
     assert_eq!(numeros, ["NF-1", "NF-2"]);
+}
+
+/// A listing that stops before the total its pages announce is an error,
+/// never a partial list.
+#[tokio::test]
+async fn a_listing_short_of_its_total_is_an_error() {
+    // The first page says it is the last, but announces 3 charges.
+    let server = setup("boleto-cobranca.read").await;
+    Mock::given(method("GET"))
+        .and(path(COBRANCAS))
+        .and(query_param("paginacao.paginaAtual", "0"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "totalElementos": 3,
+            "ultimaPagina": true,
+            "cobrancas": [item("NF-1")]
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let err = client(&server)
+        .cobranca()
+        .listar_todas(&setembro())
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::Decode { .. }), "{err:?}");
+    assert!(
+        err.to_string()
+            .contains("a listagem terminou com 1 de 3 cobranças"),
+        "{err}"
+    );
+
+    // An empty page in the middle.
+    let server = setup("boleto-cobranca.read").await;
+    for (pagina, cobrancas) in [("0", json!([item("NF-1")])), ("1", json!([]))] {
+        Mock::given(method("GET"))
+            .and(path(COBRANCAS))
+            .and(query_param("paginacao.paginaAtual", pagina))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "totalElementos": 3,
+                "ultimaPagina": false,
+                "cobrancas": cobrancas
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+    }
+    let err = client(&server)
+        .cobranca()
+        .listar_todas(&setembro())
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("1 de 3 cobranças"), "{err}");
 }
 
 #[tokio::test]
