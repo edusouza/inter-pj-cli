@@ -1228,6 +1228,10 @@ pub(crate) struct CobrancaEdicaoArgs {
 
     #[command(flatten)]
     pub(crate) espera: EsperaEdicaoArgs,
+
+    /// Com --aguardar, para a alteração que `cobranca editar` acabou de pedir e que a API pode demorar a mostrar: o 404 só adia a próxima consulta (o comando sugerido por `editar` já traz esta opção). Sem ela, o 404 é um erro na hora
+    #[arg(long, requires = "aguardar")]
+    pub(crate) recem_pedida: bool,
 }
 
 #[derive(Debug, Args)]
