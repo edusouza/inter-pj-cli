@@ -6,6 +6,10 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+### Adicionado
+
+- Biblioteca: webhooks, os endereços que o Inter chama quando algo acontece na conta — `cadastrar_webhook`, `consultar_webhook` e `excluir_webhook` em `Banking` (Pix enviados e boletos pagos pela conta, um webhook por `TipoWebhookBanking`), `Cobranca` (cobranças recebidas, canceladas e expiradas) e `Pix` (cobranças Pix pagas, um webhook por chave Pix; chaves de telefone vão sem o `+`, como a documentação pede). `WebhookUrl` confere o endereço antes do envio (`https://`, sem espaços, com um servidor), e a consulta devolve `None` quando não há webhook cadastrado (#41, #42, #43).
+
 ## [0.6.0] - 2026-09-24
 
 Pix Cobrança: cobranças Pix imediatas e com vencimento, com o QR Code, os Pix recebidos e as suas devoluções, locations, lotes de cobranças e pagamentos no sandbox.

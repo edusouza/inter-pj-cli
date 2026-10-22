@@ -182,6 +182,27 @@ pub mod banking {
         path: "/banking/v2/pix/{codigoSolicitacao}",
         scopes: &[Scope::PagamentoPixRead],
     };
+
+    /// `PUT /banking/v2/webhooks/{tipoWebhook}` — registers the webhook of a kind.
+    pub const WEBHOOK_CADASTRAR: Endpoint = Endpoint {
+        method: Method::Put,
+        path: "/banking/v2/webhooks/{tipoWebhook}",
+        scopes: &[Scope::WebhookBankingWrite],
+    };
+
+    /// `GET /banking/v2/webhooks/{tipoWebhook}` — the webhook of a kind.
+    pub const WEBHOOK_CONSULTAR: Endpoint = Endpoint {
+        method: Method::Get,
+        path: "/banking/v2/webhooks/{tipoWebhook}",
+        scopes: &[Scope::WebhookBankingRead],
+    };
+
+    /// `DELETE /banking/v2/webhooks/{tipoWebhook}` — removes the webhook of a kind.
+    pub const WEBHOOK_EXCLUIR: Endpoint = Endpoint {
+        method: Method::Delete,
+        path: "/banking/v2/webhooks/{tipoWebhook}",
+        scopes: &[Scope::WebhookBankingWrite],
+    };
 }
 
 /// Operations of the Cobrança API (`/cobranca/v3`).
@@ -249,6 +270,27 @@ pub mod cobranca {
     pub const PAGAR: Endpoint = Endpoint {
         method: Method::Post,
         path: "/cobranca/v3/cobrancas/{codigoSolicitacao}/pagar",
+        scopes: &[Scope::BoletoCobrancaWrite],
+    };
+
+    /// `PUT /cobranca/v3/cobrancas/webhook` — registers or changes the webhook.
+    pub const WEBHOOK_CADASTRAR: Endpoint = Endpoint {
+        method: Method::Put,
+        path: "/cobranca/v3/cobrancas/webhook",
+        scopes: &[Scope::BoletoCobrancaWrite],
+    };
+
+    /// `GET /cobranca/v3/cobrancas/webhook` — the webhook.
+    pub const WEBHOOK_CONSULTAR: Endpoint = Endpoint {
+        method: Method::Get,
+        path: "/cobranca/v3/cobrancas/webhook",
+        scopes: &[Scope::BoletoCobrancaRead],
+    };
+
+    /// `DELETE /cobranca/v3/cobrancas/webhook` — removes the webhook.
+    pub const WEBHOOK_EXCLUIR: Endpoint = Endpoint {
+        method: Method::Delete,
+        path: "/cobranca/v3/cobrancas/webhook",
         scopes: &[Scope::BoletoCobrancaWrite],
     };
 }
@@ -439,6 +481,27 @@ pub mod pix {
         path: "/pix/v2/sandbox/cob/pagamento",
         scopes: &[Scope::PixWrite],
     };
+
+    /// `PUT /pix/v2/webhook/{chave}` — registers the webhook of a Pix key.
+    pub const WEBHOOK_CADASTRAR: Endpoint = Endpoint {
+        method: Method::Put,
+        path: "/pix/v2/webhook/{chave}",
+        scopes: &[Scope::WebhookWrite],
+    };
+
+    /// `GET /pix/v2/webhook/{chave}` — the webhook of a Pix key.
+    pub const WEBHOOK_CONSULTAR: Endpoint = Endpoint {
+        method: Method::Get,
+        path: "/pix/v2/webhook/{chave}",
+        scopes: &[Scope::WebhookRead],
+    };
+
+    /// `DELETE /pix/v2/webhook/{chave}` — removes the webhook of a Pix key.
+    pub const WEBHOOK_EXCLUIR: Endpoint = Endpoint {
+        method: Method::Delete,
+        path: "/pix/v2/webhook/{chave}",
+        scopes: &[Scope::WebhookWrite],
+    };
 }
 
 /// Every operation implemented by this crate.
@@ -457,6 +520,9 @@ pub const ALL: &[Endpoint] = &[
     banking::PAGAMENTO_DARF_BUSCAR,
     banking::PAGAMENTO_LOTE_INCLUIR,
     banking::PAGAMENTO_LOTE_CONSULTAR,
+    banking::WEBHOOK_CADASTRAR,
+    banking::WEBHOOK_CONSULTAR,
+    banking::WEBHOOK_EXCLUIR,
     cobranca::EMITIR,
     cobranca::CONSULTAR,
     cobranca::LISTAR,
@@ -466,6 +532,9 @@ pub const ALL: &[Endpoint] = &[
     cobranca::EDITAR,
     cobranca::EDICAO,
     cobranca::PAGAR,
+    cobranca::WEBHOOK_CADASTRAR,
+    cobranca::WEBHOOK_CONSULTAR,
+    cobranca::WEBHOOK_EXCLUIR,
     pix::CRIAR_COB,
     pix::CRIAR_COB_SEM_TXID,
     pix::REVISAR_COB,
@@ -492,4 +561,7 @@ pub const ALL: &[Endpoint] = &[
     pix::PAGAR_COB_SANDBOX,
     pix::PAGAR_COBV_SANDBOX,
     pix::PAGAR_QR_CODE_SANDBOX,
+    pix::WEBHOOK_CADASTRAR,
+    pix::WEBHOOK_CONSULTAR,
+    pix::WEBHOOK_EXCLUIR,
 ];
