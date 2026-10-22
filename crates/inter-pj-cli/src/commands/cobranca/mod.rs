@@ -1,6 +1,7 @@
 //! `inter-pj cobranca ...`: charges (boleto with Pix) of the Cobrança API.
 
 mod consultar;
+mod listar;
 
 use std::fmt::Write as _;
 
@@ -18,6 +19,8 @@ use crate::output::{self, data_br};
 
 pub(super) async fn run(context: &Context, command: CobrancaCommand) -> Result<(), CliError> {
     match command {
+        CobrancaCommand::Listar(args) => listar::listar(context, &args).await,
+        CobrancaCommand::Sumario(args) => listar::sumario(context, &args).await,
         CobrancaCommand::Consultar(args) => consultar::consultar(context, &args).await,
         CobrancaCommand::Pdf(args) => consultar::pdf(context, &args).await,
     }
