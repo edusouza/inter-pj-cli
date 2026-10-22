@@ -1203,7 +1203,9 @@ async fn as_sugestoes_das_alteracoes_sao_da_mesma_conta() {
         ),
         (
             vec!["editar", CODIGO, "--valor", "200,00", "--sim"],
-            format!("Acompanhe com: inter-pj -p filial cobranca edicao {EDICAO} --aguardar"),
+            format!(
+                "Acompanhe com: inter-pj -p filial cobranca edicao {EDICAO} --aguardar --recem-pedida"
+            ),
         ),
         (
             vec!["pagar", CODIGO, "--com", "boleto"],
@@ -1376,7 +1378,7 @@ async fn edita_e_acompanha_a_alteracao() {
     );
     assert!(
         stdout.ends_with(&format!(
-            "Acompanhe com: inter-pj cobranca edicao {EDICAO} --aguardar\n"
+            "Acompanhe com: inter-pj cobranca edicao {EDICAO} --aguardar --recem-pedida\n"
         )),
         "{stdout}"
     );
@@ -1433,6 +1435,95 @@ async fn alteracao_que_falhou_sai_com_5() {
         .args(["cobranca", "edicao", EDICAO, "--aguardar"])
         .assert()
         .code(5);
+}
+
+/// The command `editar` suggests goes on with its wait: a change the API
+/// does not show yet is not refused (5) there, and the time running out
+/// keeps its code (8). Without `--recem-pedida`, the same 404 is an error at
+/// once, as for a code typed wrong.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_dica_de_editar_espera_a_alteracao_aparecer() {
+    let env = env().await;
+    env.mount_token("boleto-cobranca.write boleto-cobranca.read", None)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/cobranca/v3/cobrancas/{CODIGO}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(cobranca(true)))
+        .expect(1)
+        .mount(&env.server)
+        .await;
+    Mock::given(method("PATCH"))
+        .and(path(format!("/cobranca/v3/cobrancas/{CODIGO}")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "status": "PROCESSANDO",
+            "codigoEdicao": EDICAO
+        })))
+        .expect(1)
+        .mount(&env.server)
+        .await;
+    let consulta = format!("/cobranca/v3/cobrancas/edicao/{EDICAO}");
+    let nao_encontrada = Mock::given(method("GET"))
+        .and(path(consulta.clone()))
+        .respond_with(ResponseTemplate::new(404))
+        .mount_as_scoped(&env.server)
+        .await;
+    let sem_desfecho = format!(
+        "erro: a alteração foi pedida (código {EDICAO}), mas o tempo de espera acabou (1 s) sem que a consulta a encontrasse"
+    );
+
+    let assert = env
+        .cmd()
+        .args(["cobranca", "editar", CODIGO, "--valor", "200,00", "--sim"])
+        .args(["--aguardar", "--timeout", "1s"])
+        .assert()
+        .code(8);
+    let stderr = stderr_of(&assert);
+    assert!(stderr.contains(&sem_desfecho), "{stderr}");
+    let sugerido: Vec<String> = stderr
+        .lines()
+        .find_map(|linha| linha.strip_prefix("dica: acompanhe com: inter-pj "))
+        .unwrap_or_else(|| panic!("{stderr}"))
+        .split_whitespace()
+        .map(str::to_owned)
+        .collect();
+    assert_eq!(
+        sugerido,
+        ["cobranca", "edicao", EDICAO, "--aguardar", "--recem-pedida"]
+    );
+
+    // The suggested command, with the 404 still there.
+    let assert = env
+        .cmd()
+        .args(&sugerido)
+        .args(["--timeout", "1s"])
+        .assert()
+        .code(8);
+    let stderr = stderr_of(&assert);
+    assert!(stderr.contains(&sem_desfecho), "{stderr}");
+    assert!(
+        stderr.contains("dica: a alteração já foi pedida: não a peça de novo"),
+        "{stderr}"
+    );
+    env.cmd()
+        .args(["cobranca", "edicao", EDICAO, "--aguardar"])
+        .assert()
+        .code(5);
+    // Only a wait goes on.
+    env.cmd()
+        .args(["cobranca", "edicao", EDICAO, "--recem-pedida"])
+        .assert()
+        .code(2);
+
+    // Once the API shows the change, the wait goes to its end.
+    drop(nao_encontrada);
+    Mock::given(method("GET"))
+        .and(path(consulta))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "SUCESSO"})))
+        .expect(1)
+        .mount(&env.server)
+        .await;
+    let texto = stdout_of(&env.cmd().args(&sugerido).assert().success());
+    assert!(texto.starts_with("Alteração feita"), "{texto}");
 }
 
 /// A query of a change that failed exits with 5, as `editar` and `edicao
