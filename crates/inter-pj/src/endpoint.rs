@@ -202,6 +202,55 @@ pub mod cobranca {
         path: "/cobranca/v3/cobrancas/{codigoSolicitacao}",
         scopes: &[Scope::BoletoCobrancaRead],
     };
+
+    /// `GET /cobranca/v3/cobrancas` — charges of a period, paginated.
+    pub const LISTAR: Endpoint = Endpoint {
+        method: Method::Get,
+        path: "/cobranca/v3/cobrancas",
+        scopes: &[Scope::BoletoCobrancaRead],
+    };
+
+    /// `GET /cobranca/v3/cobrancas/sumario` — number and amount by situation.
+    pub const SUMARIO: Endpoint = Endpoint {
+        method: Method::Get,
+        path: "/cobranca/v3/cobrancas/sumario",
+        scopes: &[Scope::BoletoCobrancaRead],
+    };
+
+    /// `GET /cobranca/v3/cobrancas/{codigoSolicitacao}/pdf` — a charge as a PDF.
+    pub const PDF: Endpoint = Endpoint {
+        method: Method::Get,
+        path: "/cobranca/v3/cobrancas/{codigoSolicitacao}/pdf",
+        scopes: &[Scope::BoletoCobrancaRead],
+    };
+
+    /// `POST /cobranca/v3/cobrancas/{codigoSolicitacao}/cancelar` — cancels a charge.
+    pub const CANCELAR: Endpoint = Endpoint {
+        method: Method::Post,
+        path: "/cobranca/v3/cobrancas/{codigoSolicitacao}/cancelar",
+        scopes: &[Scope::BoletoCobrancaWrite],
+    };
+
+    /// `PATCH /cobranca/v3/cobrancas/{codigoSolicitacao}` — changes the due date or the value.
+    pub const EDITAR: Endpoint = Endpoint {
+        method: Method::Patch,
+        path: "/cobranca/v3/cobrancas/{codigoSolicitacao}",
+        scopes: &[Scope::BoletoCobrancaWrite],
+    };
+
+    /// `GET /cobranca/v3/cobrancas/edicao/{codigoEdicao}` — where a change stands.
+    pub const EDICAO: Endpoint = Endpoint {
+        method: Method::Get,
+        path: "/cobranca/v3/cobrancas/edicao/{codigoEdicao}",
+        scopes: &[Scope::BoletoCobrancaRead],
+    };
+
+    /// `POST /cobranca/v3/cobrancas/{codigoSolicitacao}/pagar` — pays a charge (sandbox only).
+    pub const PAGAR: Endpoint = Endpoint {
+        method: Method::Post,
+        path: "/cobranca/v3/cobrancas/{codigoSolicitacao}/pagar",
+        scopes: &[Scope::BoletoCobrancaWrite],
+    };
 }
 
 /// Every operation implemented by this crate.
@@ -222,4 +271,11 @@ pub const ALL: &[Endpoint] = &[
     banking::PAGAMENTO_LOTE_CONSULTAR,
     cobranca::EMITIR,
     cobranca::CONSULTAR,
+    cobranca::LISTAR,
+    cobranca::SUMARIO,
+    cobranca::PDF,
+    cobranca::CANCELAR,
+    cobranca::EDITAR,
+    cobranca::EDICAO,
+    cobranca::PAGAR,
 ];
