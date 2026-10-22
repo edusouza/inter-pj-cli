@@ -184,6 +184,26 @@ pub mod banking {
     };
 }
 
+/// Operations of the Cobrança API (`/cobranca/v3`).
+pub mod cobranca {
+    use super::{Endpoint, Method};
+    use crate::scope::Scope;
+
+    /// `POST /cobranca/v3/cobrancas` — issues a charge (boleto with Pix).
+    pub const EMITIR: Endpoint = Endpoint {
+        method: Method::Post,
+        path: "/cobranca/v3/cobrancas",
+        scopes: &[Scope::BoletoCobrancaWrite],
+    };
+
+    /// `GET /cobranca/v3/cobrancas/{codigoSolicitacao}` — a charge in detail.
+    pub const CONSULTAR: Endpoint = Endpoint {
+        method: Method::Get,
+        path: "/cobranca/v3/cobrancas/{codigoSolicitacao}",
+        scopes: &[Scope::BoletoCobrancaRead],
+    };
+}
+
 /// Every operation implemented by this crate.
 pub const ALL: &[Endpoint] = &[
     TOKEN,
@@ -200,4 +220,6 @@ pub const ALL: &[Endpoint] = &[
     banking::PAGAMENTO_DARF_BUSCAR,
     banking::PAGAMENTO_LOTE_INCLUIR,
     banking::PAGAMENTO_LOTE_CONSULTAR,
+    cobranca::EMITIR,
+    cobranca::CONSULTAR,
 ];

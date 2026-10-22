@@ -36,6 +36,7 @@ pub mod auth;
 pub mod banking;
 pub mod boleto;
 mod client;
+pub mod cobranca;
 mod credentials;
 pub mod documento;
 pub mod endpoint;

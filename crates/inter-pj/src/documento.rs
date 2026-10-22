@@ -70,6 +70,13 @@ impl Documento {
         }
     }
 
+    /// Whether this is the value [`parse`](Self::parse) gives for it. The
+    /// variants are public, so a document can also be built by hand, with
+    /// punctuation, wrong check digits or a CNPJ as a CPF.
+    pub(crate) fn conferido(&self) -> bool {
+        Self::parse(self.as_str()).is_ok_and(|documento| documento == *self)
+    }
+
     /// With the usual punctuation: `123.456.789-09`, `12.345.678/0001-95`.
     pub fn formatado(&self) -> String {
         match self {
