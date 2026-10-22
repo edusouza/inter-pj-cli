@@ -401,7 +401,7 @@ async fn pdf(context: &Context, args: &ExtratoPdfArgs) -> Result<(), CliError> {
             fim.format("%Y-%m-%d")
         ))
     });
-    let saida = Saida::new(saida, args.sobrescrever);
+    let saida = Saida::new(saida, args.sobrescrever, "extrato.pdf", "--saida");
     saida.conferir()?;
 
     let settings = context.settings()?;

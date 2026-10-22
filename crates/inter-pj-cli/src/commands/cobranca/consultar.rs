@@ -6,6 +6,7 @@ use inter_pj::cobranca::{CobrancaDetalhada, SituacaoCobranca};
 use serde_json::json;
 
 use super::render_cobranca;
+use crate::chamada::{argumento, chamada};
 use crate::cli::{CobrancaConsultarArgs, CobrancaPdfArgs, Formato};
 use crate::commands::Context;
 use crate::commands::qrcode::OpcoesQr;
@@ -30,7 +31,9 @@ pub(super) async fn consultar(
     mostrar(context, &settings, &cobranca, &opcoes)
 }
 
-/// The charge, then its QR Code in the terminal and in a PNG, as asked.
+/// The charge, then its QR Code in the terminal and in a PNG, as asked. A
+/// QR Code that cannot be made fails the command before anything is shown
+/// (5).
 pub(super) fn mostrar(
     context: &Context,
     settings: &Settings,
@@ -43,6 +46,27 @@ pub(super) fn mostrar(
         &render_cobranca(cobranca),
         cobranca,
         &copia_e_cola(cobranca),
+    )
+}
+
+/// [`mostrar`] for a charge just issued, `codigo`: a QR Code that cannot
+/// be made or saved is a warning, with the command that saves it later,
+/// because an error would read as "not issued" and a script would issue the
+/// charge again.
+pub(super) fn mostrar_emitida(
+    context: &Context,
+    settings: &Settings,
+    cobranca: &CobrancaDetalhada,
+    opcoes: &OpcoesQr,
+    codigo: &str,
+) -> Result<(), CliError> {
+    opcoes.mostrar_criada(
+        context,
+        settings,
+        &render_cobranca(cobranca),
+        cobranca,
+        &copia_e_cola(cobranca),
+        &format!("{} cobranca consultar {}", chamada(), argumento(codigo)),
     )
 }
 
@@ -74,7 +98,7 @@ pub(super) async fn pdf(context: &Context, args: &CobrancaPdfArgs) -> Result<(),
         .saida
         .clone()
         .unwrap_or_else(|| PathBuf::from(format!("cobranca-{nome}.pdf")));
-    let saida = Saida::new(caminho, args.sobrescrever);
+    let saida = Saida::new(caminho, args.sobrescrever, "cobranca.pdf", "--saida");
     saida.conferir()?;
 
     let settings = context.settings()?;
