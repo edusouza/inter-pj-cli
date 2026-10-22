@@ -1451,18 +1451,51 @@ async fn alteracao_que_falhou_sai_com_5() {
         .expect(2)
         .mount(&env.server)
         .await;
-    // Only waiting makes the failure an error: a query just shows it.
+    // Waiting or not, a failure is an error, after showing the change.
     let texto = stdout_of(
         &env.cmd()
             .args(["cobranca", "edicao", EDICAO])
             .assert()
-            .success(),
+            .code(5),
     );
     assert!(texto.starts_with("A alteração não foi feita."), "{texto}");
     env.cmd()
         .args(["cobranca", "edicao", EDICAO, "--aguardar"])
         .assert()
         .code(5);
+}
+
+/// A query of a change that failed exits with 5, as `editar` and `edicao
+/// --aguardar` do, after showing it; one done or being processed, with 0.
+#[tokio::test(flavor = "multi_thread")]
+async fn consulta_de_alteracao_que_falhou_sai_com_5() {
+    for (status, codigo_de_saida, texto) in [
+        ("SUCESSO", 0, "Alteração feita"),
+        ("FALHA", 5, "A alteração não foi feita."),
+        ("PROCESSANDO", 0, "Alteração em processamento."),
+    ] {
+        let env = env().await;
+        env.mount_token("boleto-cobranca.read", None).await;
+        Mock::given(method("GET"))
+            .and(path(format!("/cobranca/v3/cobrancas/edicao/{EDICAO}")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": status})))
+            .expect(2)
+            .mount(&env.server)
+            .await;
+        let assert = env
+            .cmd()
+            .args(["cobranca", "edicao", EDICAO])
+            .assert()
+            .code(codigo_de_saida);
+        assert!(stdout_of(&assert).starts_with(texto), "{status}");
+        let assert = env
+            .cmd()
+            .args(["cobranca", "edicao", EDICAO, "--json"])
+            .assert()
+            .code(codigo_de_saida);
+        let json: Value = serde_json::from_str(&stdout_of(&assert)).unwrap();
+        assert_eq!(json, json!({"codigoEdicao": EDICAO, "status": status}));
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]

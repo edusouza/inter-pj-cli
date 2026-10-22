@@ -200,7 +200,10 @@ async fn edicao_com(
     let codigo = args.codigo_edicao.trim();
     if !args.espera.aguardar {
         let consulta = client.cobranca().consultar_edicao(codigo).await?;
-        return mostrar_edicao(context, &settings, codigo, &consulta);
+        mostrar_edicao(context, &settings, codigo, &consulta)?;
+        // A change that failed is a failure (5), awaited or not; one being
+        // processed is a status like any other (0).
+        return fim(&consulta, true, args.espera.timeout, Espera::Consultada);
     }
     let (consulta, terminou) = aguardar(
         &client,
