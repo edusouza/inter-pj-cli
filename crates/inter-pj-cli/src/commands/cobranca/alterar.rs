@@ -205,16 +205,21 @@ async fn edicao_com(
         // processed is a status like any other (0).
         return fim(&consulta, true, args.espera.timeout, Espera::Consultada);
     }
-    let (consulta, terminou) = aguardar(
-        &client,
-        codigo,
-        Espera::Consultada,
-        args.espera.timeout,
-        intervalo,
-    )
-    .await?;
+    let acompanhar = acompanhar(codigo);
+    // The command `editar` suggests goes on with its wait, where the change
+    // may not be found yet.
+    let espera = if args.recem_pedida {
+        Espera::Pedida {
+            codigo,
+            acompanhar: &acompanhar,
+        }
+    } else {
+        Espera::Consultada
+    };
+    let (consulta, terminou) =
+        aguardar(&client, codigo, espera, args.espera.timeout, intervalo).await?;
     mostrar_edicao(context, &settings, codigo, &consulta)?;
-    fim(&consulta, terminou, args.espera.timeout, Espera::Consultada)
+    fim(&consulta, terminou, args.espera.timeout, espera)
 }
 
 pub(super) async fn pagar(context: &Context, args: &CobrancaPagarArgs) -> Result<(), CliError> {
@@ -356,9 +361,9 @@ fn antes_e_depois(antes: Option<String>, depois: Option<String>) -> Option<Strin
 /// Who waits for a change.
 #[derive(Clone, Copy)]
 enum Espera<'a> {
-    /// `editar`, right after the request: the change may not be found yet,
-    /// and no error may lose its code; `acompanhar` is the command that
-    /// follows it.
+    /// `editar`, right after the request, or the `edicao --recem-pedida` it
+    /// suggests: the change may not be found yet, and no error may lose its
+    /// code; `acompanhar` is the command that follows it.
     Pedida {
         codigo: &'a str,
         acompanhar: &'a str,
@@ -399,8 +404,9 @@ fn sem_desfecho(
 /// Queries the change every `intervalo` until it ends or `timeout` passes:
 /// the last answer, and whether it ended. An error the next query may not
 /// have (the rate limit, the service, the network) is no news; after
-/// `editar`, neither is a 404, and any other error, or the time running
-/// out before the query found the change, ends the wait with its code.
+/// `editar` (`Espera::Pedida`), neither is a 404, and any other error, or
+/// the time running out before the query found the change, ends the wait
+/// with its code.
 async fn aguardar(
     client: &InterClient,
     codigo_edicao: &str,
@@ -569,10 +575,11 @@ fn render_edicao(
     texto
 }
 
-/// The command that follows the change `codigo_edicao`, on this account.
+/// The command that follows the change `codigo_edicao`, on this account:
+/// one that still waits while the API does not show it.
 fn acompanhar(codigo_edicao: &str) -> String {
     format!(
-        "{} cobranca edicao {} --aguardar",
+        "{} cobranca edicao {} --aguardar --recem-pedida",
         chamada(),
         // A code of the API, without the characters a shell would read.
         argumento(&output::limpo(codigo_edicao))
@@ -708,7 +715,7 @@ aviso: a consulta pode levar até 30 minutos para mostrar o novo valor ou vencim
                 Some("Em processamento")
             ),
             format!(
-                "Alteração em processamento.\nMensagem             Em processamento\nCódigo da alteração  {EDICAO}\n\nAcompanhe com: inter-pj cobranca edicao {EDICAO} --aguardar"
+                "Alteração em processamento.\nMensagem             Em processamento\nCódigo da alteração  {EDICAO}\n\nAcompanhe com: inter-pj cobranca edicao {EDICAO} --aguardar --recem-pedida"
             )
         );
         assert_eq!(
@@ -724,8 +731,9 @@ aviso: a consulta pode levar até 30 minutos para mostrar o novo valor ou vencim
         assert_eq!(render_edicao(None, None, None), "Alteração solicitada.");
         // A code of the API goes into the command as one argument.
         assert!(
-            render_edicao(Some("e 1'x"), Some(&StatusEdicao::Processando), None)
-                .ends_with(r"Acompanhe com: inter-pj cobranca edicao 'e 1'\''x' --aguardar"),
+            render_edicao(Some("e 1'x"), Some(&StatusEdicao::Processando), None).ends_with(
+                r"Acompanhe com: inter-pj cobranca edicao 'e 1'\''x' --aguardar --recem-pedida"
+            ),
         );
     }
 
@@ -948,7 +956,9 @@ aviso: a consulta pode levar até 30 minutos para mostrar o novo valor ou vencim
                 dicas[..2],
                 [
                     "a alteração já foi pedida: não a peça de novo".to_owned(),
-                    format!("acompanhe com: inter-pj cobranca edicao {EDICAO} --aguardar"),
+                    format!(
+                        "acompanhe com: inter-pj cobranca edicao {EDICAO} --aguardar --recem-pedida"
+                    ),
                 ]
             );
             assert!(
@@ -977,6 +987,73 @@ aviso: a consulta pode levar até 30 minutos para mostrar o novo valor ou vencim
             .unwrap_err();
         assert!(matches!(err, CliError::Inter(_)), "{err}");
         assert_eq!(err.exit_code(), 5);
+    }
+
+    /// The command `editar` suggests waits while the API does not show the
+    /// change, as `editar` does: a 404 to the end is a wait without an end
+    /// (8) that keeps the code, not a refusal (5).
+    #[tokio::test]
+    async fn a_change_just_requested_may_not_be_found_yet() {
+        let consulta = format!("/cobranca/v3/cobrancas/edicao/{EDICAO}");
+        let (cenario, comando) = testes::cenario(&[
+            "edicao",
+            EDICAO,
+            "--aguardar",
+            "--recem-pedida",
+            "--timeout",
+            "1s",
+        ])
+        .await;
+        let CobrancaCommand::Edicao(args) = comando else {
+            unreachable!()
+        };
+        Mock::given(method("GET"))
+            .and(path(consulta.clone()))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&cenario.server)
+            .await;
+        let err = edicao_com(&cenario.context, &args, Duration::from_millis(300))
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "a alteração foi pedida (código {EDICAO}), mas o tempo de espera acabou (1 s) sem que a consulta a encontrasse"
+            )
+        );
+        assert_eq!(err.exit_code(), 8);
+        assert_eq!(
+            err.hints(),
+            [
+                "a alteração já foi pedida: não a peça de novo".to_owned(),
+                format!(
+                    "acompanhe com: inter-pj cobranca edicao {EDICAO} --aguardar --recem-pedida"
+                ),
+            ]
+        );
+
+        // Found after a while, it is awaited to its end.
+        let (cenario, comando) =
+            testes::cenario(&["edicao", EDICAO, "--aguardar", "--recem-pedida"]).await;
+        let CobrancaCommand::Edicao(args) = comando else {
+            unreachable!()
+        };
+        Mock::given(method("GET"))
+            .and(path(consulta.clone()))
+            .respond_with(ResponseTemplate::new(404))
+            .up_to_n_times(1)
+            .expect(1)
+            .mount(&cenario.server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(consulta))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "SUCESSO"})))
+            .expect(1)
+            .mount(&cenario.server)
+            .await;
+        edicao_com(&cenario.context, &args, Duration::from_millis(10))
+            .await
+            .unwrap();
     }
 
     /// In `edicao --aguardar`, a passing error is no news either.
