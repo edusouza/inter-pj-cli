@@ -1576,3 +1576,108 @@ async fn pagar_em_producao_nao_chama_a_api() {
         stderr_of(&assert)
     );
 }
+
+/// A query that fails during the wait does not lose the charge requested:
+/// one the next query may answer (503) only delays it; one that waiting
+/// does not fix (403) ends with the code and the command that follows it
+/// (9), and the request is never sent again.
+#[tokio::test(flavor = "multi_thread")]
+async fn uma_consulta_que_falha_na_espera_nao_perde_a_cobranca() {
+    let vencimento = daqui_a(30);
+    let pedido = || {
+        Mock::given(method("POST"))
+            .and(path("/cobranca/v3/cobrancas"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(json!({"codigoSolicitacao": CODIGO})),
+            )
+            .expect(1)
+    };
+    let consulta = format!("/cobranca/v3/cobrancas/{CODIGO}");
+
+    // A 503, then the charge issued: the wait goes on to the next interval.
+    let env = env().await;
+    env.mount_token("boleto-cobranca.write boleto-cobranca.read", None)
+        .await;
+    pedido().mount(&env.server).await;
+    Mock::given(method("GET"))
+        .and(path(consulta.clone()))
+        .respond_with(ResponseTemplate::new(503))
+        .up_to_n_times(1)
+        .expect(1)
+        .mount(&env.server)
+        .await;
+    mount_cobranca(&env, cobranca(true), 1).await;
+    let assert = env
+        .cmd()
+        .args(opcoes(&vencimento))
+        .args([
+            "--sim",
+            "--aguardar",
+            "--sem-retentativa",
+            "--timeout",
+            "30s",
+        ])
+        .assert()
+        .success();
+    assert!(stdout_of(&assert).starts_with("Cobrança NF-123"));
+    assert!(
+        stderr_of(&assert).contains("aguardando: a consulta falhou"),
+        "{}",
+        stderr_of(&assert)
+    );
+
+    // A 403: no permission to read, which waiting does not fix.
+    let env = self::env().await;
+    env.mount_token("boleto-cobranca.write boleto-cobranca.read", None)
+        .await;
+    pedido().mount(&env.server).await;
+    Mock::given(method("GET"))
+        .and(path(consulta))
+        .respond_with(ResponseTemplate::new(403))
+        .expect(1)
+        .mount(&env.server)
+        .await;
+    let assert = env
+        .cmd()
+        .args(opcoes(&vencimento))
+        .args(["--sim", "--aguardar"])
+        .assert()
+        .code(9);
+    assert_eq!(stdout_of(&assert), "");
+    let stderr = stderr_of(&assert);
+    for linha in [
+        format!("erro: a cobrança foi solicitada (código {CODIGO}), mas a consulta falhou: "),
+        "dica: a cobrança já foi solicitada: não a emita de novo".to_owned(),
+        format!("dica: acompanhe com: inter-pj cobranca consultar {CODIGO}"),
+    ] {
+        assert!(stderr.contains(&linha), "{linha}\n{stderr}");
+    }
+}
+
+/// Declining the confirmation sends nothing and exits with 7. The question
+/// needs a terminal, which `script` (util-linux) gives the command.
+#[cfg(target_os = "linux")]
+#[tokio::test(flavor = "multi_thread")]
+async fn confirmacao_negada_sai_com_7() {
+    let env = env().await;
+    nothing_is_sent(&env).await;
+    let linha = std::iter::once(env!("CARGO_BIN_EXE_inter-pj").to_owned())
+        .chain(opcoes(&daqui_a(30)))
+        .map(|arg| format!("'{}'", arg.replace('\'', r"'\''")))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let assert = env
+        .programa("script")
+        .args(["--quiet", "--return", "--command", &linha, "/dev/null"])
+        .write_stdin("n\n")
+        .assert()
+        .code(7);
+    // The terminal of `script` gets stdout and stderr.
+    let saida = stdout_of(&assert);
+    for linha in [
+        "Emitir a cobrança? [s/N]",
+        "erro: operação cancelada: nada foi enviado",
+    ] {
+        assert!(saida.contains(linha), "{linha}\n{saida}");
+    }
+}
