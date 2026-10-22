@@ -5,6 +5,8 @@ use std::io;
 use inter_pj::banking::PeriodoError;
 use inter_pj::{ApiError, ApiErrorKind, Error as InterError};
 
+use crate::chamada::chamada;
+
 /// Documented exit codes.
 pub(crate) mod exit {
     pub(crate) const UNEXPECTED: u8 = 1;
@@ -74,6 +76,15 @@ pub(crate) enum CliError {
         source: InterError,
         /// Command that finds the charge, to run before trying again.
         consulta: String,
+    },
+    /// A Pix charge whose creation is unknown: it may have been created.
+    /// With the same txid, the API does not create a second one.
+    #[error("{source}")]
+    CobrancaPixIncerta {
+        source: InterError,
+        /// `cob` or `cobv`, as in the commands.
+        tipo: &'static str,
+        txid: String,
     },
     /// `cobranca emitir --aguardar`: the API could not issue the charge.
     #[error("a cobrança não foi emitida: {situacao}")]
@@ -181,6 +192,7 @@ impl CliError {
             Self::ResultadoIncerto { .. }
             | Self::PagamentoIncerto { .. }
             | Self::EmissaoIncerta { .. }
+            | Self::CobrancaPixIncerta { .. }
             | Self::AlteracaoIncerta { .. }
             | Self::SemDesfecho {
                 source: Some(_), ..
@@ -240,6 +252,14 @@ impl CliError {
                     format!(
                         "a consulta precisa da permissão de leitura dos pagamentos ({escopos}), e uma lista vazia logo depois do erro não prova que nada foi pago: espere alguns minutos e confira também o extrato e os agendamentos no Internet Banking"
                     ),
+                ];
+            }
+            Self::CobrancaPixIncerta { tipo, txid, .. } => {
+                return vec![
+                    "a cobrança pode ter sido criada; com o mesmo txid, a API não cria outra"
+                        .to_owned(),
+                    format!("confira com: {} pix {tipo} consultar {txid}", chamada()),
+                    format!("ou repita o comando com --txid {txid}"),
                 ];
             }
             Self::EmissaoIncerta { consulta, .. } => {
@@ -358,6 +378,12 @@ mod tests {
             id_idempotente: "9b2f6c1e-5d0a-4c1b-8f3e-2a7d4e6b8c90".to_owned(),
         };
         assert_eq!(pix.exit_code(), exit::UNCERTAIN);
+        let cobranca = CliError::CobrancaPixIncerta {
+            source: ilegivel(),
+            tipo: "cob",
+            txid: "7978c0c97ea847e78e8849634473c1f1".to_owned(),
+        };
+        assert_eq!(cobranca.exit_code(), exit::UNCERTAIN);
         // Outside an uncertain outcome, the error keeps its category.
         assert_eq!(CliError::Inter(ilegivel()).exit_code(), exit::UNEXPECTED);
     }

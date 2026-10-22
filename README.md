@@ -502,19 +502,127 @@ A API altera só o valor (de R$ 2,50 a R$ 99.999.999,99) e o vencimento (hoje ou
 
 No sandbox, `cobranca pagar <codigo> --com boleto` (ou `pix`) paga uma cobrança, para testar o fluxo inteiro: emitir, pagar, consultar e, com um webhook cadastrado, receber a notificação. Em produção, quem paga é o cliente, e o comando é recusado antes de qualquer requisição. O pagamento precisa do escopo `boleto-cobranca.write`.
 
+### Cobranças Pix
+
+A API Pix cria cobranças com QR Code dinâmico, que o cliente paga pelo app de qualquer banco. A cobrança imediata (`pix cob`) é para pagar na hora, até expirar:
+
+```console
+$ inter-pj pix cob criar --chave pix@empresa.example --valor 149,90 --expiracao 2h \
+    --devedor-documento 12.345.678/0001-95 --devedor-nome "Cliente Exemplo Ltda" --solicitacao "Pedido 123"
+Cobrança Pix a criar
+  Ambiente     sandbox (dados fictícios)
+  Valor        R$ 149,90 (cento e quarenta e nove reais e noventa centavos)
+  Chave        pix@empresa.example (e-mail)
+  Expira       2 horas após a criação
+  Devedor      Cliente Exemplo Ltda (12.345.678/0001-95)
+  Solicitação  Pedido 123
+  txid         7978c0c97ea847e78e8849634473c1f1
+Criar a cobrança? [s/N] s
+aviso: ambiente sandbox — os dados retornados são fictícios
+Cobrança Pix criada.
+
+Cobrança Pix 7978c0c97ea847e78e8849634473c1f1
+  Status       ativa
+  Valor        R$ 149,90
+  Criada em    23/09/2026 10:05:12
+  Expira em    23/09/2026 12:05:12
+  Devedor      Cliente Exemplo Ltda (12.345.678/0001-95)
+  Chave        pix@empresa.example
+  Solicitação  Pedido 123
+  Revisão      0
+  Location     pix.example.com/qr/v2/9d36b84fc70b478fb95c12729b90ca25
+
+Copia e cola  00020101021226760014br.gov.bcb.pix2554pix.example.com/qr/v2/9d36b84fc70b...63040398
+
+Acompanhe com: inter-pj pix cob consultar 7978c0c97ea847e78e8849634473c1f1
+
+$ inter-pj pix cob criar --chave pix@empresa.example --valor 50 --qrcode               # desenha o QR Code para o cliente
+$ inter-pj pix cob criar --chave pix@empresa.example --valor 50 --qrcode-png pix.png   # grava o QR Code em PNG
+$ inter-pj pix cob criar --chave pix@empresa.example --valor 50 --simular              # mostra a requisição, não cria
+```
+
+A chave (`--chave`) é uma chave Pix da conta que recebe, e o valor, maior que zero, com até 2 casas; `--valor-alteravel` deixa o pagador mudar o valor. A cobrança expira no tempo de `--expiracao`, contado da criação (`3600s`, `30m`, `2h`, `7d`; o padrão da API é 1 dia). Opcionais: o devedor (`--devedor-documento`, com CPF ou CNPJ conferido, e `--devedor-nome`), o texto mostrado ao pagador (`--solicitacao`, até 140 caracteres) e informações adicionais (`--info NOME=VALOR`, que pode ser repetida até 50 vezes). Tudo é conferido antes de qualquer requisição.
+
+Cada cobrança tem um txid, de 26 a 35 letras e dígitos. A CLI gera um e o mostra no resumo, ou usa o de `--txid`; com o mesmo txid, a API não cria outra cobrança. Por isso, se o resultado ficar incerto (tempo esgotado, erro 5xx), a CLI sai com o código 9 e o erro traz o comando que consulta a cobrança e o que repete a criação com o mesmo txid, sem risco de duplicá-la. Esses comandos, como o `Acompanhe com` depois da criação, levam as opções que escolheram a conta na linha de comando (`-p`, `--config`, `--ambiente`, `--conta-corrente`...), para que a consulta não procure a cobrança em outro perfil, ambiente ou conta. Depois da criação, uma falha do QR Code (a API não mandou o copia e cola, o código não confere, o arquivo não pôde ser gravado) não desfaz nada: a CLI mostra a cobrança criada (em `stderr`, com `--qrcode-png -`), avisa e indica o `pix cob consultar` que grava a imagem depois, e termina com sucesso, para que um script não crie outra cobrança. Os trilhos são os das cobranças: resumo, confirmação `[s/N]` (sem terminal, exige `--sim`), `--simular` e o destaque de produção; o limite por operação não se aplica, porque a cobrança não tira dinheiro da conta. Criar e alterar precisam do escopo `cob.write`; consultar e listar, de `cob.read`.
+
+Enquanto não é paga, a cobrança pode ser alterada ou removida. A CLI a consulta antes e mostra o antes e o depois; cobranças pagas ou removidas são recusadas sem nenhuma alteração:
+
+```console
+$ inter-pj pix cob revisar 7978c0c97ea847e78e8849634473c1f1 --valor 159,90 --solicitacao "Pedido 123, com frete"
+Cobrança Pix 7978c0c97ea847e78e8849634473c1f1 a alterar
+  Ambiente     sandbox (dados fictícios)
+  Valor        R$ 149,90 → R$ 159,90
+  Expira       2 horas após a criação
+  Devedor      Cliente Exemplo Ltda (12.345.678/0001-95)
+  Solicitação  → Pedido 123, com frete
+  Status       ativa
+Alterar a cobrança? [s/N] s
+Cobrança Pix alterada (revisão 1).
+...
+
+$ inter-pj pix cob revisar 7978c0c97ea847e78e8849634473c1f1 --remover     # deixa de poder ser paga
+```
+
+`revisar` altera o valor, `--valor-alteravel sim` ou `nao`, a expiração, o devedor, a chave, a solicitação e as informações adicionais, que substituem as atuais. Como na criação, pede confirmação; sem terminal nem `--sim`, nem a consulta é feita. Revisar precisa também do escopo `cob.read`, para a consulta.
+
+A consulta mostra a cobrança e os Pix que a pagaram, com os horários no fuso local:
+
+```console
+$ inter-pj pix cob consultar a1b2c3d4e5f60718293a4b5c6d7e8f90
+Cobrança Pix a1b2c3d4e5f60718293a4b5c6d7e8f90
+  Status       concluída (paga)
+  Valor        R$ 300,00
+  Criada em    18/09/2026 09:40:00
+  Expira em    18/09/2026 11:40:00
+  Devedor      Outro Cliente (12.345.678/0001-95)
+  Chave        pix@empresa.example
+  Solicitação  Pedido 123
+  Revisão      0
+  Location     pix.example.com/qr/v2/9d36b84fc70b478fb95c12729b90ca25
+
+Pix recebidos
+Horário                  Valor  Devolvido  endToEndId
+18/09/2026 09:41:07  R$ 300,00             E00416968202609181241abcdEFGH123
+
+Copia e cola  00020101021226760014br.gov.bcb.pix2554pix.example.com/qr/v2/9d36b84fc70b...63040136
+
+$ inter-pj pix cob consultar 7978c0c97ea847e78e8849634473c1f1 --qrcode
+```
+
+`--qrcode` e `--qrcode-png` funcionam como nas cobranças com boleto, mas o QR Code só é gerado enquanto a cobrança está ativa e não expirou (depois da expiração, o status continua `ativa`, mas o Pix não é mais aceito): para uma cobrança paga, removida ou expirada, `--qrcode` e `--qrcode-png` terminam com o código 5, sem mostrar a cobrança e sem gravar a imagem.
+
+A listagem mostra as cobranças criadas em um período, por padrão os últimos 30 dias até agora:
+
+```console
+$ inter-pj pix cob listar --inicio 2026-09-01 --fim 2026-09-30
+Cobranças Pix imediatas criadas de 01/09/2026 00:00 a 30/09/2026 23:59
+
+Criada em            Status                       Valor  Devedor               txid
+23/09/2026 10:05:12  ativa                    R$ 149,90  Cliente Exemplo Ltda  7978c0c97ea847e78e8849634473c1f1
+18/09/2026 09:40:00  concluída (paga)         R$ 300,00  Outro Cliente         a1b2c3d4e5f60718293a4b5c6d7e8f90
+02/09/2026 14:20:00  removida pelo recebedor   R$ 89,90  Mercado Exemplo       0f1e2d3c4b5a69788796a5b4c3d2e1f0
+
+3 cobranças · R$ 539,80 · pagas R$ 300,00
+
+$ inter-pj pix cob listar --status ativa --documento 12.345.678/0001-95
+$ inter-pj pix cob listar --inicio 2026-09-23T08:00:00-03:00 --fim 2026-09-23T12:00:00-03:00 --formato csv > manha.csv
+```
+
+`--inicio` e `--fim` aceitam uma data (o dia inteiro, no fuso local) ou data e hora com fuso. Os filtros são `--status` (`ativa`, `concluida`, `removida-pelo-usuario` ou `removida-pelo-psp`), `--documento` (CPF/CNPJ do devedor) e `--com-location` ou `--sem-location`. A listagem lê todas as páginas, de 1.000 cobranças cada; `--pagina N` (a primeira é 0) com `--itens-por-pagina` traz uma só. Em CSV, as colunas têm os nomes da API (`valor.original`, `devedor.nome`, `pixCopiaECola`), com os códigos e os horários como a API os envia.
+
 ### Formatos de saída
 
 | Formato | Para quê |
 | --- | --- |
 | `texto` (padrão) | leitura: tabelas alinhadas, valores em `R$ 1.234,56`, datas `DD/MM/AAAA` |
 | `json` (ou `--json`) | automação: os nomes de campo da API e valores numéricos exatos |
-| `csv` | planilhas e scripts (`saldo`, `extrato` e as listagens de pagamentos e de cobranças): RFC 4180, datas `AAAA-MM-DD`, ponto decimal, saídas do extrato com valor negativo |
+| `csv` | planilhas e scripts (`saldo`, `extrato` e as listagens de pagamentos, de cobranças e de cobranças Pix): RFC 4180, datas `AAAA-MM-DD`, ponto decimal, saídas do extrato com valor negativo |
 
 Para o Excel em português, use `--formato csv --separador ';'`: ponto e vírgula, vírgula decimal e UTF-8 com BOM. Textos vindos de terceiros que começam com `=`, `+`, `-` ou `@` (ex.: a mensagem de um Pix) recebem um apóstrofo no CSV, para não serem executados como fórmula pela planilha.
 
 ### Retentativas
 
-Consultas que falham por limite de requisições (`429`), instabilidade do servidor (`500`, `502`, `503`, `504`) ou falha de conexão são repetidas automaticamente, com espera crescente (1 s, 2 s, ...) e respeitando o cabeçalho `Retry-After`. O padrão é de 3 tentativas; ajuste com `--tentativas N` (ou `INTER_TENTATIVAS`) ou desative com `--sem-retentativa`. Com `-v`, cada nova tentativa aparece em `stderr`. O envio de Pix, os pagamentos e a emissão de cobranças só são repetidos quando certamente não foram processados (`429` ou conexão recusada); o Pix, sempre com a mesma chave de idempotência.
+Consultas que falham por limite de requisições (`429`), instabilidade do servidor (`500`, `502`, `503`, `504`) ou falha de conexão são repetidas automaticamente, com espera crescente (1 s, 2 s, ...) e respeitando o cabeçalho `Retry-After`. O padrão é de 3 tentativas; ajuste com `--tentativas N` (ou `INTER_TENTATIVAS`) ou desative com `--sem-retentativa`. Com `-v`, cada nova tentativa aparece em `stderr`. O envio de Pix, os pagamentos, a emissão de cobranças e a criação e a alteração de cobranças Pix só são repetidos quando certamente não foram processados (`429` ou conexão recusada); o Pix, sempre com a mesma chave de idempotência.
 
 ### Tokens e rate limit
 
@@ -537,7 +645,7 @@ $ curl --cert certificado.crt --key chave.key \
 | 2 | uso incorreto (argumentos inválidos) |
 | 3 | configuração ausente ou inválida (inclui certificado/chave) |
 | 4 | falha de autenticação ou acesso negado (credenciais, escopos, 401/403) |
-| 5 | requisição rejeitada pela API (400, 404, 409, 422); com `--aguardar`, Pix que terminou sem ser pago, lote com algum pagamento que não foi feito, cobrança que não foi emitida ou alteração que não foi feita; `cobranca consultar` com `--qrcode` ou `--qrcode-png` de uma cobrança sem Pix |
+| 5 | requisição rejeitada pela API (400, 404, 409, 422); com `--aguardar`, Pix que terminou sem ser pago, lote com algum pagamento que não foi feito, cobrança que não foi emitida ou alteração que não foi feita; `cobranca consultar` ou `pix cob consultar` com `--qrcode` ou `--qrcode-png` de uma cobrança sem QR Code |
 | 6 | serviço indisponível, limite de requisições (429), erro 5xx ou falha de rede, numa operação que certamente não foi feita (uma consulta, ou um envio que a API não recebeu) |
 | 7 | operação cancelada na confirmação (nada foi enviado) |
 | 8 | `pix consultar`, `pagamento lote consultar`, `cobranca emitir`, `cobranca editar` ou `cobranca edicao` com `--aguardar`: tempo esgotado antes de um status final (num lote, também com pagamentos aguardando aprovação). Em `cobranca emitir`, `cobranca editar` e `cobranca edicao --recem-pedida`, o pedido já foi feito: acompanhe-o com o comando da dica, sem repeti-lo |
