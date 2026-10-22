@@ -86,6 +86,17 @@ pub(crate) enum CliError {
         tipo: &'static str,
         txid: String,
     },
+    /// A change or the removal of a Pix charge whose outcome is unknown: it
+    /// may have been applied.
+    #[error("{source}")]
+    RevisaoPixIncerta {
+        source: InterError,
+        /// `cob` or `cobv`, as in the commands.
+        tipo: &'static str,
+        txid: String,
+        /// Whether it was the removal of the charge.
+        remocao: bool,
+    },
     /// `cobranca emitir --aguardar`: the API could not issue the charge.
     #[error("a cobrança não foi emitida: {situacao}")]
     CobrancaNaoEmitida { situacao: String },
@@ -193,6 +204,7 @@ impl CliError {
             | Self::PagamentoIncerto { .. }
             | Self::EmissaoIncerta { .. }
             | Self::CobrancaPixIncerta { .. }
+            | Self::RevisaoPixIncerta { .. }
             | Self::AlteracaoIncerta { .. }
             | Self::SemDesfecho {
                 source: Some(_), ..
@@ -214,29 +226,18 @@ impl CliError {
         }
     }
 
-    /// Suggestions shown after the error message.
-    pub(crate) fn hints(&self) -> Vec<String> {
-        let err = match self {
-            Self::Inter(err) => err,
-            Self::Periodo {
-                dica: Some(dica), ..
-            } => return vec![(*dica).to_owned()],
-            Self::PagamentosRepetidos { .. } => {
-                return vec![
-                    "se forem mesmo pagamentos distintos, use --permitir-repetidos".to_owned(),
-                ];
-            }
-            Self::TempoEsgotado { .. } => {
-                return vec!["consulte de novo mais tarde, ou aumente o --timeout".to_owned()];
-            }
+    /// The hints of an outcome that may have been processed: what may have
+    /// happened, and how to check it before trying again.
+    fn dicas_de_resultado_incerto(&self) -> Option<Vec<String>> {
+        Some(match self {
             Self::ResultadoIncerto { id_idempotente, .. } => {
-                return vec![
+                vec![
                     "o pagamento pode ter sido feito: confira o extrato antes de tentar de novo"
                         .to_owned(),
                     format!(
                         "para repetir sem risco de pagar duas vezes, use a mesma chave: --id-idempotente {id_idempotente}"
                     ),
-                ];
+                ]
             }
             Self::PagamentoIncerto {
                 situacao,
@@ -244,7 +245,7 @@ impl CliError {
                 escopos,
                 ..
             } => {
-                return vec![
+                vec![
                     format!(
                         "{situacao}, e esta API não tem chave de idempotência: repetir o comando pode pagar duas vezes"
                     ),
@@ -252,22 +253,38 @@ impl CliError {
                     format!(
                         "a consulta precisa da permissão de leitura dos pagamentos ({escopos}), e uma lista vazia logo depois do erro não prova que nada foi pago: espere alguns minutos e confira também o extrato e os agendamentos no Internet Banking"
                     ),
-                ];
+                ]
             }
             Self::CobrancaPixIncerta { tipo, txid, .. } => {
-                return vec![
+                vec![
                     "a cobrança pode ter sido criada; com o mesmo txid, a API não cria outra"
                         .to_owned(),
                     format!("confira com: {} pix {tipo} consultar {txid}", chamada()),
                     format!("ou repita o comando com --txid {txid}"),
-                ];
+                ]
+            }
+            Self::RevisaoPixIncerta {
+                tipo,
+                txid,
+                remocao,
+                ..
+            } => {
+                let situacao = if *remocao {
+                    "a cobrança pode ter sido removida"
+                } else {
+                    "a alteração pode ter sido feita"
+                };
+                vec![format!(
+                    "{situacao}: confira com {} pix {tipo} consultar {txid} antes de repetir o comando",
+                    chamada()
+                )]
             }
             Self::EmissaoIncerta { consulta, .. } => {
-                return vec![
+                vec![
                     "a cobrança pode ter sido emitida; por 30 minutos, a API recusa outra com o mesmo seu número, valor, vencimento e pagador".to_owned(),
                     format!("confira antes de tentar de novo: {consulta}"),
                     "a consulta precisa da permissão de leitura das cobranças (boleto-cobranca.read), e uma lista vazia logo depois do erro não prova que nada foi emitido: a emissão termina depois da resposta; espere alguns minutos e confira o valor, o vencimento e o pagador das cobranças encontradas".to_owned(),
-                ];
+                ]
             }
             Self::AlteracaoIncerta {
                 situacao,
@@ -280,7 +297,29 @@ impl CliError {
                     format!("confira antes de tentar de novo: {consulta}"),
                 ];
                 dicas.extend(demora.map(str::to_owned));
-                return dicas;
+                dicas
+            }
+            _ => return None,
+        })
+    }
+
+    /// Suggestions shown after the error message.
+    pub(crate) fn hints(&self) -> Vec<String> {
+        if let Some(dicas) = self.dicas_de_resultado_incerto() {
+            return dicas;
+        }
+        let err = match self {
+            Self::Inter(err) => err,
+            Self::Periodo {
+                dica: Some(dica), ..
+            } => return vec![(*dica).to_owned()],
+            Self::PagamentosRepetidos { .. } => {
+                return vec![
+                    "se forem mesmo pagamentos distintos, use --permitir-repetidos".to_owned(),
+                ];
+            }
+            Self::TempoEsgotado { .. } => {
+                return vec!["consulte de novo mais tarde, ou aumente o --timeout".to_owned()];
             }
             Self::SemDesfecho {
                 consulta,
@@ -384,6 +423,13 @@ mod tests {
             txid: "7978c0c97ea847e78e8849634473c1f1".to_owned(),
         };
         assert_eq!(cobranca.exit_code(), exit::UNCERTAIN);
+        let revisao = CliError::RevisaoPixIncerta {
+            source: ilegivel(),
+            tipo: "cobv",
+            txid: "7978c0c97ea847e78e8849634473c1f1".to_owned(),
+            remocao: true,
+        };
+        assert_eq!(revisao.exit_code(), exit::UNCERTAIN);
         // Outside an uncertain outcome, the error keeps its category.
         assert_eq!(CliError::Inter(ilegivel()).exit_code(), exit::UNEXPECTED);
     }

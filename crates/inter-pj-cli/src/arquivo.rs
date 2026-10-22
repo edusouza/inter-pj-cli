@@ -5,6 +5,7 @@
 //! drop the fine without anyone noticing.
 
 mod cobranca;
+mod cobv;
 mod csv;
 mod lote;
 
@@ -27,6 +28,7 @@ use crate::valor::parse_valor_ou_zero;
 const TAMANHO_MAXIMO: u64 = 1024 * 1024;
 
 pub(crate) use cobranca::{cobranca, modelo_cobranca};
+pub(crate) use cobv::{cobv, modelo_cobv};
 pub(crate) use lote::{ArquivoLote, MODELO_CSV, MODELO_JSON, ler_lote};
 
 /// Fields of a payment by barcode, as in the API (`EfetuarPagamento`).
@@ -168,6 +170,23 @@ impl<'a> Campos<'a> {
             .transpose()
     }
 
+    /// The object `valor`, an item of a list of this object, which may
+    /// only have the fields `aceitos`. Its messages name the fields by the
+    /// item (`infoAdicionais[1].nome`).
+    pub(crate) fn objeto_de(
+        &self,
+        valor: &'a Value,
+        item: &str,
+        aceitos: &[&str],
+    ) -> Result<Campos<'a>, CliError> {
+        Self::com_prefixo(
+            valor,
+            self.onde,
+            format!("{}{item}.", self.prefixo),
+            aceitos,
+        )
+    }
+
     /// An error about `campo`.
     pub(crate) fn erro(&self, campo: &str, problema: impl Display) -> CliError {
         CliError::Usage(format!(
@@ -186,6 +205,19 @@ impl<'a> Campos<'a> {
                 .and_then(|n| u32::try_from(n).ok())
                 .map(Some)
                 .ok_or_else(erro),
+            Some(Value::String(texto)) if texto.trim().is_empty() => Ok(None),
+            Some(Value::String(texto)) => texto.trim().parse().map(Some).map_err(|_| erro()),
+            Some(_) => Err(erro()),
+        }
+    }
+
+    /// A whole number as large as an identifier: a JSON number or its
+    /// digits as text.
+    pub(crate) fn inteiro_longo(&self, campo: &str) -> Result<Option<u64>, CliError> {
+        let erro = || self.erro(campo, "esperado um número inteiro, sem sinal");
+        match self.bruto(campo) {
+            None => Ok(None),
+            Some(Value::Number(numero)) => numero.as_u64().map(Some).ok_or_else(erro),
             Some(Value::String(texto)) if texto.trim().is_empty() => Ok(None),
             Some(Value::String(texto)) => texto.trim().parse().map(Some).map_err(|_| erro()),
             Some(_) => Err(erro()),

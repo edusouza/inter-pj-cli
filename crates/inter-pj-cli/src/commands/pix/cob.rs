@@ -5,17 +5,19 @@ use std::fmt::Write as _;
 use chrono::{DateTime, FixedOffset, Local, TimeDelta, TimeZone, Utc};
 use inter_pj::endpoint;
 use inter_pj::pix::{
-    CalendarioCobGerado, Cob, CobRevisada, CobSolicitada, Devedor, FiltroCobs, LocCob, PaginaCobs,
-    StatusCob, Txid, ValorCobRevisada,
+    CalendarioCobGerado, Cob, CobRevisada, CobSolicitada, Devedor, FiltroCobs, LocCob, StatusCob,
+    Txid, ValorCobRevisada,
 };
-use rust_decimal::Decimal;
 use serde_json::json;
 
-use super::{descrever_status, incerta, periodo, pessoa, tabela_pix};
+use super::{
+    Filtros, alteravel, antes_e_depois, copia_e_cola_ativa, descrever_status, incerta, paginacao,
+    pessoa, tabela_pix,
+};
 use crate::chamada::chamada;
 use crate::cli::{
     Formato, PixCobCommand, PixCobConsultarArgs, PixCobCriarArgs, PixCobListarArgs,
-    PixCobRevisarArgs, SimNao, StatusCobArg,
+    PixCobRevisarArgs, SimNao,
 };
 use crate::commands::qrcode::OpcoesQr;
 use crate::commands::{Context, simulacao};
@@ -201,7 +203,7 @@ async fn revisar(
     let settings = context.settings()?;
     let client = context.client(&settings)?;
     let atual = client.pix().consultar_cob(&args.txid).await?;
-    alteravel(&atual)?;
+    alteravel(atual.status.as_ref())?;
     let ambiente = settings.ambiente.as_ref().map(|setting| setting.value);
     eprintln!("{}", resumo_revisao(&atual, &revisao, ambiente));
     let pergunta = if revisao.remover {
@@ -258,20 +260,6 @@ fn revisao_das_opcoes(args: &PixCobRevisarArgs) -> Result<CobRevisada, CliError>
         .validar()
         .map_err(|err| CliError::Usage(format!("{}: {err}", opcao(err.campo()))))?;
     Ok(revisao)
-}
-
-/// Refuses what can no longer change: a charge paid or removed.
-fn alteravel(cob: &Cob) -> Result<(), CliError> {
-    let motivo = match &cob.status {
-        Some(StatusCob::Concluida) => "já foi paga",
-        Some(StatusCob::RemovidaPeloUsuarioRecebedor | StatusCob::RemovidaPeloPsp) => {
-            "já foi removida"
-        }
-        _ => return Ok(()),
-    };
-    Err(CliError::Usage(format!(
-        "a cobrança {motivo}: não pode ser alterada"
-    )))
 }
 
 /// The charge as it is, and what changes.
@@ -342,15 +330,6 @@ fn resumo_revisao(
     secao(&titulo, &linhas)
 }
 
-/// `R$ 37,00 → R$ 40,00`, or what stays.
-fn antes_e_depois(antes: Option<String>, depois: Option<String>) -> Option<String> {
-    match (antes, depois) {
-        (Some(antes), Some(depois)) => Some(format!("{antes} → {depois}")),
-        (None, Some(depois)) => Some(format!("→ {depois}")),
-        (antes, None) => antes,
-    }
-}
-
 async fn consultar(context: &Context, args: &PixCobConsultarArgs) -> Result<(), CliError> {
     let opcoes = OpcoesQr::new(
         context,
@@ -399,17 +378,7 @@ where
 /// The "copia e cola" of a charge that can still be paid, or why there is
 /// none.
 fn copia_e_cola(cob: &Cob) -> Result<&str, String> {
-    match &cob.status {
-        Some(StatusCob::Ativa) | None => cob
-            .pix_copia_e_cola
-            .as_deref()
-            .filter(|texto| !texto.trim().is_empty())
-            .ok_or_else(|| "a API não informou o copia e cola desta cobrança".to_owned()),
-        Some(status) => Err(format!(
-            "a cobrança está {}: o QR Code não serve mais para pagar",
-            descrever_status(status)
-        )),
-    }
+    copia_e_cola_ativa(cob.status.as_ref(), cob.pix_copia_e_cola.as_deref())
 }
 
 /// An immediate charge in detail, with the times in the local time zone.
@@ -510,14 +479,11 @@ fn expira(calendario: &CalendarioCobGerado) -> Option<DateTime<FixedOffset>> {
 }
 
 async fn listar(context: &Context, args: &PixCobListarArgs) -> Result<(), CliError> {
-    let mut filtro = FiltroCobs::new(periodo(args.periodo)?);
-    filtro.devedor.clone_from(&args.documento);
-    filtro.status = args.status.map(status);
-    filtro.location_presente = match (args.com_location, args.sem_location) {
-        (true, _) => Some(true),
-        (_, true) => Some(false),
-        _ => None,
-    };
+    let filtros = Filtros::de(args)?;
+    let mut filtro = FiltroCobs::new(filtros.periodo);
+    filtro.devedor.clone_from(&filtros.devedor);
+    filtro.status.clone_from(&filtros.status);
+    filtro.location_presente = filtros.location_presente;
     let settings = context.settings()?;
     let client = context.client(&settings)?;
     let (cobs, pagina) = match args.pagina {
@@ -536,10 +502,10 @@ async fn listar(context: &Context, args: &PixCobListarArgs) -> Result<(), CliErr
     };
     match context.formato() {
         Formato::Json => output::print_json(&json!({ "cobs": cobs })),
-        Formato::Csv => output::print_raw(&csv(&cobs).csv(context.separador())),
+        Formato::Csv => output::print_csv(&csv(&cobs), context.separador()),
         Formato::Texto => {
             context.warn_if_sandbox(&settings);
-            let mut texto = format!("{}\n\n", titulo(&filtro));
+            let mut texto = format!("{}\n\n", filtros.titulo("Cobranças Pix imediatas", &[]));
             if cobs.is_empty() {
                 texto.push_str("Nenhuma cobrança encontrada.");
             } else {
@@ -547,47 +513,11 @@ async fn listar(context: &Context, args: &PixCobListarArgs) -> Result<(), CliErr
                 let _ = write!(texto, "\n\n{}", totais(&cobs));
             }
             if let Some((numero, pagina)) = pagina {
-                texto.push_str(&paginacao(numero, &pagina));
+                texto.push_str(&paginacao(numero, &pagina.parametros, cobs.len()));
             }
             output::print(&texto)
         }
     }
-}
-
-fn status(status: StatusCobArg) -> StatusCob {
-    match status {
-        StatusCobArg::Ativa => StatusCob::Ativa,
-        StatusCobArg::Concluida => StatusCob::Concluida,
-        StatusCobArg::RemovidaPeloUsuario => StatusCob::RemovidaPeloUsuarioRecebedor,
-        StatusCobArg::RemovidaPeloPsp => StatusCob::RemovidaPeloPsp,
-    }
-}
-
-/// `Cobranças Pix criadas de 25/08/2026 00:00 a 23/09/2026 23:59`, and the
-/// filters.
-fn titulo(filtro: &FiltroCobs) -> String {
-    let formato = "%d/%m/%Y %H:%M";
-    let mut texto = format!(
-        "Cobranças Pix imediatas criadas de {} a {}",
-        filtro.periodo.inicio.format(formato),
-        filtro.periodo.fim.format(formato)
-    );
-    let mut filtros = Vec::new();
-    if let Some(status) = &filtro.status {
-        filtros.push(descrever_status(status).to_owned());
-    }
-    if let Some(documento) = &filtro.devedor {
-        filtros.push(format!("devedor {}", documento.formatado()));
-    }
-    match filtro.location_presente {
-        Some(true) => filtros.push("com location".to_owned()),
-        Some(false) => filtros.push("sem location".to_owned()),
-        None => {}
-    }
-    if !filtros.is_empty() {
-        let _ = write!(texto, " ({})", filtros.join(", "));
-    }
-    texto
 }
 
 fn tabela(cobs: &[Cob]) -> Tabela {
@@ -621,38 +551,12 @@ fn tabela(cobs: &[Cob]) -> Tabela {
 
 /// `3 cobranças · R$ 450,00 · pagas R$ 150,00`.
 fn totais(cobs: &[Cob]) -> String {
-    let valor = |cob: &Cob| cob.valor.as_ref().and_then(|valor| valor.original);
-    let total: Decimal = cobs.iter().filter_map(valor).sum();
-    let pagas: Decimal = cobs
-        .iter()
-        .filter(|cob| cob.status == Some(StatusCob::Concluida))
-        .filter_map(valor)
-        .sum();
-    let quantas = match cobs.len() {
-        1 => "1 cobrança".to_owned(),
-        n => format!("{n} cobranças"),
-    };
-    let mut texto = format!("{quantas} · {}", output::brl(total));
-    if !pagas.is_zero() {
-        let _ = write!(texto, " · pagas {}", output::brl(pagas));
-    }
-    texto
-}
-
-/// Where the page asked for with `--pagina` stands among the others.
-fn paginacao(numero: u32, pagina: &PaginaCobs) -> String {
-    let mut texto = format!("\n\nPágina {numero}");
-    let paginacao = pagina.parametros.paginacao.unwrap_or_default();
-    if let Some(total) = paginacao.quantidade_de_paginas {
-        let _ = write!(texto, " de {} (a primeira é 0)", total.saturating_sub(1));
-    }
-    if let Some(total) = paginacao.quantidade_total_de_itens {
-        let _ = write!(texto, "; {total} cobranças no período");
-    }
-    if paginacao.tem_mais(numero, pagina.cobs.len()) {
-        let _ = write!(texto, "; a próxima é --pagina {}", numero + 1);
-    }
-    texto
+    super::totais(cobs.iter().map(|cob| {
+        (
+            cob.valor.as_ref().and_then(|valor| valor.original),
+            cob.status.as_ref(),
+        )
+    }))
 }
 
 /// Every field, with the API's names (nested ones with a dot) and codes.
@@ -913,9 +817,9 @@ Copia e cola  00020101021226"
         let mut sem = cob("ATIVA");
         sem.pix_copia_e_cola = None;
         assert!(copia_e_cola(&sem).is_err());
-        assert!(alteravel(&cob("CONCLUIDA")).is_err());
-        assert!(alteravel(&cob("REMOVIDA_PELO_PSP")).is_err());
-        assert!(alteravel(&cob("ATIVA")).is_ok());
+        assert!(alteravel(cob("CONCLUIDA").status.as_ref()).is_err());
+        assert!(alteravel(cob("REMOVIDA_PELO_PSP").status.as_ref()).is_err());
+        assert!(alteravel(cob("ATIVA").status.as_ref()).is_ok());
     }
 
     #[test]
@@ -947,6 +851,22 @@ Copia e cola  00020101021226"
         assert_eq!(
             copia_e_cola_em(&sem_calendario, agora("2030-01-01T00:00:00Z"), &brasilia()),
             Ok("00020101021226")
+        );
+    }
+
+    #[test]
+    fn the_csv_for_a_terminal_has_no_escape_sequence() {
+        let mut forjada = cob("ATIVA");
+        forjada.solicitacao_pagador = Some("Pedido\u{1b}]52;c;ZXZpbA==\u{7}\nR$ 0,01".to_owned());
+        let tabela = csv(&[forjada]);
+        let terminal = tabela.csv_para_terminal(crate::tabela::Separador::Virgula);
+        assert!(!terminal.contains(['\u{1b}', '\u{7}']), "{terminal}");
+        assert_eq!(terminal.split("\r\n").count(), 3, "{terminal}");
+        // In a file, the text as the API sent it.
+        assert!(
+            tabela
+                .csv(crate::tabela::Separador::Virgula)
+                .contains('\u{1b}')
         );
     }
 
