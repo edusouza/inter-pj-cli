@@ -86,6 +86,21 @@ pub(crate) enum CliError {
         tipo: &'static str,
         txid: String,
     },
+    /// A refund whose outcome is unknown: the money may have left. With the
+    /// same id, the API does not refund again.
+    #[error("{source}")]
+    DevolucaoIncerta {
+        source: InterError,
+        /// End-to-end id of the Pix refunded.
+        e2e: String,
+        id: String,
+        /// Whether the API accepted the refund and what failed was the
+        /// wait for its end (`--aguardar`).
+        aceita: bool,
+    },
+    /// `pix devolucao ... --aguardar`: the refund was not made.
+    #[error("a devolução não foi feita: {motivo}")]
+    DevolucaoNaoRealizada { motivo: String },
     /// A change or the removal of a Pix charge whose outcome is unknown: it
     /// may have been applied.
     #[error("{source}")]
@@ -193,6 +208,7 @@ impl CliError {
             | Self::LoteComErro { .. }
             | Self::CobrancaNaoEmitida { .. }
             | Self::EdicaoNaoFeita { .. }
+            | Self::DevolucaoNaoRealizada { .. }
             | Self::SemQrCode(_) => exit::REJECTED,
             Self::TempoEsgotado { .. } | Self::SemDesfecho { source: None, .. } => {
                 exit::WAIT_TIMEOUT
@@ -205,6 +221,7 @@ impl CliError {
             | Self::EmissaoIncerta { .. }
             | Self::CobrancaPixIncerta { .. }
             | Self::RevisaoPixIncerta { .. }
+            | Self::DevolucaoIncerta { .. }
             | Self::AlteracaoIncerta { .. }
             | Self::SemDesfecho {
                 source: Some(_), ..
@@ -278,6 +295,23 @@ impl CliError {
                     "{situacao}: confira com {} pix {tipo} consultar {txid} antes de repetir o comando",
                     chamada()
                 )]
+            }
+            Self::DevolucaoIncerta {
+                e2e, id, aceita, ..
+            } => {
+                let situacao = if *aceita {
+                    "a devolução foi solicitada, mas o acompanhamento falhou: ela pode estar em processamento ou já ter sido feita"
+                } else {
+                    "a devolução pode ter sido feita; com o mesmo id, a API não devolve de novo"
+                };
+                vec![
+                    situacao.to_owned(),
+                    format!(
+                        "confira com: {} pix devolucao consultar {e2e} {id}",
+                        chamada()
+                    ),
+                    format!("ou repita o comando com --id {id}"),
+                ]
             }
             Self::EmissaoIncerta { consulta, .. } => {
                 vec![
@@ -430,6 +464,13 @@ mod tests {
             remocao: true,
         };
         assert_eq!(revisao.exit_code(), exit::UNCERTAIN);
+        let devolucao = CliError::DevolucaoIncerta {
+            source: ilegivel(),
+            e2e: "E12345678202609232020abcdef12345".to_owned(),
+            id: "D1".to_owned(),
+            aceita: false,
+        };
+        assert_eq!(devolucao.exit_code(), exit::UNCERTAIN);
         // Outside an uncertain outcome, the error keeps its category.
         assert_eq!(CliError::Inter(ilegivel()).exit_code(), exit::UNEXPECTED);
     }
