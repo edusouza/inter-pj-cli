@@ -4,6 +4,7 @@ use std::borrow::Cow;
 use std::io::{self, IsTerminal, Write};
 
 use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, TimeZone};
+use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::{Decimal, RoundingStrategy};
 use serde::Serialize;
 
@@ -21,6 +22,23 @@ pub(crate) fn brl(value: Decimal) -> String {
     let digits = format!("{:.2}", rounded.abs());
     let (integer, cents) = digits.split_once('.').unwrap_or((&digits, "00"));
     format!("{sign}R$ {},{cents}", group_thousands(integer))
+}
+
+/// A monetary value as a JSON number, as the library's models write it:
+/// whole values as integers (`37`), others through their shortest
+/// round-trip `f64` (`160.5`).
+pub(crate) fn valor_json(valor: Decimal) -> serde_json::Value {
+    if valor.fract().is_zero()
+        && let Some(inteiro) = valor.to_i64()
+    {
+        return inteiro.into();
+    }
+    // Amounts the CLI reads have at most 12 digits, which an `f64` holds;
+    // the text is only a fallback.
+    valor
+        .to_f64()
+        .and_then(serde_json::Number::from_f64)
+        .map_or_else(|| valor.to_string().into(), serde_json::Value::Number)
 }
 
 /// A percentage the Brazilian way: `2,5%`.
@@ -286,6 +304,17 @@ mod tests {
         for (input, expected) in cases {
             assert_eq!(brl(dec(input)), expected, "{input}");
         }
+    }
+
+    #[test]
+    fn amounts_are_json_numbers() {
+        let json = |input: &str| valor_json(dec(input)).to_string();
+        assert_eq!(json("37.00"), "37");
+        assert_eq!(json("0"), "0");
+        assert_eq!(json("160.50"), "160.5");
+        assert_eq!(json("2850.55"), "2850.55");
+        assert_eq!(json("9999999999.99"), "9999999999.99");
+        assert_eq!(json("0.01"), "0.01");
     }
 
     #[test]
