@@ -372,6 +372,39 @@ O CSV aceita `,` ou `;` como separador (detectado pelo cabeçalho), UTF-8 com ou
 
 O lote é processado depois do envio: `pagamento lote consultar` mostra o status do lote e de cada pagamento, e com `--aguardar` consulta a cada 6 segundos até o lote ser processado e nenhum pagamento estar pendente. O código de saída olha cada pagamento, e não só o status do lote: 0 quando todos foram pagos ou agendados (os agendados, com um aviso: saem da conta na data do agendamento); 5 quando algum não foi feito (erro, recusado, cancelado, expirado) ou tem um status que a CLI não conhece; 8 quando o tempo acabou (padrão: 5 min) com o lote em processamento ou com pagamentos aguardando aprovação no Internet Banking. Uma consulta que falha durante a espera (`429`, `5xx`, rede) não a interrompe: a CLI tenta de novo no próximo intervalo e, no fim do prazo, mostra o último status que conhece. Como nos outros pagamentos, não há chave de idempotência: se o resultado do envio ficar incerto (código 9), confira `pagamento boleto listar` e `pagamento darf listar` antes de enviar de novo; os comandos sugeridos levam as opções que escolheram a conta (`-p`, `--config`, `--ambiente`...). O envio precisa do escopo `pagamento-lote.write`, e a consulta, de `pagamento-lote.read`.
 
+### Cobranças
+
+Cobranças são boletos com Pix para os clientes da empresa. A consulta mostra a situação, os valores e os encargos, o boleto e o Pix:
+
+```console
+$ inter-pj cobranca consultar 0b7e4c1a-5d3f-4a2b-9c8d-7e6f5a4b3c2d
+Cobrança NF-123
+  Situação    a receber
+  Valor       R$ 150,00
+  Vencimento  20/10/2026
+  Pagador     Cliente Exemplo Ltda (12.345.678/0001-95)
+  Emitida em  23/09/2026
+  Tipo        simples
+  Desconto    2% até 5 dias antes do vencimento
+  Multa       2%
+  Juros       1% ao mês
+  Código      0b7e4c1a-5d3f-4a2b-9c8d-7e6f5a4b3c2d
+
+Boleto
+  Nosso número     12345678
+  Linha digitável  07790.00116 12345.678002 12345.678903 1 16050000015000
+
+Pix
+  Copia e cola  00020126580014br.gov.bcb.pix0136123e4567-e12b-...63041D3D
+  txid          COBRANCAEXEMPLO00000000001
+
+$ inter-pj cobranca consultar 0b7e4c1a-5d3f-4a2b-9c8d-7e6f5a4b3c2d --qrcode            # desenha o QR Code do Pix
+$ inter-pj cobranca consultar 0b7e4c1a-5d3f-4a2b-9c8d-7e6f5a4b3c2d --qrcode-png pix.png # grava o QR Code em PNG
+$ inter-pj cobranca pdf 0b7e4c1a-5d3f-4a2b-9c8d-7e6f5a4b3c2d                           # cobranca-<codigo>.pdf
+```
+
+`--qrcode` desenha o QR Code do Pix no terminal, para o cliente ler com o celular. Em um terminal, ele sai preto no branco, qualquer que seja o tema. Com `NO_COLOR` ou com a saída redirecionada, sem cores, os módulos claros é que são desenhados, como no `qrencode -t UTF8`, e o código fica certo em terminais de fundo escuro; para imprimir ou enviar, prefira `--qrcode-png`. Antes de desenhar, a CLI confere o copia e cola (CRC16). Se a cobrança não tem um Pix que dê um QR Code (ainda está sendo emitida, foi emitida sem chave Pix na conta ou o copia e cola não confere), `--qrcode` e `--qrcode-png` terminam com o código 5, sem mostrar a cobrança e sem gravar a imagem. O PNG e o PDF são gravados com permissão `600` e não sobrescrevem um arquivo existente sem `--sobrescrever`; `-` os envia para a saída padrão. As consultas precisam do escopo `boleto-cobranca.read`.
+
 ### Formatos de saída
 
 | Formato | Para quê |
@@ -407,7 +440,7 @@ $ curl --cert certificado.crt --key chave.key \
 | 2 | uso incorreto (argumentos inválidos) |
 | 3 | configuração ausente ou inválida (inclui certificado/chave) |
 | 4 | falha de autenticação ou acesso negado (credenciais, escopos, 401/403) |
-| 5 | requisição rejeitada pela API (400, 404, 409, 422); com `--aguardar`, Pix que terminou sem ser pago ou lote com algum pagamento que não foi feito |
+| 5 | requisição rejeitada pela API (400, 404, 409, 422); com `--aguardar`, Pix que terminou sem ser pago ou lote com algum pagamento que não foi feito; `--qrcode` ou `--qrcode-png` de uma cobrança sem Pix |
 | 6 | serviço indisponível, limite de requisições (429), erro 5xx ou falha de rede, numa operação que certamente não foi feita (uma consulta, ou um envio que a API não recebeu) |
 | 7 | operação cancelada na confirmação (nada foi enviado) |
 | 8 | `pix consultar` ou `pagamento lote consultar` com `--aguardar`: tempo esgotado antes de um status final (num lote, também com pagamentos aguardando aprovação) |
