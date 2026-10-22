@@ -86,6 +86,16 @@ pub(crate) enum CliError {
         tipo: &'static str,
         txid: String,
     },
+    /// A creation or a change of a location whose outcome is unknown: it may
+    /// have been made, and repeating it may make it again.
+    #[error("{source}")]
+    LocIncerta {
+        source: InterError,
+        /// What may have happened: "a location pode ter sido criada".
+        situacao: &'static str,
+        /// Command that checks it, to run before trying again.
+        consulta: String,
+    },
     /// A refund whose outcome is unknown: the money may have left. With the
     /// same id, the API does not refund again.
     #[error("{source}")]
@@ -222,6 +232,7 @@ impl CliError {
             | Self::CobrancaPixIncerta { .. }
             | Self::RevisaoPixIncerta { .. }
             | Self::DevolucaoIncerta { .. }
+            | Self::LocIncerta { .. }
             | Self::AlteracaoIncerta { .. }
             | Self::SemDesfecho {
                 source: Some(_), ..
@@ -313,6 +324,11 @@ impl CliError {
                     format!("ou repita o comando com --id {id}"),
                 ]
             }
+            Self::LocIncerta {
+                situacao, consulta, ..
+            } => vec![format!(
+                "{situacao}: confira com {consulta} antes de repetir o comando"
+            )],
             Self::EmissaoIncerta { consulta, .. } => {
                 vec![
                     "a cobrança pode ter sido emitida; por 30 minutos, a API recusa outra com o mesmo seu número, valor, vencimento e pagador".to_owned(),
@@ -471,6 +487,12 @@ mod tests {
             aceita: false,
         };
         assert_eq!(devolucao.exit_code(), exit::UNCERTAIN);
+        let loc = CliError::LocIncerta {
+            source: ilegivel(),
+            situacao: "a location pode ter sido criada",
+            consulta: "inter-pj pix loc listar --sem-cobranca".to_owned(),
+        };
+        assert_eq!(loc.exit_code(), exit::UNCERTAIN);
         // Outside an uncertain outcome, the error keeps its category.
         assert_eq!(CliError::Inter(ilegivel()).exit_code(), exit::UNEXPECTED);
     }

@@ -1,5 +1,5 @@
 //! `inter-pj pix` commands of the Pix API (`/pix/v2`): the charges, the Pix
-//! received and their refunds.
+//! received and their refunds, and the locations.
 //!
 //! Doc comments here are `--help` text too (in Portuguese).
 
@@ -11,7 +11,8 @@ use clap::{ArgAction, ArgGroup, Args, Subcommand, ValueEnum};
 use inter_pj::cobranca::Uf;
 use inter_pj::documento::Documento;
 use inter_pj::pix::{
-    ChavePix, IdDevolucao, IdDevolucaoError, InfoAdicional, NaturezaDevolucao, Txid, TxidError,
+    ChavePix, IdDevolucao, IdDevolucaoError, InfoAdicional, NaturezaDevolucao, TipoCob, Txid,
+    TxidError,
 };
 use rust_decimal::Decimal;
 
@@ -722,6 +723,108 @@ pub(crate) struct PixDevolucaoConsultarArgs {
 
     #[command(flatten)]
     pub(crate) espera: EsperaDevolucaoArgs,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum PixLocCommand {
+    /// Cria uma location, o endereço do QR Code de uma cobrança, para usar depois com --loc
+    Criar(PixLocCriarArgs),
+    /// Locations criadas em um período (padrão: últimos 30 dias), com filtros
+    Listar(PixLocListarArgs),
+    /// Mostra uma location e a cobrança vinculada a ela
+    Consultar(PixLocConsultarArgs),
+    /// Desvincula a cobrança de uma location, após mostrá-la e pedir confirmação
+    Desvincular(PixLocDesvincularArgs),
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct PixLocCriarArgs {
+    /// Para que cobrança: cob (imediata) ou cobv (com vencimento)
+    #[arg(
+        long,
+        value_name = "TIPO",
+        value_enum,
+        ignore_case = true,
+        hide_possible_values = true
+    )]
+    pub(crate) tipo: TipoCobArg,
+}
+
+/// `--tipo` of the locations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum TipoCobArg {
+    Cob,
+    Cobv,
+}
+
+impl From<TipoCobArg> for TipoCob {
+    fn from(tipo: TipoCobArg) -> Self {
+        match tipo {
+            TipoCobArg::Cob => Self::Cob,
+            TipoCobArg::Cobv => Self::Cobv,
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct PixLocListarArgs {
+    #[command(flatten)]
+    pub(crate) periodo: PeriodoPixArgs,
+
+    /// Apenas as locations para este tipo de cobrança: cob ou cobv
+    #[arg(
+        long,
+        value_name = "TIPO",
+        value_enum,
+        ignore_case = true,
+        hide_possible_values = true
+    )]
+    pub(crate) tipo: Option<TipoCobArg>,
+
+    #[command(flatten)]
+    pub(crate) vinculo: ComSemVinculoArgs,
+
+    /// Traz só esta página (a primeira é 0), em vez de todas
+    #[arg(long, value_name = "N")]
+    pub(crate) pagina: Option<u32>,
+
+    /// Itens por página com --pagina, de 1 a 1000 [padrão da API: 100]
+    #[arg(long, value_name = "N", requires = "pagina")]
+    pub(crate) itens_por_pagina: Option<u32>,
+}
+
+/// `--com-cobranca` or `--sem-cobranca` of the locations.
+#[derive(Debug, Clone, Copy, Args)]
+pub(crate) struct ComSemVinculoArgs {
+    /// Apenas as locations com uma cobrança vinculada
+    #[arg(long, conflicts_with = "sem_cobranca")]
+    pub(crate) com_cobranca: bool,
+
+    /// Apenas as locations livres, sem cobrança
+    #[arg(long)]
+    pub(crate) sem_cobranca: bool,
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct PixLocConsultarArgs {
+    /// id da location, mostrado por `pix loc criar` e `pix loc listar`
+    #[arg(value_name = "ID")]
+    pub(crate) id: u64,
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct PixLocDesvincularArgs {
+    /// id da location
+    #[arg(value_name = "ID")]
+    pub(crate) id: u64,
+
+    /// Confirma sem perguntar (para scripts)
+    #[arg(long, help_heading = "Segurança")]
+    pub(crate) sim: bool,
 }
 
 /// `--inicio` and `--fim` of the Pix listings.
