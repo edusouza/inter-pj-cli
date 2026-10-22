@@ -8,8 +8,9 @@ mod cobranca;
 mod cobv;
 mod csv;
 mod lote;
+mod lote_cobv;
 
-use std::fmt::Display;
+use std::fmt::{self as fmt, Display};
 use std::io::{self, Read};
 use std::path::Path;
 use std::str::FromStr;
@@ -19,6 +20,7 @@ use inter_pj::banking::{PagamentoBoleto, PagamentoDarf};
 use inter_pj::boleto::CodigoBarras;
 use inter_pj::documento::Documento;
 use rust_decimal::Decimal;
+use serde::de::{self, Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde_json::{Map, Value};
 
 use crate::error::CliError;
@@ -30,6 +32,7 @@ const TAMANHO_MAXIMO: u64 = 1024 * 1024;
 pub(crate) use cobranca::{cobranca, modelo_cobranca};
 pub(crate) use cobv::{cobv, modelo_cobv};
 pub(crate) use lote::{ArquivoLote, MODELO_CSV, MODELO_JSON, ler_lote};
+pub(crate) use lote_cobv::{ler_lote_cobv, ler_revisao_lote_cobv, modelo_lote_cobv};
 
 /// Fields of a payment by barcode, as in the API (`EfetuarPagamento`).
 pub(crate) const CAMPOS_BOLETO: [&str; 5] = [
@@ -64,6 +67,17 @@ pub(crate) fn nome(caminho: &Path) -> String {
     }
 }
 
+/// `1,36094E+16` or `1.36094E+16`: how Excel shows a long number, whose
+/// digits it then loses.
+fn notacao_cientifica(texto: &str) -> bool {
+    let Some((mantissa, expoente)) = texto.split_once(['E', 'e']) else {
+        return false;
+    };
+    let digitos = |parte: &str| !parte.is_empty() && parte.bytes().all(|b| b.is_ascii_digit());
+    digitos(expoente.strip_prefix('+').unwrap_or(expoente))
+        && mantissa.split([',', '.']).all(digitos)
+}
+
 /// Reads a text file, or the standard input for `-`.
 pub(crate) fn ler(caminho: &Path) -> Result<String, CliError> {
     let erro = |err: io::Error| CliError::io(format!("falha ao ler {}", nome(caminho)), err);
@@ -91,15 +105,101 @@ pub(crate) fn ler(caminho: &Path) -> Result<String, CliError> {
 
 /// Reads and parses a JSON file.
 pub(crate) fn ler_json(caminho: &Path) -> Result<Value, CliError> {
-    let texto = ler(caminho)?;
-    serde_json::from_str(&texto).map_err(|err| {
-        CliError::Usage(format!(
-            "{}: JSON inválido na linha {}, coluna {}",
-            nome(caminho),
-            err.line(),
-            err.column()
-        ))
-    })
+    json(&ler(caminho)?, &nome(caminho))
+}
+
+/// `texto` as JSON, refusing an object with the same key twice: a parser
+/// keeps the last one in silence, and in a file edited by hand a second
+/// `"original"` would replace the first without anyone noticing.
+pub(crate) fn json(texto: &str, nome: &str) -> Result<Value, CliError> {
+    let mut leitor = serde_json::Deserializer::from_str(texto);
+    SemRepetidas::deserialize(&mut leitor)
+        .and_then(|valor| leitor.end().map(|()| valor.0))
+        .map_err(|err| {
+            let onde = format!("na linha {}, coluna {}", err.line(), err.column());
+            CliError::Usage(if err.is_data() {
+                // Our own message, without the " at line ..." of `serde_json`.
+                let texto = err.to_string();
+                let causa = texto.split(" at line ").next().unwrap_or(&texto);
+                format!("{nome}: {causa}, {onde}")
+            } else {
+                format!("{nome}: JSON inválido {onde}")
+            })
+        })
+}
+
+/// A JSON value whose objects have each key once.
+struct SemRepetidas(Value);
+
+impl<'de> Deserialize<'de> for SemRepetidas {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_any(Valor).map(SemRepetidas)
+    }
+}
+
+/// Builds a [`Value`] as `serde_json` does, but refuses a repeated key.
+struct Valor;
+
+impl<'de> Visitor<'de> for Valor {
+    type Value = Value;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("um valor JSON")
+    }
+
+    fn visit_bool<E>(self, valor: bool) -> Result<Value, E> {
+        Ok(Value::Bool(valor))
+    }
+
+    fn visit_i64<E>(self, valor: i64) -> Result<Value, E> {
+        Ok(Value::from(valor))
+    }
+
+    fn visit_u64<E>(self, valor: u64) -> Result<Value, E> {
+        Ok(Value::from(valor))
+    }
+
+    fn visit_f64<E>(self, valor: f64) -> Result<Value, E> {
+        Ok(Value::from(valor))
+    }
+
+    fn visit_str<E>(self, valor: &str) -> Result<Value, E> {
+        Ok(Value::String(valor.to_owned()))
+    }
+
+    fn visit_string<E>(self, valor: String) -> Result<Value, E> {
+        Ok(Value::String(valor))
+    }
+
+    fn visit_unit<E>(self) -> Result<Value, E> {
+        Ok(Value::Null)
+    }
+
+    fn visit_none<E>(self) -> Result<Value, E> {
+        Ok(Value::Null)
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, mut lista: A) -> Result<Value, A::Error> {
+        let mut itens = Vec::new();
+        while let Some(SemRepetidas(item)) = lista.next_element()? {
+            itens.push(item);
+        }
+        Ok(Value::Array(itens))
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut campos: A) -> Result<Value, A::Error> {
+        let mut objeto = Map::new();
+        while let Some(chave) = campos.next_key::<String>()? {
+            if objeto.contains_key(&chave) {
+                return Err(de::Error::custom(format!(
+                    "o campo \"{chave}\" aparece duas vezes no mesmo objeto"
+                )));
+            }
+            let SemRepetidas(valor) = campos.next_value()?;
+            objeto.insert(chave, valor);
+        }
+        Ok(Value::Object(objeto))
+    }
 }
 
 /// The fields of a JSON object, read with errors that say where they are.
@@ -185,6 +285,16 @@ impl<'a> Campos<'a> {
             format!("{}{item}.", self.prefixo),
             aceitos,
         )
+    }
+
+    /// An error about the object as a whole.
+    pub(crate) fn erro_geral(&self, problema: impl Display) -> CliError {
+        CliError::Usage(format!("{}: {problema}", self.onde))
+    }
+
+    /// Whether `campo` has a value.
+    pub(crate) fn presente(&self, campo: &str) -> bool {
+        self.bruto(campo).is_some()
     }
 
     /// An error about `campo`.
@@ -472,6 +582,31 @@ mod tests {
             let erro = com(campo, valor);
             assert!(erro.starts_with(esperado), "{campo}: {erro}");
         }
+    }
+
+    #[test]
+    fn a_key_repeated_at_any_level_is_refused() {
+        let texto = r#"{"cobsv": [
+  {"valor": {"original": "10,00"}},
+  {"valor": {"original": "10,00", "original": "1000,00"}}
+]}"#;
+        assert_eq!(
+            json(texto, "lote.json").unwrap_err().to_string(),
+            "lote.json: o campo \"original\" aparece duas vezes no mesmo objeto, na linha 3, coluna 44"
+        );
+        let texto = r#"{"descricao": "a", "descricao": "b"}"#;
+        assert!(json(texto, "x.json").is_err());
+        // Without repetition, the same value as serde_json's.
+        let texto = r#"[{"a": 1, "b": [true, null, 1.5, -2, "c"]}, {"a": 18446744073709551615}]"#;
+        assert_eq!(
+            json(texto, "x.json").unwrap(),
+            serde_json::from_str::<Value>(texto).unwrap()
+        );
+        assert_eq!(
+            json("[1, 2", "x.json").unwrap_err().to_string(),
+            "x.json: JSON inválido na linha 1, coluna 5"
+        );
+        assert!(json("{} {}", "x.json").is_err());
     }
 
     #[test]

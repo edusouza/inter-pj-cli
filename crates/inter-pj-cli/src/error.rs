@@ -108,6 +108,10 @@ pub(crate) enum CliError {
         /// wait for its end (`--aguardar`).
         aceita: bool,
     },
+    /// A batch of charges whose request is unknown: it may have been
+    /// received. Its charges have txids, so repeating it creates none twice.
+    #[error("{source}")]
+    LoteCobvIncerto { source: InterError, id: u64 },
     /// `pix devolucao ... --aguardar`: the refund was not made.
     #[error("a devolução não foi feita: {motivo}")]
     DevolucaoNaoRealizada { motivo: String },
@@ -237,7 +241,7 @@ impl CliError {
             | Self::SemDesfecho {
                 source: Some(_), ..
             } => exit::UNCERTAIN,
-            Self::Inter(err) => match err {
+            Self::Inter(err) | Self::LoteCobvIncerto { source: err, .. } => match err {
                 InterError::InvalidInput(_) => exit::USAGE,
                 InterError::Config(_) | InterError::Identity(_) => exit::CONFIG,
                 InterError::Auth(_) => exit::AUTH,
@@ -324,6 +328,15 @@ impl CliError {
                     format!("ou repita o comando com --id {id}"),
                 ]
             }
+            Self::LoteCobvIncerto { id, .. } => {
+                vec![
+                    format!(
+                        "o lote pode ter sido recebido: confira com inter-pj pix lote-cobv consultar {id} antes de repetir"
+                    ),
+                    "repetir o comando não duplica cobranças: com o mesmo txid, a API não cria outra"
+                        .to_owned(),
+                ]
+            }
             Self::LocIncerta {
                 situacao, consulta, ..
             } => vec![format!(
@@ -335,19 +348,6 @@ impl CliError {
                     format!("confira antes de tentar de novo: {consulta}"),
                     "a consulta precisa da permissão de leitura das cobranças (boleto-cobranca.read), e uma lista vazia logo depois do erro não prova que nada foi emitido: a emissão termina depois da resposta; espere alguns minutos e confira o valor, o vencimento e o pagador das cobranças encontradas".to_owned(),
                 ]
-            }
-            Self::AlteracaoIncerta {
-                situacao,
-                consulta,
-                demora,
-                ..
-            } => {
-                let mut dicas = vec![
-                    (*situacao).to_owned(),
-                    format!("confira antes de tentar de novo: {consulta}"),
-                ];
-                dicas.extend(demora.map(str::to_owned));
-                dicas
             }
             _ => return None,
         })
@@ -370,6 +370,19 @@ impl CliError {
             }
             Self::TempoEsgotado { .. } => {
                 return vec!["consulte de novo mais tarde, ou aumente o --timeout".to_owned()];
+            }
+            Self::AlteracaoIncerta {
+                situacao,
+                consulta,
+                demora,
+                ..
+            } => {
+                let mut dicas = vec![
+                    (*situacao).to_owned(),
+                    format!("confira antes de tentar de novo: {consulta}"),
+                ];
+                dicas.extend(demora.map(str::to_owned));
+                return dicas;
             }
             Self::SemDesfecho {
                 consulta,

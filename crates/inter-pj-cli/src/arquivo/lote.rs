@@ -11,7 +11,7 @@ use chrono::NaiveDate;
 use inter_pj::banking::ItemLote;
 use serde_json::{Map, Value};
 
-use super::{CAMPOS_BOLETO, CAMPOS_DARF, Campos, boleto, csv, darf, ler};
+use super::{CAMPOS_BOLETO, CAMPOS_DARF, Campos, boleto, csv, darf, ler, notacao_cientifica};
 use crate::error::CliError;
 
 /// Most problems listed at once.
@@ -129,13 +129,7 @@ pub(crate) fn ler_lote(caminho: &Path, hoje: NaiveDate) -> Result<ArquivoLote, C
 }
 
 fn json(nome: &str, texto: &str, hoje: NaiveDate) -> Result<ArquivoLote, CliError> {
-    let valor: Value = serde_json::from_str(texto).map_err(|err| {
-        CliError::Usage(format!(
-            "{nome}: JSON inválido na linha {}, coluna {}",
-            err.line(),
-            err.column()
-        ))
-    })?;
+    let valor = super::json(texto, nome)?;
     let (meu_identificador, itens) = match &valor {
         Value::Array(itens) => (None, itens),
         Value::Object(objeto) => {
@@ -244,16 +238,6 @@ fn estragado_pelo_excel(objeto: &Map<String, Value>, onde: &str) -> Option<CliEr
         )),
         _ => None,
     }
-}
-
-/// `1,36094E+16` or `1.36094E+16`.
-fn notacao_cientifica(texto: &str) -> bool {
-    let Some((mantissa, expoente)) = texto.split_once(['E', 'e']) else {
-        return false;
-    };
-    let digitos = |parte: &str| !parte.is_empty() && parte.bytes().all(|b| b.is_ascii_digit());
-    digitos(expoente.strip_prefix('+').unwrap_or(expoente))
-        && mantissa.split([',', '.']).all(digitos)
 }
 
 fn item_de(valor: &Value, onde: &str, hoje: NaiveDate) -> Result<ItemLote, CliError> {
