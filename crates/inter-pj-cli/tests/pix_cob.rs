@@ -538,11 +538,13 @@ async fn cobranca_paga_nao_e_revisada_nem_tem_qr_code() {
         "{}",
         stderr_of(&assert)
     );
+    // No QR Code to show: the query fails before showing anything (5).
     let assert = env
         .cmd()
         .args(["pix", "cob", "consultar", TXID, "--qrcode"])
         .assert()
-        .success();
+        .code(5);
+    assert_eq!(stdout_of(&assert), "");
     assert!(
         stderr_of(&assert).contains("o QR Code não serve mais para pagar"),
         "{}",
@@ -608,7 +610,8 @@ async fn cobranca_expirada_nao_tem_qr_code() {
         .args(["pix", "cob", "consultar", TXID, "--qrcode-png"])
         .arg(&png)
         .assert()
-        .code(2);
+        .code(5);
+    assert_eq!(stdout_of(&assert), "");
     assert!(
         stderr_of(&assert).contains("a cobrança expirou em 23/09/2026"),
         "{}",
