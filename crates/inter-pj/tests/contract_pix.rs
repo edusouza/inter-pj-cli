@@ -17,6 +17,10 @@ use inter_pj::pix::{
     MAX_INFO_ADICIONAIS, MAX_SOLICITACAO_PAGADOR, ModalidadeAgente, Retirada, StatusCob,
     StatusDevolucao, TXID_MAXIMO, TXID_MINIMO, TipoCob, ValorCobRevisada, ValorRetirada,
 };
+use inter_pj::pix::{
+    Devolucao, DevolucaoSolicitada, ID_DEVOLUCAO_MAXIMO, MAX_DESCRICAO_DEVOLUCAO,
+    NaturezaDevolucao, PaginaPixRecebidos,
+};
 use serde_json::Value;
 use spec::{
     enum_values, example_for_schema, keys, parameter_names, parameters, property_names, resolve,
@@ -514,4 +518,80 @@ fn charge_with_a_due_date_limits_are_the_documented_ones() {
     assert_eq!(propriedade(abatimento, "modalidade").unwrap()["maximum"], 2);
     let listagem = parameter_names(&endpoint::pix::LISTAR_COBVS);
     assert!(listagem.contains("loteCobVId"));
+}
+
+// --- Pix recebidos e devoluções ---------------------------------------------------
+
+#[test]
+fn refunds_are_the_documentation_examples() {
+    let devolucao = DevolucaoSolicitada::new("7.89".parse().unwrap());
+    assert_eq!(
+        &serde_json::to_value(&devolucao).unwrap(),
+        example("devolucaoSolicitada1")
+    );
+    let mut completa = devolucao;
+    completa.natureza = Some(NaturezaDevolucao::Retirada);
+    completa.descricao = Some("Troco devolvido".to_owned());
+    assert_documentado(
+        "DevolucaoSolicitada",
+        &serde_json::to_value(&completa).unwrap(),
+    );
+    for nome in ["devolucaoResponse1", "devolucaoResponse2"] {
+        let exemplo = example(nome);
+        let devolucao: Devolucao = serde_json::from_value(exemplo.clone()).unwrap();
+        assert_eq!(
+            &serde_json::to_value(&devolucao).unwrap(),
+            exemplo,
+            "{nome}"
+        );
+    }
+    let pix: PixRecebido = serde_json::from_value(example("pixResponse2").clone()).unwrap();
+    assert_eq!(
+        &serde_json::to_value(&pix).unwrap(),
+        example("pixResponse2")
+    );
+}
+
+#[test]
+fn pages_of_pix_received_keep_every_documented_field() {
+    let mut pagina = example_for_schema("PixConsultados");
+    pagina["pix"] = Value::Array(Vec::new());
+    let pagina: PaginaPixRecebidos = serde_json::from_value(pagina).unwrap();
+    let de_volta = serde_json::to_value(&pagina).unwrap();
+    assert_eq!(keys(&de_volta), property_names("PixConsultados"));
+    assert_eq!(
+        keys(&de_volta["parametros"]),
+        property_names("ParametrosConsultaPix")
+    );
+}
+
+#[test]
+fn refund_codes_and_limits_are_the_documented_ones() {
+    assert_eq!(
+        strings(&NaturezaDevolucao::TODAS.map(NaturezaDevolucao::as_str)),
+        enum_values("DevolucaoSolicitadaNatureza")
+            .into_iter()
+            .map(str::to_owned)
+            .collect()
+    );
+    assert_eq!(
+        schema("DevolucaoId")["pattern"],
+        format!("[a-zA-Z0-9]{{1,{ID_DEVOLUCAO_MAXIMO}}}")
+    );
+    assert_eq!(
+        propriedade(schema("DevolucaoSolicitada"), "descricao").unwrap()["maxLength"],
+        MAX_DESCRICAO_DEVOLUCAO
+    );
+    let listagem = parameter_names(&endpoint::pix::LISTAR_RECEBIDOS);
+    for nome in [
+        "inicio",
+        "fim",
+        "txId",
+        "txIdPresente",
+        "devolucaoPresente",
+        "cpf",
+        "cnpj",
+    ] {
+        assert!(listagem.contains(nome), "{nome}");
+    }
 }

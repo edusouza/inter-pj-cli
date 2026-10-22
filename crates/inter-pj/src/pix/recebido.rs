@@ -1,10 +1,223 @@
-//! Pix received by the account and their refunds, as returned by the Pix API.
+//! Pix received by the account and their refunds.
+
+use std::fmt::{self, Write as _};
+use std::str::FromStr;
 
 use rust_decimal::Decimal;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 use serde_json::Value;
 
+use super::cob::ParametrosConsulta;
+use super::comum::{CobrancaPixError, PeriodoPix, texto, valor};
+use super::txid::Txid;
+use crate::documento::Documento;
 use crate::serde_util::{api_enum, decimal_texto, lenient, string_serde};
+
+/// Longest [`IdDevolucao`].
+pub const ID_DEVOLUCAO_MAXIMO: usize = 35;
+
+/// Longest [`DevolucaoSolicitada::descricao`].
+pub const MAX_DESCRICAO_DEVOLUCAO: usize = 140;
+
+/// Identifier of a refund (`id`): 1 to 35 letters and digits, chosen by the
+/// receiver. The API does not refund twice with the same id, so a refund
+/// whose answer was lost can be repeated with it.
+///
+/// ```
+/// use inter_pj::pix::IdDevolucao;
+///
+/// let id: IdDevolucao = "D123".parse().unwrap();
+/// assert_eq!(id.as_str(), "D123");
+/// assert!("D-123".parse::<IdDevolucao>().is_err());
+/// assert_eq!(IdDevolucao::novo().as_str().len(), 32);
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct IdDevolucao(String);
+
+impl IdDevolucao {
+    /// A new random id: 32 hexadecimal digits in lower case.
+    ///
+    /// # Panics
+    ///
+    /// Never in practice: AWS-LC aborts the process itself when the operating
+    /// system cannot provide random bytes.
+    pub fn novo() -> Self {
+        let mut bytes = [0u8; 16];
+        aws_lc_rs::rand::fill(&mut bytes)
+            .expect("o sistema não forneceu bytes aleatórios para o id da devolução");
+        let mut id = String::with_capacity(32);
+        for byte in bytes {
+            let _ = write!(id, "{byte:02x}");
+        }
+        Self(id)
+    }
+
+    /// The id as sent.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl FromStr for IdDevolucao {
+    type Err = IdDevolucaoError;
+
+    fn from_str(raw: &str) -> Result<Self, Self::Err> {
+        let id = raw.trim();
+        if (1..=ID_DEVOLUCAO_MAXIMO).contains(&id.len())
+            && id.bytes().all(|b| b.is_ascii_alphanumeric())
+        {
+            Ok(Self(id.to_owned()))
+        } else {
+            Err(IdDevolucaoError)
+        }
+    }
+}
+
+impl fmt::Display for IdDevolucao {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// A text that is not an [`IdDevolucao`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("id da devolução inválido: use de 1 a 35 letras e dígitos, sem espaços nem símbolos")]
+pub struct IdDevolucaoError;
+
+/// A refund to request (`DevolucaoSolicitada`), with
+/// [`Pix::devolver`](super::Pix::devolver). The refunds of a Pix cannot
+/// add up to more than it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
+pub struct DevolucaoSolicitada {
+    /// Amount to refund.
+    #[serde(serialize_with = "decimal_texto::serialize")]
+    pub valor: Decimal,
+    /// Which part of the Pix is refunded; the API's default is the original
+    /// amount.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub natureza: Option<NaturezaDevolucao>,
+    /// Message to the payer, up to [`MAX_DESCRICAO_DEVOLUCAO`] characters.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub descricao: Option<String>,
+}
+
+impl DevolucaoSolicitada {
+    /// A refund of `valor`.
+    pub fn new(valor: Decimal) -> Self {
+        Self {
+            valor,
+            natureza: None,
+            descricao: None,
+        }
+    }
+
+    /// Checks what can be checked before sending.
+    ///
+    /// # Errors
+    ///
+    /// The first field the API would refuse.
+    pub fn validar(&self) -> Result<(), CobrancaPixError> {
+        valor(self.valor, "valor", false)?;
+        if let Some(descricao) = &self.descricao {
+            texto(descricao, "descricao", MAX_DESCRICAO_DEVOLUCAO)?;
+        }
+        Ok(())
+    }
+}
+
+/// Which part of a Pix a refund is about (`DevolucaoSolicitadaNatureza`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum NaturezaDevolucao {
+    /// `ORIGINAL`: a common Pix, or the purchase of a Pix Troco.
+    Original,
+    /// `RETIRADA`: the cash of a Pix Saque, or the change of a Pix Troco.
+    Retirada,
+}
+
+impl NaturezaDevolucao {
+    /// Every nature.
+    pub const TODAS: [Self; 2] = [Self::Original, Self::Retirada];
+
+    /// Code used by the API.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Original => "ORIGINAL",
+            Self::Retirada => "RETIRADA",
+        }
+    }
+}
+
+impl Serialize for NaturezaDevolucao {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+/// Filters of [`Pix::listar_pix_recebidos`](super::Pix::listar_pix_recebidos):
+/// the period in which the Pix were processed and, optionally, the charge,
+/// whether there is one, whether it was refunded and the payer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct FiltroPixRecebidos {
+    /// Period.
+    pub periodo: PeriodoPix,
+    /// Only the Pix of this charge.
+    pub txid: Option<Txid>,
+    /// Only Pix of (`true`) or without (`false`) a charge.
+    pub tx_id_presente: Option<bool>,
+    /// Only Pix with (`true`) or without (`false`) refunds.
+    pub devolucao_presente: Option<bool>,
+    /// CPF or CNPJ of the payer.
+    pub devedor: Option<Documento>,
+}
+
+impl FiltroPixRecebidos {
+    /// Every Pix received in `periodo`.
+    pub fn new(periodo: PeriodoPix) -> Self {
+        Self {
+            periodo,
+            txid: None,
+            tx_id_presente: None,
+            devolucao_presente: None,
+            devedor: None,
+        }
+    }
+
+    pub(crate) fn query(&self) -> Vec<(&'static str, String)> {
+        let mut query: Vec<(&'static str, String)> = self.periodo.query().into();
+        if let Some(txid) = &self.txid {
+            query.push(("txId", txid.as_str().to_owned()));
+        }
+        if let Some(presente) = self.tx_id_presente {
+            query.push(("txIdPresente", presente.to_string()));
+        }
+        if let Some(presente) = self.devolucao_presente {
+            query.push(("devolucaoPresente", presente.to_string()));
+        }
+        match &self.devedor {
+            Some(Documento::Cpf(cpf)) => query.push(("cpf", cpf.clone())),
+            Some(Documento::Cnpj(cnpj)) => query.push(("cnpj", cnpj.clone())),
+            None => {}
+        }
+        query
+    }
+}
+
+/// A page of [`Pix::listar_pix_recebidos`](super::Pix::listar_pix_recebidos)
+/// (`PixConsultados`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+pub struct PaginaPixRecebidos {
+    /// The filters and the page, as the API understood them.
+    #[serde(default)]
+    pub parametros: ParametrosConsulta,
+    /// The Pix of the page.
+    #[serde(default, deserialize_with = "lenient::vec")]
+    pub pix: Vec<PixRecebido>,
+}
 
 /// A Pix received (`Pix`), inside a charge or in the listing of the Pix
 /// received.
@@ -157,6 +370,65 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn refunds_are_checked_before_sending() {
+        let mut devolucao = DevolucaoSolicitada::new("7.89".parse().unwrap());
+        devolucao.validar().unwrap();
+        assert_eq!(
+            serde_json::to_value(&devolucao).unwrap(),
+            json!({"valor": "7.89"})
+        );
+        devolucao.natureza = Some(NaturezaDevolucao::Retirada);
+        devolucao.descricao = Some("Troco devolvido".to_owned());
+        assert_eq!(
+            serde_json::to_value(&devolucao).unwrap(),
+            json!({"valor": "7.89", "natureza": "RETIRADA", "descricao": "Troco devolvido"})
+        );
+        devolucao.descricao = Some("x".repeat(141));
+        assert_eq!(devolucao.validar().unwrap_err().campo(), "descricao");
+        devolucao.valor = Decimal::ZERO;
+        assert_eq!(devolucao.validar().unwrap_err().campo(), "valor");
+    }
+
+    #[test]
+    fn refund_ids_have_up_to_35_letters_and_digits() {
+        assert!("a".parse::<IdDevolucao>().is_ok());
+        assert!("A1".repeat(17).parse::<IdDevolucao>().is_ok());
+        for invalido in ["", "a".repeat(36).as_str(), "a b", "ação", "../x"] {
+            assert_eq!(
+                invalido.parse::<IdDevolucao>(),
+                Err(IdDevolucaoError),
+                "{invalido}"
+            );
+        }
+        let id = IdDevolucao::novo();
+        assert_eq!(id.as_str().parse::<IdDevolucao>().unwrap(), id);
+    }
+
+    #[test]
+    fn filters_become_the_query() {
+        use chrono::DateTime;
+        let periodo = PeriodoPix::new(
+            DateTime::parse_from_rfc3339("2026-09-01T00:00:00-03:00").unwrap(),
+            DateTime::parse_from_rfc3339("2026-09-30T23:59:59-03:00").unwrap(),
+        )
+        .unwrap();
+        let mut filtro = FiltroPixRecebidos::new(periodo);
+        filtro.txid = Some("7978c0c97ea847e78e8849634473c1f1".parse().unwrap());
+        filtro.tx_id_presente = Some(true);
+        filtro.devolucao_presente = Some(false);
+        filtro.devedor = Some("123.456.789-09".parse().unwrap());
+        assert_eq!(
+            filtro.query()[2..],
+            [
+                ("txId", "7978c0c97ea847e78e8849634473c1f1".to_owned()),
+                ("txIdPresente", "true".to_owned()),
+                ("devolucaoPresente", "false".to_owned()),
+                ("cpf", "12345678909".to_owned()),
+            ]
+        );
+    }
 
     #[test]
     fn a_received_pix_keeps_what_came() {
