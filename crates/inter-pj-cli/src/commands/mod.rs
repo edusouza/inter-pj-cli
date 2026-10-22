@@ -16,7 +16,7 @@ use std::time::Duration;
 use chrono::{DateTime, Days, FixedOffset, NaiveDate, Utc};
 use clap::ArgMatches;
 use clap::parser::ValueSource;
-use inter_pj::{ClientIdentity, Credentials, InterClient};
+use inter_pj::{ApiErrorKind, ClientIdentity, Credentials, Error as InterError, InterClient};
 use secrecy::ExposeSecret;
 
 use crate::cli::{Cli, Command, Formato, GlobalArgs, PeriodoArgs};
@@ -253,6 +253,19 @@ fn hoje() -> NaiveDate {
 
 fn hoje_em(agora: DateTime<Utc>) -> NaiveDate {
     agora.with_timezone(&BRASILIA).date_naive()
+}
+
+/// An error after which the next query of a wait (`--aguardar`) may
+/// answer: the rate limit, the service, the network.
+fn passageiro(err: &InterError) -> bool {
+    match err {
+        InterError::Api(api) => matches!(
+            api.kind(),
+            ApiErrorKind::RateLimited | ApiErrorKind::Unavailable | ApiErrorKind::Server
+        ),
+        InterError::Transport(_) | InterError::TokenTransport(_) => true,
+        _ => false,
+    }
 }
 
 /// Dates of a listing: without `--fim`, today; without `--inicio`, the

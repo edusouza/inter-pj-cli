@@ -9,12 +9,13 @@ use inter_pj::cobranca::{
 use inter_pj::{Environment, Error as InterError, InterClient};
 use serde_json::json;
 
-use super::{argumento, data, descrever_situacao, documento};
+use super::{data, descrever_situacao, documento};
+use crate::chamada::{argumento, chamada};
 use crate::cli::{
     CobrancaCancelarArgs, CobrancaEdicaoArgs, CobrancaEditarArgs, CobrancaPagarArgs, FormaArg,
     Formato,
 };
-use crate::commands::{Context, hoje};
+use crate::commands::{Context, hoje, passageiro};
 use crate::config::Settings;
 use crate::confirmacao::{Terminal, confirmar, descrever_ambiente, pode_confirmar};
 use crate::error::CliError;
@@ -51,7 +52,11 @@ pub(super) async fn cancelar(
     );
     confirmar(terminal, args.sim, "Cancelar a cobrança?")?;
 
-    client.cobranca().cancelar(codigo, &args.motivo).await?;
+    client
+        .cobranca()
+        .cancelar(codigo, &args.motivo)
+        .await
+        .map_err(|err| incerta(err, "a cobrança pode ter sido cancelada", codigo, None))?;
     match context.formato() {
         Formato::Json => output::print_json(&json!({
             "codigoSolicitacao": codigo,
@@ -59,7 +64,9 @@ pub(super) async fn cancelar(
         })),
         // `commands::run` refuses csv for this command.
         Formato::Texto | Formato::Csv => output::print(&format!(
-            "Cancelamento solicitado.\n\nConfira com: inter-pj cobranca consultar {codigo}"
+            "Cancelamento solicitado.\n\nConfira com: {} cobranca consultar {}",
+            chamada(),
+            argumento(codigo)
         )),
     }
 }
@@ -110,7 +117,18 @@ async fn editar_com(
     );
     confirmar(terminal, args.sim, "Alterar a cobrança?")?;
 
-    let solicitacao = client.cobranca().editar(codigo, &edicao).await?;
+    let solicitacao = client
+        .cobranca()
+        .editar(codigo, &edicao)
+        .await
+        .map_err(|err| {
+            incerta(
+                err,
+                "a alteração pode ter sido pedida, e repetir o comando pediria outra",
+                codigo,
+                Some("uma alteração feita pode levar até 30 minutos para aparecer na consulta"),
+            )
+        })?;
     let codigo_edicao = solicitacao
         .codigo_edicao
         .as_deref()
@@ -121,10 +139,29 @@ async fn editar_com(
         .as_ref()
         .is_some_and(StatusEdicao::is_final);
     if let Some(codigo_edicao) = codigo_edicao.filter(|_| args.espera.aguardar && !terminou) {
-        let (consulta, terminou) =
-            aguardar(&client, codigo_edicao, args.espera.timeout, intervalo).await?;
+        // From here on the change exists: whatever happens to the wait,
+        // its code is not lost.
+        let acompanhar = acompanhar(codigo_edicao);
+        eprintln!(
+            "{}",
+            output::sem_controle(&format!(
+                "Alteração pedida: código {codigo_edicao}. Acompanhe com: {acompanhar}"
+            ))
+        );
+        let espera = Espera::Pedida {
+            codigo: codigo_edicao,
+            acompanhar: &acompanhar,
+        };
+        let (consulta, terminou) = aguardar(
+            &client,
+            codigo_edicao,
+            espera,
+            args.espera.timeout,
+            intervalo,
+        )
+        .await?;
         mostrar_edicao(context, &settings, codigo_edicao, &consulta)?;
-        return fim(&consulta, terminou, args.espera.timeout);
+        return fim(&consulta, terminou, args.espera.timeout, espera);
     }
     if args.espera.aguardar && !terminou && codigo_edicao.is_none() {
         eprintln!("aviso: a API não informou o código da alteração; não há como aguardar");
@@ -163,11 +200,21 @@ async fn edicao_com(
     let codigo = args.codigo_edicao.trim();
     if !args.espera.aguardar {
         let consulta = client.cobranca().consultar_edicao(codigo).await?;
-        return mostrar_edicao(context, &settings, codigo, &consulta);
+        mostrar_edicao(context, &settings, codigo, &consulta)?;
+        // A change that failed is a failure (5), awaited or not; one being
+        // processed is a status like any other (0).
+        return fim(&consulta, true, args.espera.timeout, Espera::Consultada);
     }
-    let (consulta, terminou) = aguardar(&client, codigo, args.espera.timeout, intervalo).await?;
+    let (consulta, terminou) = aguardar(
+        &client,
+        codigo,
+        Espera::Consultada,
+        args.espera.timeout,
+        intervalo,
+    )
+    .await?;
     mostrar_edicao(context, &settings, codigo, &consulta)?;
-    fim(&consulta, terminou, args.espera.timeout)
+    fim(&consulta, terminou, args.espera.timeout, Espera::Consultada)
 }
 
 pub(super) async fn pagar(context: &Context, args: &CobrancaPagarArgs) -> Result<(), CliError> {
@@ -189,7 +236,11 @@ pub(super) async fn pagar(context: &Context, args: &CobrancaPagarArgs) -> Result
         FormaArg::Pix => (PagarCom::Pix, "o Pix"),
     };
     let codigo = args.codigo.trim();
-    client.cobranca().pagar_no_sandbox(codigo, com).await?;
+    client
+        .cobranca()
+        .pagar_no_sandbox(codigo, com)
+        .await
+        .map_err(|err| incerta(err, "a cobrança pode ter sido paga", codigo, None))?;
     match context.formato() {
         Formato::Json => output::print_json(&json!({
             "codigoSolicitacao": codigo,
@@ -198,8 +249,30 @@ pub(super) async fn pagar(context: &Context, args: &CobrancaPagarArgs) -> Result
         })),
         // `commands::run` refuses csv for this command.
         Formato::Texto | Formato::Csv => output::print(&format!(
-            "Cobrança paga no sandbox, com {forma}.\n\nConfira com: inter-pj cobranca consultar {codigo}"
+            "Cobrança paga no sandbox, com {forma}.\n\nConfira com: {} cobranca consultar {}",
+            chamada(),
+            argumento(codigo)
         )),
+    }
+}
+
+/// The error of a request without idempotency key: uncertain (9) when it
+/// may have been processed, with the command that shows the charge.
+fn incerta(
+    err: InterError,
+    situacao: &'static str,
+    codigo: &str,
+    demora: Option<&'static str>,
+) -> CliError {
+    if err.may_have_been_processed() {
+        CliError::AlteracaoIncerta {
+            source: err,
+            situacao,
+            consulta: format!("{} cobranca consultar {}", chamada(), argumento(codigo)),
+            demora,
+        }
+    } else {
+        err.into()
     }
 }
 
@@ -280,37 +353,131 @@ fn antes_e_depois(antes: Option<String>, depois: Option<String>) -> Option<Strin
     }
 }
 
+/// Who waits for a change.
+#[derive(Clone, Copy)]
+enum Espera<'a> {
+    /// `editar`, right after the request: the change may not be found yet,
+    /// and no error may lose its code; `acompanhar` is the command that
+    /// follows it.
+    Pedida {
+        codigo: &'a str,
+        acompanhar: &'a str,
+    },
+    /// `edicao`, with a code given by the user: a 404 is an answer, and the
+    /// errors are the ones of any query.
+    Consultada,
+}
+
+impl<'a> Espera<'a> {
+    /// The code and the command that follows it, of a change just
+    /// requested.
+    fn pedida(self) -> Option<(&'a str, &'a str)> {
+        match self {
+            Espera::Pedida { codigo, acompanhar } => Some((codigo, acompanhar)),
+            Espera::Consultada => None,
+        }
+    }
+}
+
+/// The change `codigo` was requested, and the wait ended without its end:
+/// `motivo` says how, and `source` is the query that ended it.
+fn sem_desfecho(
+    (codigo, acompanhar): (&str, &str),
+    motivo: String,
+    source: Option<InterError>,
+) -> CliError {
+    CliError::SemDesfecho {
+        oque: "a alteração foi pedida",
+        codigo: codigo.to_owned(),
+        motivo,
+        consulta: acompanhar.to_owned(),
+        repetir: "a alteração já foi pedida: não a peça de novo",
+        source: source.map(Box::new),
+    }
+}
+
 /// Queries the change every `intervalo` until it ends or `timeout` passes:
-/// the last answer, and whether it ended. Right after the request, the
-/// change may not be found yet: that counts as being processed.
+/// the last answer, and whether it ended. An error the next query may not
+/// have (the rate limit, the service, the network) is no news; after
+/// `editar`, neither is a 404, and any other error, or the time running
+/// out before the query found the change, ends the wait with its code.
 async fn aguardar(
     client: &InterClient,
     codigo_edicao: &str,
+    espera: Espera<'_>,
     timeout: Duration,
     intervalo: Duration,
 ) -> Result<(ConsultaEdicao, bool), CliError> {
     let prazo = Instant::now() + timeout;
     let mut anunciado = false;
+    let mut ultima = None;
     loop {
-        let ultima = match client.cobranca().consultar_edicao(codigo_edicao).await {
+        // The failure of this query, when the next one may not have it.
+        let falha = match client.cobranca().consultar_edicao(codigo_edicao).await {
             Ok(consulta) if consulta.status.as_ref().is_some_and(StatusEdicao::is_final) => {
                 return Ok((consulta, true));
             }
-            Ok(consulta) => Some(consulta),
-            Err(InterError::Api(api)) if api.status == 404 => None,
-            Err(err) => return Err(err.into()),
+            Ok(consulta) => {
+                ultima = Some(consulta);
+                None
+            }
+            Err(InterError::Api(api))
+                if api.status == 404 && matches!(espera, Espera::Pedida { .. }) =>
+            {
+                None
+            }
+            Err(err) if passageiro(&err) => Some(err),
+            Err(err) => {
+                return Err(match espera.pedida() {
+                    Some(pedida) => {
+                        let motivo = format!("a consulta falhou: {err}");
+                        sem_desfecho(pedida, motivo, Some(err))
+                    }
+                    None => err.into(),
+                });
+            }
         };
         let agora = Instant::now();
         if agora >= prazo {
-            return ultima
-                .map(|consulta| (consulta, false))
-                .ok_or_else(|| tempo_esgotado(timeout));
+            let segundos = timeout.as_secs();
+            return match (ultima, falha) {
+                (Some(consulta), _) => Ok((consulta, false)),
+                (None, Some(err)) => Err(match espera.pedida() {
+                    Some(pedida) => sem_desfecho(
+                        pedida,
+                        format!(
+                            "o tempo de espera acabou ({segundos} s) sem uma resposta da consulta: {}",
+                            output::limpo(&err.to_string())
+                        ),
+                        None,
+                    ),
+                    // A query only: its last error, as any other query.
+                    None => err.into(),
+                }),
+                (None, None) => Err(match espera.pedida() {
+                    Some(pedida) => sem_desfecho(
+                        pedida,
+                        format!(
+                            "o tempo de espera acabou ({segundos} s) sem que a consulta a encontrasse"
+                        ),
+                        None,
+                    ),
+                    None => tempo_esgotado(timeout),
+                }),
+            };
         }
-        if !anunciado {
+        let pausa = intervalo.min(prazo - agora);
+        if let Some(err) = &falha {
+            eprintln!(
+                "aguardando: a consulta falhou ({}); nova tentativa em {} s",
+                output::limpo(&err.to_string()),
+                pausa.as_secs()
+            );
+        } else if !anunciado {
             eprintln!("aguardando a alteração...");
             anunciado = true;
         }
-        tokio::time::sleep(intervalo.min(prazo - agora)).await;
+        tokio::time::sleep(pausa).await;
     }
 }
 
@@ -323,9 +490,24 @@ fn tempo_esgotado(timeout: Duration) -> CliError {
 }
 
 /// How an awaited change ended: 5 when it failed, 8 when time ran out.
-fn fim(consulta: &ConsultaEdicao, terminou: bool, timeout: Duration) -> Result<(), CliError> {
+fn fim(
+    consulta: &ConsultaEdicao,
+    terminou: bool,
+    timeout: Duration,
+    espera: Espera<'_>,
+) -> Result<(), CliError> {
     match consulta.status {
-        _ if !terminou => Err(tempo_esgotado(timeout)),
+        _ if !terminou => Err(match espera.pedida() {
+            Some(pedida) => sem_desfecho(
+                pedida,
+                format!(
+                    "o tempo de espera acabou ({} s) com ela ainda em processamento",
+                    timeout.as_secs()
+                ),
+                None,
+            ),
+            None => tempo_esgotado(timeout),
+        }),
         Some(StatusEdicao::Falha) => Err(CliError::EdicaoNaoFeita {
             motivo: "a API informou falha".to_owned(),
         }),
@@ -382,13 +564,19 @@ fn render_edicao(
     if let Some(codigo) = codigo_edicao
         && !status.is_some_and(StatusEdicao::is_final)
     {
-        let _ = write!(
-            texto,
-            "\n\nAcompanhe com: inter-pj cobranca edicao {} --aguardar",
-            argumento(codigo)
-        );
+        let _ = write!(texto, "\n\nAcompanhe com: {}", acompanhar(codigo));
     }
     texto
+}
+
+/// The command that follows the change `codigo_edicao`, on this account.
+fn acompanhar(codigo_edicao: &str) -> String {
+    format!(
+        "{} cobranca edicao {} --aguardar",
+        chamada(),
+        // A code of the API, without the characters a shell would read.
+        argumento(&output::limpo(codigo_edicao))
+    )
 }
 
 #[cfg(test)]
@@ -534,6 +722,11 @@ aviso: a consulta pode levar até 30 minutos para mostrar o novo valor ou vencim
             "A alteração não foi feita.\nMensagem  Cobrança já paga"
         );
         assert_eq!(render_edicao(None, None, None), "Alteração solicitada.");
+        // A code of the API goes into the command as one argument.
+        assert!(
+            render_edicao(Some("e 1'x"), Some(&StatusEdicao::Processando), None)
+                .ends_with(r"Acompanhe com: inter-pj cobranca edicao 'e 1'\''x' --aguardar"),
+        );
     }
 
     // --- the commands against a mock API ------------------------------------
@@ -668,6 +861,149 @@ aviso: a consulta pode levar até 30 minutos para mostrar o novo valor ou vencim
             "a alteração da cobrança não foi feita: Cobrança não pode ser alterada"
         );
         assert_eq!(err.exit_code(), 5);
+    }
+
+    /// The change was requested: a query that the next one may answer does
+    /// not end the wait.
+    #[tokio::test]
+    async fn a_passing_error_does_not_end_the_wait() {
+        let (cenario, args) = editar_com_status(
+            &["--aguardar", "--sem-retentativa"],
+            json!({"status": "PROCESSANDO", "codigoEdicao": EDICAO}),
+        )
+        .await;
+        let consulta = format!("/cobranca/v3/cobrancas/edicao/{EDICAO}");
+        Mock::given(method("GET"))
+            .and(path(consulta.clone()))
+            .respond_with(ResponseTemplate::new(503))
+            .up_to_n_times(1)
+            .expect(1)
+            .mount(&cenario.server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(consulta))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "SUCESSO"})))
+            .expect(1)
+            .mount(&cenario.server)
+            .await;
+        editar_com(
+            &cenario.context,
+            &args,
+            &mut TerminalFalso::default(),
+            Duration::from_millis(10),
+        )
+        .await
+        .unwrap();
+    }
+
+    /// After `editar`, a wait without an end keeps the code of the change
+    /// and says how to follow it, never to ask again or to wait longer.
+    #[tokio::test]
+    async fn a_wait_after_editar_never_loses_the_change() {
+        for (resposta, codigo_de_saida, motivo) in [
+            (
+                ResponseTemplate::new(200).set_body_json(json!({"status": "PROCESSANDO"})),
+                8,
+                "o tempo de espera acabou (1 s) com ela ainda em processamento",
+            ),
+            (
+                ResponseTemplate::new(404),
+                8,
+                "o tempo de espera acabou (1 s) sem que a consulta a encontrasse",
+            ),
+            (
+                ResponseTemplate::new(503),
+                8,
+                "o tempo de espera acabou (1 s) sem uma resposta da consulta: ",
+            ),
+            (ResponseTemplate::new(403), 9, "a consulta falhou: "),
+        ] {
+            let (cenario, args) = editar_com_status(
+                &["--aguardar", "--timeout", "1s", "--sem-retentativa"],
+                json!({"status": "PROCESSANDO", "codigoEdicao": EDICAO}),
+            )
+            .await;
+            Mock::given(method("GET"))
+                .and(path(format!("/cobranca/v3/cobrancas/edicao/{EDICAO}")))
+                .respond_with(resposta)
+                .mount(&cenario.server)
+                .await;
+            let err = editar_com(
+                &cenario.context,
+                &args,
+                &mut TerminalFalso::default(),
+                Duration::from_millis(300),
+            )
+            .await
+            .unwrap_err();
+            assert!(
+                err.to_string().starts_with(&format!(
+                    "a alteração foi pedida (código {EDICAO}), mas {motivo}"
+                )),
+                "{err}"
+            );
+            assert_eq!(err.exit_code(), codigo_de_saida, "{err}");
+            let dicas = err.hints();
+            assert_eq!(
+                dicas[..2],
+                [
+                    "a alteração já foi pedida: não a peça de novo".to_owned(),
+                    format!("acompanhe com: inter-pj cobranca edicao {EDICAO} --aguardar"),
+                ]
+            );
+            assert!(
+                !dicas.iter().any(|dica| dica.contains("--timeout")),
+                "{dicas:?}"
+            );
+        }
+    }
+
+    /// A code given to `edicao` that the API does not know is an answer:
+    /// the 404 at once, not the whole wait.
+    #[tokio::test]
+    async fn an_unknown_change_is_an_error_at_once() {
+        let (cenario, comando) = testes::cenario(&["edicao", EDICAO, "--aguardar"]).await;
+        let CobrancaCommand::Edicao(args) = comando else {
+            unreachable!()
+        };
+        Mock::given(method("GET"))
+            .and(path(format!("/cobranca/v3/cobrancas/edicao/{EDICAO}")))
+            .respond_with(ResponseTemplate::new(404))
+            .expect(1)
+            .mount(&cenario.server)
+            .await;
+        let err = edicao_com(&cenario.context, &args, Duration::from_millis(10))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, CliError::Inter(_)), "{err}");
+        assert_eq!(err.exit_code(), 5);
+    }
+
+    /// In `edicao --aguardar`, a passing error is no news either.
+    #[tokio::test]
+    async fn a_passing_error_does_not_end_the_query() {
+        let (cenario, comando) =
+            testes::cenario(&["edicao", EDICAO, "--aguardar", "--sem-retentativa"]).await;
+        let CobrancaCommand::Edicao(args) = comando else {
+            unreachable!()
+        };
+        let consulta = format!("/cobranca/v3/cobrancas/edicao/{EDICAO}");
+        Mock::given(method("GET"))
+            .and(path(consulta.clone()))
+            .respond_with(ResponseTemplate::new(429))
+            .up_to_n_times(1)
+            .expect(1)
+            .mount(&cenario.server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(consulta))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "SUCESSO"})))
+            .expect(1)
+            .mount(&cenario.server)
+            .await;
+        edicao_com(&cenario.context, &args, Duration::from_millis(10))
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
