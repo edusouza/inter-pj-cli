@@ -348,6 +348,97 @@ pub mod pix {
         path: "/pix/v2/pix/{e2eId}/devolucao/{id}",
         scopes: &[Scope::PixRead],
     };
+
+    /// `POST /pix/v2/loc` — creates a location for a payload.
+    pub const CRIAR_LOC: Endpoint = Endpoint {
+        method: Method::Post,
+        path: "/pix/v2/loc",
+        scopes: &[Scope::PayloadLocationWrite],
+    };
+
+    /// `GET /pix/v2/loc` — locations of a period, paginated.
+    pub const LISTAR_LOCS: Endpoint = Endpoint {
+        method: Method::Get,
+        path: "/pix/v2/loc",
+        scopes: &[Scope::PayloadLocationRead],
+    };
+
+    /// `GET /pix/v2/loc/{id}` — a location.
+    pub const CONSULTAR_LOC: Endpoint = Endpoint {
+        method: Method::Get,
+        path: "/pix/v2/loc/{id}",
+        scopes: &[Scope::PayloadLocationRead],
+    };
+
+    /// `DELETE /pix/v2/loc/{id}/txid` — unlinks the charge from a location.
+    pub const DESVINCULAR_LOC: Endpoint = Endpoint {
+        method: Method::Delete,
+        path: "/pix/v2/loc/{id}/txid",
+        scopes: &[Scope::PayloadLocationWrite],
+    };
+
+    /// `PUT /pix/v2/lotecobv/{id}` — creates or replaces a batch of charges with a due date.
+    pub const CRIAR_LOTE_COBV: Endpoint = Endpoint {
+        method: Method::Put,
+        path: "/pix/v2/lotecobv/{id}",
+        scopes: &[Scope::LoteCobvWrite],
+    };
+
+    /// `PATCH /pix/v2/lotecobv/{id}` — changes charges of a batch.
+    pub const REVISAR_LOTE_COBV: Endpoint = Endpoint {
+        method: Method::Patch,
+        path: "/pix/v2/lotecobv/{id}",
+        scopes: &[Scope::LoteCobvWrite],
+    };
+
+    /// `GET /pix/v2/lotecobv/{id}` — a batch and its charges.
+    pub const CONSULTAR_LOTE_COBV: Endpoint = Endpoint {
+        method: Method::Get,
+        path: "/pix/v2/lotecobv/{id}",
+        scopes: &[Scope::LoteCobvRead],
+    };
+
+    /// `GET /pix/v2/lotecobv/{id}/sumario` — totals of a batch.
+    pub const SUMARIO_LOTE_COBV: Endpoint = Endpoint {
+        method: Method::Get,
+        path: "/pix/v2/lotecobv/{id}/sumario",
+        scopes: &[Scope::LoteCobvRead],
+    };
+
+    /// `GET /pix/v2/lotecobv/{id}/situacao/{situacao}` — charges of a batch in a situation.
+    pub const LOTE_COBV_POR_SITUACAO: Endpoint = Endpoint {
+        method: Method::Get,
+        path: "/pix/v2/lotecobv/{id}/situacao/{situacao}",
+        scopes: &[Scope::LoteCobvRead],
+    };
+
+    /// `GET /pix/v2/lotecobv` — batches of a period, paginated.
+    pub const LISTAR_LOTES_COBV: Endpoint = Endpoint {
+        method: Method::Get,
+        path: "/pix/v2/lotecobv",
+        scopes: &[Scope::LoteCobvRead],
+    };
+
+    /// `POST /pix/v2/cob/pagar/{txid}` — pays an immediate charge (sandbox only).
+    pub const PAGAR_COB_SANDBOX: Endpoint = Endpoint {
+        method: Method::Post,
+        path: "/pix/v2/cob/pagar/{txid}",
+        scopes: &[Scope::PixWrite],
+    };
+
+    /// `POST /pix/v2/cobv/pagar/{txid}` — pays a charge with a due date (sandbox only).
+    pub const PAGAR_COBV_SANDBOX: Endpoint = Endpoint {
+        method: Method::Post,
+        path: "/pix/v2/cobv/pagar/{txid}",
+        scopes: &[Scope::PixWrite],
+    };
+
+    /// `POST /pix/v2/sandbox/cob/pagamento` — pays a "copia e cola" (sandbox only).
+    pub const PAGAR_QR_CODE_SANDBOX: Endpoint = Endpoint {
+        method: Method::Post,
+        path: "/pix/v2/sandbox/cob/pagamento",
+        scopes: &[Scope::PixWrite],
+    };
 }
 
 /// Every operation implemented by this crate.
@@ -388,4 +479,17 @@ pub const ALL: &[Endpoint] = &[
     pix::CONSULTAR_RECEBIDO,
     pix::SOLICITAR_DEVOLUCAO,
     pix::CONSULTAR_DEVOLUCAO,
+    pix::CRIAR_LOC,
+    pix::LISTAR_LOCS,
+    pix::CONSULTAR_LOC,
+    pix::DESVINCULAR_LOC,
+    pix::CRIAR_LOTE_COBV,
+    pix::REVISAR_LOTE_COBV,
+    pix::CONSULTAR_LOTE_COBV,
+    pix::SUMARIO_LOTE_COBV,
+    pix::LOTE_COBV_POR_SITUACAO,
+    pix::LISTAR_LOTES_COBV,
+    pix::PAGAR_COB_SANDBOX,
+    pix::PAGAR_COBV_SANDBOX,
+    pix::PAGAR_QR_CODE_SANDBOX,
 ];

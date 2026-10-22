@@ -33,6 +33,16 @@ impl CobrancaPixError {
         }
     }
 
+    /// The same problem, in the item `prefixo` of a list (`cobsv[2]`).
+    pub(crate) fn no_item(self, prefixo: &str) -> Self {
+        let campo = if self.campo.is_empty() {
+            prefixo.to_owned()
+        } else {
+            format!("{prefixo}.{}", self.campo)
+        };
+        Self { campo, ..self }
+    }
+
     /// The field, with the API's name and path.
     pub fn campo(&self) -> &str {
         &self.campo
@@ -267,6 +277,13 @@ pub struct LocationPix {
         deserialize_with = "lenient::u64"
     )]
     pub id: Option<u64>,
+    /// txid of the charge linked to the location, in its query.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient::string"
+    )]
+    pub txid: Option<String>,
     /// Address of the payload, without the scheme.
     #[serde(
         default,

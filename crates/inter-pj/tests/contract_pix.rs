@@ -7,6 +7,7 @@ use std::collections::BTreeSet;
 
 use inter_pj::cobranca::Uf;
 use inter_pj::endpoint;
+use inter_pj::pix::LocationPix;
 use inter_pj::pix::{
     AbatimentoCobv, Cob, Cobv, CobvRevisada, CobvSolicitada, DescontoCobv, DescontoData,
     DevedorCobv, JurosCobv, MAX_DESCONTOS_DATA_FIXA, ModalidadeJuros, MultaCobv, PaginaCobs,
@@ -16,6 +17,10 @@ use inter_pj::pix::{
     CobRevisada, CobSolicitada, Devedor, ITENS_POR_PAGINA_MAXIMO_PIX, InfoAdicional, LocCob,
     MAX_INFO_ADICIONAIS, MAX_SOLICITACAO_PAGADOR, ModalidadeAgente, Retirada, StatusCob,
     StatusDevolucao, TXID_MAXIMO, TXID_MINIMO, TipoCob, ValorCobRevisada, ValorRetirada,
+};
+use inter_pj::pix::{
+    CobvDoLote, CobvRevisadaDoLote, LoteCobv, LoteCobvRevisado, LoteCobvSolicitado, PaginaLocs,
+    PaginaLotesCobv, StatusCobvLote, SumarioLoteCobv, Txid,
 };
 use inter_pj::pix::{
     Devolucao, DevolucaoSolicitada, ID_DEVOLUCAO_MAXIMO, MAX_DESCRICAO_DEVOLUCAO,
@@ -594,4 +599,164 @@ fn refund_codes_and_limits_are_the_documented_ones() {
     ] {
         assert!(listagem.contains(nome), "{nome}");
     }
+}
+
+// --- locations, lotes e sandbox ---------------------------------------------------
+
+#[test]
+fn locations_are_the_documented_ones() {
+    for nome in [
+        "payloadLocationResponse1",
+        "payloadLocationResponse2",
+        "payloadLocationResponse3",
+    ] {
+        let exemplo = example(nome);
+        let loc: LocationPix = serde_json::from_value(exemplo.clone()).unwrap();
+        assert_eq!(&serde_json::to_value(&loc).unwrap(), exemplo, "{nome}");
+    }
+    let completa: LocationPix =
+        serde_json::from_value(example_for_schema("PayloadLocationCompleta")).unwrap();
+    assert_eq!(
+        keys(&serde_json::to_value(&completa).unwrap()),
+        property_names("PayloadLocationCompleta")
+    );
+    let mut pagina = example_for_schema("PayloadLocationConsultadas");
+    pagina["loc"] = Value::Array(Vec::new());
+    let pagina: PaginaLocs = serde_json::from_value(pagina).unwrap();
+    let de_volta = serde_json::to_value(&pagina).unwrap();
+    assert_eq!(
+        keys(&de_volta),
+        property_names("PayloadLocationConsultadas")
+    );
+    let listagem = parameter_names(&endpoint::pix::LISTAR_LOCS);
+    for nome in ["inicio", "fim", "txIdPresente", "tipoCob"] {
+        assert!(listagem.contains(nome), "{nome}");
+    }
+}
+
+fn cobv_do_lote(txid: &str, nome: &str, cep: &str, loc: u64) -> CobvDoLote {
+    let mut devedor = DevedorCobv::new("12345678909".parse().unwrap(), nome);
+    devedor.cidade = Some("Recife".to_owned());
+    devedor.uf = Some(Uf::Pe);
+    devedor.cep = Some(cep.to_owned());
+    let mut cobv = CobvSolicitada::new(
+        "7c084cd4-54af-4172-a516-a7d1a12b75cc".parse().unwrap(),
+        "100.00".parse().unwrap(),
+        dia(2020, 12, 31),
+        devedor,
+    );
+    cobv.calendario.validade_apos_vencimento = Some(30);
+    cobv.loc = Some(LocCob::new(loc));
+    cobv.solicitacao_pagador = Some("Informar matrícula".to_owned());
+    CobvDoLote::new(txid.parse().unwrap(), cobv)
+}
+
+#[test]
+fn batches_are_the_documentation_examples() {
+    let mut um = cobv_do_lote(
+        "fb2761260e554ad593c7226beb5cb650",
+        "João Souza",
+        "70011750",
+        789,
+    );
+    um.cobv.devedor.logradouro = Some("Alameda Souza, Numero 80, Bairro Braz".to_owned());
+    let mut dois = cobv_do_lote(
+        "7978c0c97ea847e78e8849634473c1f1",
+        "Manoel Silva",
+        "70055751",
+        57221,
+    );
+    dois.cobv.devedor.logradouro = Some("Rua 15, Numero 1, Bairro Campo Grande".to_owned());
+    let lote = LoteCobvSolicitado::new("Cobranças dos alunos do turno vespertino", vec![um, dois]);
+    lote.validar().unwrap();
+    assert_eq!(
+        &serde_json::to_value(&lote).unwrap(),
+        example("loteCobVBody1")
+    );
+
+    let revisao = |txid: &str| {
+        let mut revisao = CobvRevisada::new();
+        revisao.calendario = Some(inter_pj::pix::CalendarioCobv::new(dia(2020, 1, 10)));
+        let mut valor = ValorCobvRevisada::default();
+        valor.original = Some("110.00".parse().unwrap());
+        revisao.valor = Some(valor);
+        CobvRevisadaDoLote::new(txid.parse::<Txid>().unwrap(), revisao)
+    };
+    let revisado = LoteCobvRevisado::new(vec![
+        revisao("fb2761260e554ad593c7226beb5cb650"),
+        revisao("7978c0c97ea847e78e8849634473c1f1"),
+    ]);
+    revisado.validar().unwrap();
+    assert_eq!(
+        &serde_json::to_value(&revisado).unwrap(),
+        example("loteCobVBodyRevisado1")
+    );
+}
+
+#[test]
+fn batch_answers_survive_a_round_trip() {
+    for nome in [
+        "loteCobVResponse1",
+        "loteCobVResponse2",
+        "loteCobVByIdStatusResponse1",
+    ] {
+        let exemplo = example(nome);
+        let lote: LoteCobv = serde_json::from_value(exemplo.clone()).unwrap();
+        assert_eq!(&serde_json::to_value(&lote).unwrap(), exemplo, "{nome}");
+    }
+    let sumario: SumarioLoteCobv =
+        serde_json::from_value(example_for_schema("SummaryLoteCobV")).unwrap();
+    assert_eq!(
+        keys(&serde_json::to_value(&sumario).unwrap()),
+        property_names("SummaryLoteCobV")
+    );
+    let mut pagina = example_for_schema("LotesCobVConsultados");
+    pagina["lotes"] = Value::Array(Vec::new());
+    let pagina: PaginaLotesCobv = serde_json::from_value(pagina).unwrap();
+    assert_eq!(
+        keys(&serde_json::to_value(&pagina).unwrap()),
+        property_names("LotesCobVConsultados")
+    );
+    assert_eq!(
+        strings(
+            &StatusCobvLote::DOCUMENTADOS
+                .iter()
+                .map(StatusCobvLote::as_str)
+                .collect::<Vec<_>>()
+        ),
+        enum_values("SituacaoCobranca")
+            .into_iter()
+            .map(str::to_owned)
+            .collect()
+    );
+}
+
+#[test]
+fn sandbox_payments_are_documented() {
+    for endpoint in [
+        endpoint::pix::PAGAR_COB_SANDBOX,
+        endpoint::pix::PAGAR_COBV_SANDBOX,
+        endpoint::pix::PAGAR_QR_CODE_SANDBOX,
+    ] {
+        let operacao = spec::operation(&endpoint);
+        let descricao = format!(
+            "{} {}",
+            operacao["summary"].as_str().unwrap_or_default(),
+            operacao["description"].as_str().unwrap_or_default()
+        );
+        assert!(descricao.contains("Sandbox"), "{endpoint}: {descricao}");
+    }
+    assert_eq!(property_names("PagarCobrancaPix"), strings(&["valor"]));
+    assert_eq!(
+        property_names("MakePaymentCobCobv"),
+        strings(&["qrCode", "valor"])
+    );
+    assert_eq!(
+        property_names("PagarCobrancaPixResponse"),
+        strings(&["e2e"])
+    );
+    assert_eq!(
+        property_names("MakePaymentCobCobvResponse"),
+        strings(&["endToEnd"])
+    );
 }
