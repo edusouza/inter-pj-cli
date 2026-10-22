@@ -45,7 +45,7 @@ pub(super) async fn listar(context: &Context, args: &CobrancaListarArgs) -> Resu
     };
     match context.formato() {
         Formato::Json => output::print_json(&json!({ "cobrancas": cobrancas })),
-        Formato::Csv => output::print_raw(&csv(&cobrancas).csv(context.separador())),
+        Formato::Csv => output::print_csv(&csv(&cobrancas), context.separador()),
         Formato::Texto => {
             context.warn_if_sandbox(&settings);
             let mut texto = format!("{}\n\n", titulo(&filtro));
@@ -70,7 +70,7 @@ pub(super) async fn sumario(context: &Context, args: &CobrancaSumarioArgs) -> Re
     let itens = client.cobranca().sumario(&filtro).await?;
     match context.formato() {
         Formato::Json => output::print_json(&json!({ "sumario": itens })),
-        Formato::Csv => output::print_raw(&csv_sumario(&itens).csv(context.separador())),
+        Formato::Csv => output::print_csv(&csv_sumario(&itens), context.separador()),
         Formato::Texto => {
             context.warn_if_sandbox(&settings);
             output::print(&render_sumario(&filtro, &itens))
@@ -445,6 +445,24 @@ Vencimento  Seu número  Pagador               Situação       Valor  Código
             linhas.nth(1).unwrap(),
             "5a6b7c8d-1e2f-4a3b-8c9d-0e1f2a3b4c5d,NF-124,RECEBIDO,,,2026-09-10,300.00,300.00,PIX,,Outro Cliente,12345678909,,,,"
         );
+    }
+
+    #[test]
+    fn csv_in_a_terminal_is_cleaned() {
+        let mut cobrancas = cobrancas();
+        cobrancas[0].cobranca.pagador.as_mut().unwrap().nome =
+            Some("Fulano\u{1b}[2J\u{1b}[1;1HTudo certo\nAna\u{1b}]0;titulo\u{7}".to_owned());
+        let tabela = csv(&cobrancas);
+        let terminal = tabela.csv_para_terminal(crate::tabela::Separador::PontoEVirgula);
+        assert!(!terminal.contains('\u{1b}'), "{terminal}");
+        assert!(!terminal.contains('\u{7}'), "{terminal}");
+        assert!(!terminal.starts_with('\u{feff}'), "{terminal}");
+        // The header and one line per charge.
+        assert_eq!(terminal.trim_end().split("\r\n").count(), 3, "{terminal}");
+        // To a file or a pipe, the text goes as the API sent it.
+        let arquivo = tabela.csv(crate::tabela::Separador::PontoEVirgula);
+        assert!(arquivo.starts_with('\u{feff}'), "{arquivo}");
+        assert!(arquivo.contains("Fulano\u{1b}[2J"), "{arquivo}");
     }
 
     #[test]

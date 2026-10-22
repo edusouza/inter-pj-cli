@@ -258,6 +258,11 @@ impl Pagador {
 
     fn validar(&self) -> Result<(), EmissaoCobrancaError> {
         use EmissaoCobrancaError as E;
+        if !self.cpf_cnpj.conferido() {
+            return Err(E::Documento {
+                campo: "pagador.cpfCnpj",
+            });
+        }
         texto(Some(&self.nome), "pagador.nome", 1, 100)?;
         texto(Some(&self.endereco), "pagador.endereco", 1, 100)?;
         texto(self.numero.as_ref(), "pagador.numero", 1, 10)?;
@@ -359,6 +364,11 @@ pub struct BeneficiarioFinal {
 
 impl BeneficiarioFinal {
     fn validar(&self) -> Result<(), EmissaoCobrancaError> {
+        if !self.cpf_cnpj.conferido() {
+            return Err(EmissaoCobrancaError::Documento {
+                campo: "beneficiarioFinal.cpfCnpj",
+            });
+        }
         texto(Some(&self.nome), "beneficiarioFinal.nome", 1, 100)?;
         texto(Some(&self.endereco), "beneficiarioFinal.endereco", 1, 100)?;
         texto(self.bairro.as_ref(), "beneficiarioFinal.bairro", 1, 60)?;
@@ -803,6 +813,13 @@ pub enum EmissaoCobrancaError {
     /// Too many days until the automatic cancellation.
     #[error("o prazo para cancelamento automático vai de 0 a 60 dias após o vencimento")]
     DiasAgenda,
+    /// The CPF or CNPJ is not one [`Documento::parse`] gives: it was built
+    /// by hand.
+    #[error("CPF/CNPJ inválido")]
+    Documento {
+        /// `pagador.cpfCnpj` or `beneficiarioFinal.cpfCnpj`.
+        campo: &'static str,
+    },
     /// The postal code is not 8 digits.
     #[error("o CEP tem 8 dígitos")]
     Cep {
@@ -862,6 +879,7 @@ impl EmissaoCobrancaError {
     pub fn campo(&self) -> &'static str {
         match self {
             Self::Texto { campo, .. }
+            | Self::Documento { campo }
             | Self::Cep { campo }
             | Self::Taxa { campo }
             | Self::Valor { campo } => campo,
@@ -1217,6 +1235,47 @@ mod tests {
             let erro = invalida.validar().unwrap_err();
             assert_eq!(erro.campo(), campo, "{erro}");
         }
+    }
+
+    #[test]
+    fn hand_built_documents_are_refused() {
+        let beneficiario = |cpf_cnpj| BeneficiarioFinal {
+            cpf_cnpj,
+            nome: "Beneficiário Exemplo".to_owned(),
+            endereco: "Rua Exemplo".to_owned(),
+            bairro: None,
+            cidade: "São Paulo".to_owned(),
+            uf: Uf::Sp,
+            cep: "01001000".to_owned(),
+        };
+        for documento in [
+            Documento::Cnpj("abc".to_owned()),
+            // Wrong check digits.
+            Documento::Cpf("12345678900".to_owned()),
+            // Punctuation, which the body would carry as is.
+            Documento::Cpf("123.456.789-09".to_owned()),
+            // A CNPJ as a CPF, which would be sent as FISICA.
+            Documento::Cpf("12345678000195".to_owned()),
+        ] {
+            let mut c = cobranca();
+            c.pagador.cpf_cnpj = documento.clone();
+            assert_eq!(
+                c.validar(),
+                Err(EmissaoCobrancaError::Documento {
+                    campo: "pagador.cpfCnpj"
+                }),
+                "{documento:?}"
+            );
+            let mut c = cobranca();
+            c.beneficiario_final = Some(beneficiario(documento));
+            assert_eq!(
+                c.validar().map_err(|erro| erro.campo()),
+                Err("beneficiarioFinal.cpfCnpj")
+            );
+        }
+        let mut c = cobranca();
+        c.beneficiario_final = Some(beneficiario("12.abc.345/01de-35".parse().unwrap()));
+        assert_eq!(c.validar(), Ok(()));
     }
 
     #[test]
