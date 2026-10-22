@@ -25,6 +25,10 @@ use crate::valor::por_extenso;
 /// the sandbox (production allows 120).
 const INTERVALO: Duration = Duration::from_secs(6);
 
+/// What a wait without an end reports as done, and why not to repeat it.
+const SOLICITADA: &str = "a cobrança foi solicitada";
+const NAO_REPITA: &str = "a cobrança já foi solicitada: não a emita de novo, porque depois de 30 minutos a API aceita outra igual";
+
 pub(super) async fn emitir(
     context: &Context,
     args: &CobrancaEmitirArgs,
@@ -118,13 +122,15 @@ async fn emitir_com(
     let (detalhe, emitida) =
         aguardar(&client, &codigo, &consulta, args.depois.timeout, intervalo).await?;
     let erro = match detalhe.cobranca.situacao.as_ref() {
-        _ if !emitida => CliError::EmissaoSemDesfecho {
+        _ if !emitida => CliError::SemDesfecho {
+            oque: SOLICITADA,
             codigo,
             motivo: format!(
                 "o tempo de espera acabou ({} s) com ela ainda em processamento",
                 args.depois.timeout.as_secs()
             ),
             consulta,
+            repetir: NAO_REPITA,
             source: None,
         },
         Some(situacao @ SituacaoCobranca::FalhaEmissao) => CliError::CobrancaNaoEmitida {
@@ -447,10 +453,12 @@ async fn aguardar(
     timeout: Duration,
     intervalo: Duration,
 ) -> Result<(CobrancaDetalhada, bool), CliError> {
-    let sem_desfecho = |motivo: String, source: Option<InterError>| CliError::EmissaoSemDesfecho {
+    let sem_desfecho = |motivo: String, source: Option<InterError>| CliError::SemDesfecho {
+        oque: SOLICITADA,
         codigo: codigo.to_owned(),
         motivo,
         consulta: consulta.to_owned(),
+        repetir: NAO_REPITA,
         source: source.map(Box::new),
     };
     let prazo = Instant::now() + timeout;

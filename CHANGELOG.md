@@ -24,7 +24,7 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ### Alterado
 
-- Os códigos de saída 5 e 8 valem também para `cobranca emitir`, `cobranca editar` e `cobranca edicao` com `--aguardar` (cobrança não emitida ou alteração não feita; tempo esgotado), e o 9, para uma consulta de `cobranca emitir --aguardar` que falha de um jeito que esperar não resolve. Em `cobranca emitir`, os erros 8 e 9 trazem o código da cobrança solicitada e o comando que a acompanha; `429`, `5xx` e falhas de rede durante a espera só adiam a próxima consulta.
+- Os códigos de saída 5 e 8 valem também para `cobranca emitir`, `cobranca editar` e `cobranca edicao` com `--aguardar` (cobrança não emitida ou alteração não feita; tempo esgotado), e o 9, para uma consulta de `cobranca emitir` ou `cobranca editar` com `--aguardar` que falha de um jeito que esperar não resolve. Nesses dois comandos, os erros 8 e 9 trazem o código da cobrança ou da alteração pedida e o comando que a acompanha. `429`, `5xx` e falhas de rede durante a espera só adiam a próxima consulta, e, em `cobranca edicao`, um código que a API não conhece é um erro na hora.
 
 ## [0.4.0] - 2026-09-23
 

@@ -94,18 +94,23 @@ pub(crate) enum CliError {
     /// `cobranca editar`, or `cobranca edicao --aguardar`: the change failed.
     #[error("a alteração da cobrança não foi feita: {motivo}")]
     EdicaoNaoFeita { motivo: String },
-    /// `cobranca emitir --aguardar`: the charge was requested (the API
-    /// gave its code), but the wait ended before its final situation: the
-    /// time ran out (`source` is `None`), or a query failed in a way that
+    /// `--aguardar` after a request the API accepted (`cobranca emitir`,
+    /// `cobranca editar`): the wait ended before the final situation, when
+    /// the time ran out (`source` is `None`) or a query failed in a way that
     /// waiting does not fix.
-    #[error("a cobrança foi solicitada (código {codigo}), mas {motivo}")]
-    EmissaoSemDesfecho {
+    #[error("{oque} (código {codigo}), mas {motivo}")]
+    SemDesfecho {
+        /// What was requested: `a cobrança foi solicitada`.
+        oque: &'static str,
         codigo: String,
         /// What happened: `o tempo de espera acabou (60 s) com ela ainda em
         /// processamento`.
         motivo: String,
-        /// Command that queries the charge, on this account.
+        /// Command that follows the request, on this account.
         consulta: String,
+        /// Why the command must not run again: `a cobrança já foi
+        /// solicitada: não a emita de novo`.
+        repetir: &'static str,
         source: Option<Box<InterError>>,
     },
     /// The user did not confirm the operation.
@@ -166,7 +171,7 @@ impl CliError {
             | Self::CobrancaNaoEmitida { .. }
             | Self::EdicaoNaoFeita { .. }
             | Self::SemQrCode(_) => exit::REJECTED,
-            Self::TempoEsgotado { .. } | Self::EmissaoSemDesfecho { source: None, .. } => {
+            Self::TempoEsgotado { .. } | Self::SemDesfecho { source: None, .. } => {
                 exit::WAIT_TIMEOUT
             }
             // Built only when the request may have been processed: a script
@@ -176,7 +181,7 @@ impl CliError {
             | Self::PagamentoIncerto { .. }
             | Self::EmissaoIncerta { .. }
             | Self::AlteracaoIncerta { .. }
-            | Self::EmissaoSemDesfecho {
+            | Self::SemDesfecho {
                 source: Some(_), ..
             } => exit::UNCERTAIN,
             Self::Inter(err) => match err {
@@ -256,13 +261,13 @@ impl CliError {
                 dicas.extend(demora.map(str::to_owned));
                 return dicas;
             }
-            Self::EmissaoSemDesfecho {
-                consulta, source, ..
+            Self::SemDesfecho {
+                consulta,
+                repetir,
+                source,
+                ..
             } => {
-                let mut dicas = vec![
-                    "a cobrança já foi solicitada: não a emita de novo, porque depois de 30 minutos a API aceita outra igual".to_owned(),
-                    format!("acompanhe com: {consulta}"),
-                ];
+                let mut dicas = vec![(*repetir).to_owned(), format!("acompanhe com: {consulta}")];
                 dicas.extend(source.as_deref().map(dicas_da_api).unwrap_or_default());
                 return dicas;
             }
