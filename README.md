@@ -475,6 +475,32 @@ Os filtros são `--situacao` (`a-receber`, `recebida`, `atrasada`, `cancelada`, 
 
 `--qrcode` desenha o QR Code do Pix no terminal, para o cliente ler com o celular. Em um terminal, ele sai preto no branco, qualquer que seja o tema. Com `NO_COLOR` ou com a saída redirecionada, sem cores, os módulos claros é que são desenhados, como no `qrencode -t UTF8`, e o código fica certo em terminais de fundo escuro; para imprimir ou enviar, prefira `--qrcode-png`. Antes de desenhar, a CLI confere o copia e cola (CRC16). Se a cobrança não tem um Pix que dê um QR Code (ainda está sendo emitida, foi emitida sem chave Pix na conta ou o copia e cola não confere), `--qrcode` e `--qrcode-png` terminam com o código 5, sem mostrar a cobrança e sem gravar a imagem. O PNG e o PDF são gravados com permissão `600` e não sobrescrevem um arquivo existente sem `--sobrescrever`; `-` os envia para a saída padrão. As consultas precisam do escopo `boleto-cobranca.read`.
 
+Uma cobrança ainda não paga pode ser cancelada ou ter o valor e o vencimento alterados. Nos dois casos, a CLI primeiro consulta a cobrança e mostra o que vai mudar, e cobranças pagas, canceladas ou expiradas são recusadas sem nenhuma alteração:
+
+```console
+$ inter-pj cobranca editar 0b7e4c1a-5d3f-4a2b-9c8d-7e6f5a4b3c2d --valor 200,00 --vencimento 2026-11-10
+Cobrança a alterar
+  Ambiente    sandbox (dados fictícios)
+  Seu número  NF-123
+  Situação    a receber
+  Valor       R$ 150,00 → R$ 200,00
+  Vencimento  20/10/2026 → 10/11/2026
+  Pagador     Cliente Exemplo Ltda (12.345.678/0001-95)
+  Código      0b7e4c1a-5d3f-4a2b-9c8d-7e6f5a4b3c2d
+aviso: a consulta pode levar até 30 minutos para mostrar o novo valor ou vencimento
+Alterar a cobrança? [s/N] s
+Alteração em processamento.
+Código da alteração  5a6b7c8d-1e2f-4a3b-8c9d-0e1f2a3b4c5d
+
+Acompanhe com: inter-pj cobranca edicao 5a6b7c8d-1e2f-4a3b-8c9d-0e1f2a3b4c5d --aguardar --recem-pedida
+
+$ inter-pj cobranca cancelar 0b7e4c1a-5d3f-4a2b-9c8d-7e6f5a4b3c2d --motivo "Pedido cancelado"
+```
+
+A API altera só o valor (de R$ 2,50 a R$ 99.999.999,99) e o vencimento (hoje ou depois). A alteração é processada depois do pedido: `cobranca edicao` mostra em que pé ela está e, com `--aguardar` (aceito também por `editar`), consulta a cada 6 segundos até o fim, saindo com o código 0 (feita), 5 (não foi feita) ou 8 (o tempo acabou; padrão: 60s). Em `editar --aguardar`, assim que a API aceita o pedido, a CLI mostra em `stderr` o código da alteração e o comando que a acompanha. `429`, `5xx` e falhas de rede só adiam a próxima consulta. Se o tempo acabar (8) ou a consulta falhar de outro modo (9), o erro traz o código: a alteração já foi pedida, e repetir o comando pediria outra. Em `edicao`, um código que a API não conhece é um erro na hora (5), como o de um código digitado errado, a não ser com `--recem-pedida`, que o comando sugerido por `editar` já traz: a API pode demorar a mostrar uma alteração que acabou de ser pedida, e aí o 404 só adia a próxima consulta, como na espera do próprio `editar`; se ele durar até o fim do tempo, o comando sai com 8 e o código da alteração, não com o 5 de uma alteração recusada. Sem `--aguardar`, `edicao` mostra o status e sai com 5 se a alteração não foi feita, e com 0 se ela foi feita ou ainda está em processamento. Mesmo feita, a alteração pode levar até 30 minutos para aparecer em `cobranca consultar`. O motivo do cancelamento tem até 50 caracteres. Essas operações não têm chave de idempotência: se o resultado ficar incerto (tempo esgotado, erro 5xx), a CLI sai com o código 9 e indica o `cobranca consultar` que mostra se a cobrança foi cancelada ou alterada, antes de tentar de novo. O `Confira com` e o `Acompanhe com` que `cancelar`, `editar` e `pagar` mostram levam as opções que escolheram a conta na linha de comando (`-p`, `--config`, `--ambiente`...). Os dois comandos pedem confirmação (sem terminal, exigem `--sim`, e nesse caso nem a consulta é feita) e precisam do escopo `boleto-cobranca.write`, além de `boleto-cobranca.read` para a consulta; a API aceita até 10 alterações por minuto.
+
+No sandbox, `cobranca pagar <codigo> --com boleto` (ou `pix`) paga uma cobrança, para testar o fluxo inteiro: emitir, pagar, consultar e, com um webhook cadastrado, receber a notificação. Em produção, quem paga é o cliente, e o comando é recusado antes de qualquer requisição. O pagamento precisa do escopo `boleto-cobranca.write`.
+
 ### Formatos de saída
 
 | Formato | Para quê |
@@ -510,11 +536,11 @@ $ curl --cert certificado.crt --key chave.key \
 | 2 | uso incorreto (argumentos inválidos) |
 | 3 | configuração ausente ou inválida (inclui certificado/chave) |
 | 4 | falha de autenticação ou acesso negado (credenciais, escopos, 401/403) |
-| 5 | requisição rejeitada pela API (400, 404, 409, 422); com `--aguardar`, Pix que terminou sem ser pago, lote com algum pagamento que não foi feito ou cobrança que não foi emitida; `cobranca consultar` com `--qrcode` ou `--qrcode-png` de uma cobrança sem Pix |
+| 5 | requisição rejeitada pela API (400, 404, 409, 422); com `--aguardar`, Pix que terminou sem ser pago, lote com algum pagamento que não foi feito, cobrança que não foi emitida ou alteração que não foi feita; `cobranca consultar` com `--qrcode` ou `--qrcode-png` de uma cobrança sem Pix |
 | 6 | serviço indisponível, limite de requisições (429), erro 5xx ou falha de rede, numa operação que certamente não foi feita (uma consulta, ou um envio que a API não recebeu) |
 | 7 | operação cancelada na confirmação (nada foi enviado) |
-| 8 | `pix consultar`, `pagamento lote consultar` ou `cobranca emitir` com `--aguardar`: tempo esgotado antes de um status final (num lote, também com pagamentos aguardando aprovação). Em `cobranca emitir`, a cobrança já foi solicitada: acompanhe-a com o `cobranca consultar` da dica, sem emitir de novo |
-| 9 | resultado incerto: um envio pode ter sido feito (tempo esgotado, erro 5xx ou resposta ilegível depois do envio), ou, em `cobranca emitir --aguardar`, a cobrança foi solicitada e a consulta falhou. Confira com o comando da dica antes de tentar de novo; um script não deve repetir o comando às cegas |
+| 8 | `pix consultar`, `pagamento lote consultar`, `cobranca emitir`, `cobranca editar` ou `cobranca edicao` com `--aguardar`: tempo esgotado antes de um status final (num lote, também com pagamentos aguardando aprovação). Em `cobranca emitir`, `cobranca editar` e `cobranca edicao --recem-pedida`, o pedido já foi feito: acompanhe-o com o comando da dica, sem repeti-lo |
+| 9 | resultado incerto: um envio pode ter sido feito (tempo esgotado, erro 5xx ou resposta ilegível depois do envio; também em `cobranca cancelar`, `editar` e `pagar`), ou, em `cobranca emitir` e `cobranca editar` com `--aguardar` (e em `cobranca edicao --aguardar --recem-pedida`), o pedido foi aceito e a consulta falhou. Confira com o comando da dica antes de tentar de novo; um script não deve repetir o comando às cegas |
 
 Mensagens de erro vão para `stderr`, em português, com a explicação da API e dicas. Com `-v`/`-vv` a CLI mostra detalhes das requisições (método, caminho, status e tempo) — nunca tokens, segredos ou corpos de resposta.
 

@@ -78,18 +78,40 @@ pub(crate) enum CliError {
     /// `cobranca emitir --aguardar`: the API could not issue the charge.
     #[error("a cobrança não foi emitida: {situacao}")]
     CobrancaNaoEmitida { situacao: String },
-    /// `cobranca emitir --aguardar`: the charge was requested (the API
-    /// gave its code), but the wait ended before its final situation: the
-    /// time ran out (`source` is `None`), or a query failed in a way that
+    /// `cobranca cancelar`, `editar` or `pagar`, which have no idempotency
+    /// key: the request may have been processed (timeout, `5xx`, an
+    /// unreadable answer after sending).
+    #[error("{source}")]
+    AlteracaoIncerta {
+        source: InterError,
+        /// What may have happened: `a cobrança pode ter sido cancelada`.
+        situacao: &'static str,
+        /// Command that shows the charge, to run before trying again.
+        consulta: String,
+        /// Why the check may not show it yet.
+        demora: Option<&'static str>,
+    },
+    /// `cobranca editar`, or `cobranca edicao --aguardar`: the change failed.
+    #[error("a alteração da cobrança não foi feita: {motivo}")]
+    EdicaoNaoFeita { motivo: String },
+    /// `--aguardar` after a request the API accepted (`cobranca emitir`,
+    /// `cobranca editar` and the `cobranca edicao --recem-pedida` it
+    /// suggests): the wait ended before the final situation, when
+    /// the time ran out (`source` is `None`) or a query failed in a way that
     /// waiting does not fix.
-    #[error("a cobrança foi solicitada (código {codigo}), mas {motivo}")]
-    EmissaoSemDesfecho {
+    #[error("{oque} (código {codigo}), mas {motivo}")]
+    SemDesfecho {
+        /// What was requested: `a cobrança foi solicitada`.
+        oque: &'static str,
         codigo: String,
         /// What happened: `o tempo de espera acabou (60 s) com ela ainda em
         /// processamento`.
         motivo: String,
-        /// Command that queries the charge, on this account.
+        /// Command that follows the request, on this account.
         consulta: String,
+        /// Why the command must not run again: `a cobrança já foi
+        /// solicitada: não a emita de novo`.
+        repetir: &'static str,
         source: Option<Box<InterError>>,
     },
     /// The user did not confirm the operation.
@@ -148,8 +170,9 @@ impl CliError {
             Self::PixNaoPago { .. }
             | Self::LoteComErro { .. }
             | Self::CobrancaNaoEmitida { .. }
+            | Self::EdicaoNaoFeita { .. }
             | Self::SemQrCode(_) => exit::REJECTED,
-            Self::TempoEsgotado { .. } | Self::EmissaoSemDesfecho { source: None, .. } => {
+            Self::TempoEsgotado { .. } | Self::SemDesfecho { source: None, .. } => {
                 exit::WAIT_TIMEOUT
             }
             // Built only when the request may have been processed: a script
@@ -158,7 +181,8 @@ impl CliError {
             Self::ResultadoIncerto { .. }
             | Self::PagamentoIncerto { .. }
             | Self::EmissaoIncerta { .. }
-            | Self::EmissaoSemDesfecho {
+            | Self::AlteracaoIncerta { .. }
+            | Self::SemDesfecho {
                 source: Some(_), ..
             } => exit::UNCERTAIN,
             Self::Inter(err) => match err {
@@ -225,13 +249,26 @@ impl CliError {
                     "a consulta precisa da permissão de leitura das cobranças (boleto-cobranca.read), e uma lista vazia logo depois do erro não prova que nada foi emitido: a emissão termina depois da resposta; espere alguns minutos e confira o valor, o vencimento e o pagador das cobranças encontradas".to_owned(),
                 ];
             }
-            Self::EmissaoSemDesfecho {
-                consulta, source, ..
+            Self::AlteracaoIncerta {
+                situacao,
+                consulta,
+                demora,
+                ..
             } => {
                 let mut dicas = vec![
-                    "a cobrança já foi solicitada: não a emita de novo, porque depois de 30 minutos a API aceita outra igual".to_owned(),
-                    format!("acompanhe com: {consulta}"),
+                    (*situacao).to_owned(),
+                    format!("confira antes de tentar de novo: {consulta}"),
                 ];
+                dicas.extend(demora.map(str::to_owned));
+                return dicas;
+            }
+            Self::SemDesfecho {
+                consulta,
+                repetir,
+                source,
+                ..
+            } => {
+                let mut dicas = vec![(*repetir).to_owned(), format!("acompanhe com: {consulta}")];
                 dicas.extend(source.as_deref().map(dicas_da_api).unwrap_or_default());
                 return dicas;
             }

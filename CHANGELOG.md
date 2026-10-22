@@ -8,6 +8,11 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ### Adicionado
 
+- `inter-pj cobranca cancelar <codigo> --motivo TEXTO`: cancela uma cobrança depois de consultá-la, mostrá-la e pedir confirmação; cobranças pagas, canceladas ou expiradas são recusadas sem nenhuma alteração, e, sem terminal nem `--sim`, nenhuma requisição é feita. Um resultado incerto (tempo esgotado, erro 5xx) sai com o código 9, como em `editar` e `pagar`, com o comando que confere a cobrança (#30).
+- `inter-pj cobranca editar <codigo> [--valor] [--vencimento]`: altera o valor e o vencimento, os únicos campos que a API aceita, mostrando o antes e o depois; com `--aguardar`, acompanha a alteração até o fim, saindo com 5 se ela não foi feita e 8 se o tempo acabou (#30).
+- `inter-pj cobranca edicao <codigo-edicao> [--aguardar [--recem-pedida]]`: mostra em que pé está uma alteração; `--recem-pedida`, que o comando sugerido por `editar` traz, continua a espera enquanto a API ainda não mostra a alteração (#30).
+- `inter-pj cobranca pagar <codigo> --com boleto|pix`: paga uma cobrança no sandbox, para testar o fluxo completo; em produção, é recusado antes de qualquer requisição (#32).
+- Biblioteca: `cobranca::motivo_cancelamento` confere o motivo do cancelamento antes do envio (#30).
 - `inter-pj cobranca emitir`: emite uma cobrança com boleto e Pix pelas opções (casos simples) ou por `--arquivo` (JSON com os campos da API, inclusive beneficiário final e nota fiscal, ou `-` para a entrada padrão), conferida localmente com mensagens que apontam a opção ou o campo; campos desconhecidos no arquivo são recusados. O resumo mostra o valor por extenso, até quando vale o desconto e quando a cobrança não paga é cancelada, e avisa sobre multa e juros que não chegam a valer (`--dias-agenda` 0 cancela a cobrança no vencimento), prazo de desconto já passado e vencimento no mesmo dia (só até as 19h59). Confirmação, `--sim` e `--simular`; sem chave de idempotência, um resultado incerto sai com o código 9 e vem com o comando que procura a cobrança antes de emiti-la de novo. Com `--aguardar [--timeout 60s]`, espera a emissão e mostra o boleto e o Pix, com `--qrcode` e `--qrcode-png` (#28).
 - `inter-pj cobranca modelo`: imprime um arquivo de exemplo para `cobranca emitir --arquivo`, com dados fictícios e vencimento em 30 dias (#28).
 - `inter-pj cobranca listar`: cobranças de um período por vencimento (padrão), emissão ou pagamento, com filtros de situação, pagador, CPF/CNPJ, seu número e tipo, ordem e todas as páginas (ou `--pagina`), em texto com totais, JSON ou CSV com os nomes da API (#29).
@@ -19,7 +24,7 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ### Alterado
 
-- Os códigos de saída 5 e 8 valem também para `cobranca emitir --aguardar` (cobrança não emitida; tempo esgotado), e o 9, para uma consulta que falha durante a espera de um jeito que esperar não resolve. Nos dois casos, o erro traz o código da cobrança solicitada e o comando que a acompanha; `429`, `5xx` e falhas de rede durante a espera só adiam a próxima consulta.
+- Os códigos de saída 5 e 8 valem também para `cobranca emitir`, `cobranca editar` e `cobranca edicao` com `--aguardar` (cobrança não emitida ou alteração não feita; tempo esgotado), e o 9, para uma consulta de `cobranca emitir` ou `cobranca editar` com `--aguardar` que falha de um jeito que esperar não resolve. Nesses dois comandos, os erros 8 e 9 trazem o código da cobrança ou da alteração pedida e o comando que a acompanha. `429`, `5xx` e falhas de rede durante a espera só adiam a próxima consulta, e, em `cobranca edicao`, um código que a API não conhece é um erro na hora, a não ser com `--recem-pedida`: aí o 404 só adia a próxima consulta e, se durar até o fim do tempo, o comando sai com 8, como em `editar`.
 
 ## [0.4.0] - 2026-09-23
 
