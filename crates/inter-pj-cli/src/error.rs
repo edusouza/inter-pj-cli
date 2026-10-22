@@ -132,7 +132,8 @@ pub(crate) enum CliError {
     #[error("a alteração da cobrança não foi feita: {motivo}")]
     EdicaoNaoFeita { motivo: String },
     /// `--aguardar` after a request the API accepted (`cobranca emitir`,
-    /// `cobranca editar`): the wait ended before the final situation, when
+    /// `cobranca editar` and the `cobranca edicao --recem-pedida` it
+    /// suggests): the wait ended before the final situation, when
     /// the time ran out (`source` is `None`) or a query failed in a way that
     /// waiting does not fix.
     #[error("{oque} (código {codigo}), mas {motivo}")]
