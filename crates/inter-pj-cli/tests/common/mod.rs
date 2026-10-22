@@ -61,7 +61,13 @@ impl TestEnv {
 
     /// The binary with an isolated environment.
     pub fn cmd(&self) -> Command {
-        let mut cmd = Command::new(env!("CARGO_BIN_EXE_inter-pj"));
+        self.programa(env!("CARGO_BIN_EXE_inter-pj"))
+    }
+
+    /// `programa` with the isolated environment of [`cmd`](Self::cmd), for
+    /// the binary run by another program.
+    pub fn programa(&self, programa: impl AsRef<std::ffi::OsStr>) -> Command {
+        let mut cmd = Command::new(programa);
         for (key, _) in std::env::vars() {
             if key.starts_with("INTER_") {
                 cmd.env_remove(key);
