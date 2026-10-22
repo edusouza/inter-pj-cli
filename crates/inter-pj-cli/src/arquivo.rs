@@ -4,6 +4,7 @@
 //! Unknown fields are refused: a typo such as `valorMuta` would otherwise
 //! drop the fine without anyone noticing.
 
+mod cobranca;
 mod csv;
 mod lote;
 
@@ -25,6 +26,7 @@ use crate::valor::parse_valor_ou_zero;
 /// Largest file accepted: a batch of 150 payments takes about 60 KB.
 const TAMANHO_MAXIMO: u64 = 1024 * 1024;
 
+pub(crate) use cobranca::{cobranca, modelo_cobranca};
 pub(crate) use lote::{ArquivoLote, MODELO_CSV, MODELO_JSON, ler_lote};
 
 /// Fields of a payment by barcode, as in the API (`EfetuarPagamento`).
@@ -103,14 +105,30 @@ pub(crate) struct Campos<'a> {
     objeto: &'a Map<String, Value>,
     /// Where the object is: `darf.json`, `pagamento 3`.
     onde: &'a str,
+    /// Path of a nested object, for the messages: `pagador.`.
+    prefixo: String,
 }
 
 impl<'a> Campos<'a> {
     /// The object `valor`, which may only have the fields `aceitos`.
     pub(crate) fn de(valor: &'a Value, onde: &'a str, aceitos: &[&str]) -> Result<Self, CliError> {
+        Self::com_prefixo(valor, onde, String::new(), aceitos)
+    }
+
+    fn com_prefixo(
+        valor: &'a Value,
+        onde: &'a str,
+        prefixo: String,
+        aceitos: &[&str],
+    ) -> Result<Self, CliError> {
         let Value::Object(objeto) = valor else {
+            let quem = if prefixo.is_empty() {
+                onde.to_owned()
+            } else {
+                format!("{onde}, campo \"{}\"", prefixo.trim_end_matches('.'))
+            };
             return Err(CliError::Usage(format!(
-                "{onde}: esperado um objeto JSON, com os campos {}",
+                "{quem}: esperado um objeto JSON, com os campos {}",
                 aceitos.join(", ")
             )));
         };
@@ -119,16 +137,68 @@ impl<'a> Campos<'a> {
             .find(|campo| !aceitos.contains(&campo.as_str()))
         {
             return Err(CliError::Usage(format!(
-                "{onde}: campo desconhecido \"{campo}\"; os campos aceitos são {}",
+                "{onde}: campo desconhecido \"{prefixo}{campo}\"; os campos aceitos são {}",
                 aceitos.join(", ")
             )));
         }
-        Ok(Self { objeto, onde })
+        Ok(Self {
+            objeto,
+            onde,
+            prefixo,
+        })
+    }
+
+    /// The object in `campo`, if given, which may only have the fields
+    /// `aceitos`. Its messages name the fields by their path
+    /// (`pagador.cep`).
+    pub(crate) fn objeto(
+        &self,
+        campo: &str,
+        aceitos: &[&str],
+    ) -> Result<Option<Campos<'a>>, CliError> {
+        self.bruto(campo)
+            .map(|valor| {
+                Self::com_prefixo(
+                    valor,
+                    self.onde,
+                    format!("{}{campo}.", self.prefixo),
+                    aceitos,
+                )
+            })
+            .transpose()
     }
 
     /// An error about `campo`.
     pub(crate) fn erro(&self, campo: &str, problema: impl Display) -> CliError {
-        CliError::Usage(format!("{}, campo \"{campo}\": {problema}", self.onde))
+        CliError::Usage(format!(
+            "{}, campo \"{}{campo}\": {problema}",
+            self.onde, self.prefixo
+        ))
+    }
+
+    /// A whole number: a JSON number or its digits as text.
+    pub(crate) fn inteiro(&self, campo: &str) -> Result<Option<u32>, CliError> {
+        let erro = || self.erro(campo, "esperado um número inteiro, sem sinal");
+        match self.bruto(campo) {
+            None => Ok(None),
+            Some(Value::Number(numero)) => numero
+                .as_u64()
+                .and_then(|n| u32::try_from(n).ok())
+                .map(Some)
+                .ok_or_else(erro),
+            Some(Value::String(texto)) if texto.trim().is_empty() => Ok(None),
+            Some(Value::String(texto)) => texto.trim().parse().map(Some).map_err(|_| erro()),
+            Some(_) => Err(erro()),
+        }
+    }
+
+    /// A list.
+    pub(crate) fn lista(&self, campo: &str) -> Result<Option<&'a Vec<Value>>, CliError> {
+        match self.bruto(campo) {
+            None => Ok(None),
+            Some(Value::Array(itens)) => Ok(Some(itens)),
+            Some(_) => Err(self.erro(campo, "esperada uma lista")),
+        }
     }
 
     fn bruto(&self, campo: &str) -> Option<&'a Value> {

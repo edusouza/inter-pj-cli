@@ -374,7 +374,48 @@ O lote é processado depois do envio: `pagamento lote consultar` mostra o status
 
 ### Cobranças
 
-Cobranças são boletos com Pix para os clientes da empresa. A consulta mostra a situação, os valores e os encargos, o boleto e o Pix:
+Cobranças são boletos com Pix para os clientes da empresa. A emissão parte das opções, nos casos simples, ou de um arquivo JSON com os campos da API; antes de enviar, a CLI confere tudo e mostra o resumo:
+
+```console
+$ inter-pj cobranca emitir --seu-numero NF-123 --valor 150,00 --vencimento 2026-10-20 \
+    --pagador-documento 12.345.678/0001-95 --pagador-nome "Cliente Exemplo Ltda" \
+    --pagador-endereco "Avenida Brasil" --pagador-numero 1200 --pagador-cidade "Belo Horizonte" \
+    --pagador-uf MG --pagador-cep 30110-000 --pagador-email financeiro@exemplo.com.br \
+    --desconto 2% --desconto-dias 5 --multa 2% --juros 1% --dias-agenda 30
+Cobrança a emitir
+  Ambiente      sandbox (dados fictícios)
+  Seu número    NF-123
+  Valor         R$ 150,00 (cento e cinquenta reais)
+  Vencimento    20/10/2026
+  Pagador       Cliente Exemplo Ltda (12.345.678/0001-95)
+  Endereço      Avenida Brasil, 1200 - Belo Horizonte/MG - CEP 30110-000
+  Contato       financeiro@exemplo.com.br
+  Desconto      2% para pagamentos até 15/10/2026
+  Multa         2%
+  Juros         1% ao mês
+  Cancelamento  19/11/2026, 30 dias após o vencimento, se não for paga
+  Recebimento   boleto e Pix (se a conta tiver chave Pix)
+Emitir a cobrança? [s/N] s
+Cobrança solicitada: a emissão termina em instantes.
+Código  0b7e4c1a-5d3f-4a2b-9c8d-7e6f5a4b3c2d
+
+Acompanhe com: inter-pj cobranca consultar 0b7e4c1a-5d3f-4a2b-9c8d-7e6f5a4b3c2d
+
+$ inter-pj cobranca modelo > cobranca.json    # exemplo com todos os campos, vencendo em 30 dias
+$ inter-pj cobranca emitir --arquivo cobranca.json --aguardar --qrcode
+```
+
+São obrigatórios o seu número (até 15 caracteres, ex.: o número da nota), o valor (de R$ 2,50 a R$ 99.999.999,99), o vencimento (hoje ou depois) e, do pagador, CPF ou CNPJ, nome, endereço, cidade, UF e CEP; número, complemento, bairro, e-mail e telefone são opcionais. `--desconto`, `--multa` e `--juros` aceitam um percentual (`2%`) ou um valor (`4,00`): o desconto vale para pagamentos até `--desconto-dias` antes do vencimento (padrão: até o vencimento), e os juros são ao mês, em percentual, ou por dia, em valor. `--mensagem` pode ser repetida, até 5 linhas de 78 caracteres, e `--receber-com boleto` ou `pix` restringe as formas de pagamento (padrão: boleto e, se a conta tiver chave, Pix).
+
+Atenção a `--dias-agenda` (`numDiasAgenda`): é por quantos dias depois do vencimento a cobrança não paga continua valendo. O padrão da API, 0, cancela a cobrança no vencimento: pagamentos atrasados não são aceitos, e multa e juros nunca chegam a valer. O resumo mostra a data do cancelamento e avisa quando há multa ou juros sem prazo para valerem, quando o prazo do desconto já passou e quando a cobrança vence hoje, o que só é aceito até as 19h59 (horário de Brasília).
+
+O arquivo (`--arquivo`, ou `-` para a entrada padrão) tem os nomes de campo da API e aceita também o beneficiário final e a nota fiscal, cuja chave de acesso é conferida (dígito verificador, número e série). Campos desconhecidos são recusados e as mensagens apontam o campo (`cobranca.json, campo "pagador.cep": ...`); valores aceitam número (`150.00`) ou texto (`"150,00"`), CEP e CPF/CNPJ aceitam pontuação, e `tipoPessoa` pode ficar de fora, pois vem do documento.
+
+Os trilhos são os dos pagamentos: confirmação `[s/N]` (sem terminal, ou com `--arquivo -`, exige `--sim`) e `--simular`, que mostra a requisição sem enviar nada; o limite por operação não se aplica, porque uma cobrança não tira dinheiro da conta. A emissão é assíncrona: a API responde com o código da solicitação, e a cobrança fica em processamento até o boleto e o Pix serem gerados. Com `--aguardar`, a CLI consulta a cada 6 segundos (até `--timeout`; padrão: 60s) e mostra a cobrança emitida, com o QR Code se `--qrcode` ou `--qrcode-png` forem pedidos, e sai com o código 5 se a emissão falhou ou 8 se o tempo acabou. Assim que a API aceita o pedido, a CLI mostra em `stderr` o código da cobrança e o `cobranca consultar` que a acompanha. Uma consulta que falha durante a espera (`429`, `5xx`, rede) não a interrompe: a CLI tenta de novo no próximo intervalo. Se o tempo acabar (8) ou a consulta falhar de outro modo (9, por exemplo sem o escopo de leitura), o erro traz o código e o comando de consulta: a cobrança já foi solicitada, e emiti-la de novo faria outra. Se a cobrança emitida não tiver um Pix que dê o QR Code, a CLI a mostra (em `stderr`, com `--qrcode-png -`), avisa e termina com sucesso, para que um script não a emita de novo.
+
+Não há chave de idempotência, mas, por 30 minutos, a API recusa outra cobrança com o mesmo seu número, valor, vencimento e pagador. Se o resultado da emissão ficar incerto, a CLI sai com o código 9 e o erro traz o comando que procura a cobrança (`cobranca listar --filtrar-por emissao --seu-numero NF-123`) para conferir antes de tentar de novo: uma lista vazia logo depois do erro não prova que nada foi emitido, porque a emissão termina depois da resposta. Esse comando e o `Acompanhe com` levam as opções que escolheram a conta na linha de comando (`-p`, `--config`, `--ambiente`, `--conta-corrente`...), para que a conferência não procure a cobrança em outro perfil, ambiente ou conta. A emissão precisa do escopo `boleto-cobranca.write` e, com `--aguardar`, também de `boleto-cobranca.read`.
+
+A consulta mostra a situação, os valores e os encargos, o boleto e o Pix:
 
 ```console
 $ inter-pj cobranca consultar 0b7e4c1a-5d3f-4a2b-9c8d-7e6f5a4b3c2d
@@ -391,8 +432,9 @@ Cobrança NF-123
   Código      0b7e4c1a-5d3f-4a2b-9c8d-7e6f5a4b3c2d
 
 Boleto
-  Nosso número     12345678
-  Linha digitável  07790.00116 12345.678002 12345.678903 1 16050000015000
+  Nosso número      12345678
+  Linha digitável   07790.00116 12345.678002 12345.678903 1 16050000015000
+  Código de barras  07791160500000150000001112345678001234567890
 
 Pix
   Copia e cola  00020126580014br.gov.bcb.pix0136123e4567-e12b-...63041D3D
@@ -445,7 +487,7 @@ Para o Excel em português, use `--formato csv --separador ';'`: ponto e vírgul
 
 ### Retentativas
 
-Consultas que falham por limite de requisições (`429`), instabilidade do servidor (`500`, `502`, `503`, `504`) ou falha de conexão são repetidas automaticamente, com espera crescente (1 s, 2 s, ...) e respeitando o cabeçalho `Retry-After`. O padrão é de 3 tentativas; ajuste com `--tentativas N` (ou `INTER_TENTATIVAS`) ou desative com `--sem-retentativa`. Com `-v`, cada nova tentativa aparece em `stderr`. O envio de Pix e os pagamentos só são repetidos quando certamente não foram processados (`429` ou conexão recusada); o Pix, sempre com a mesma chave de idempotência.
+Consultas que falham por limite de requisições (`429`), instabilidade do servidor (`500`, `502`, `503`, `504`) ou falha de conexão são repetidas automaticamente, com espera crescente (1 s, 2 s, ...) e respeitando o cabeçalho `Retry-After`. O padrão é de 3 tentativas; ajuste com `--tentativas N` (ou `INTER_TENTATIVAS`) ou desative com `--sem-retentativa`. Com `-v`, cada nova tentativa aparece em `stderr`. O envio de Pix, os pagamentos e a emissão de cobranças só são repetidos quando certamente não foram processados (`429` ou conexão recusada); o Pix, sempre com a mesma chave de idempotência.
 
 ### Tokens e rate limit
 
@@ -468,11 +510,11 @@ $ curl --cert certificado.crt --key chave.key \
 | 2 | uso incorreto (argumentos inválidos) |
 | 3 | configuração ausente ou inválida (inclui certificado/chave) |
 | 4 | falha de autenticação ou acesso negado (credenciais, escopos, 401/403) |
-| 5 | requisição rejeitada pela API (400, 404, 409, 422); com `--aguardar`, Pix que terminou sem ser pago ou lote com algum pagamento que não foi feito; `--qrcode` ou `--qrcode-png` de uma cobrança sem Pix |
+| 5 | requisição rejeitada pela API (400, 404, 409, 422); com `--aguardar`, Pix que terminou sem ser pago, lote com algum pagamento que não foi feito ou cobrança que não foi emitida; `cobranca consultar` com `--qrcode` ou `--qrcode-png` de uma cobrança sem Pix |
 | 6 | serviço indisponível, limite de requisições (429), erro 5xx ou falha de rede, numa operação que certamente não foi feita (uma consulta, ou um envio que a API não recebeu) |
 | 7 | operação cancelada na confirmação (nada foi enviado) |
-| 8 | `pix consultar` ou `pagamento lote consultar` com `--aguardar`: tempo esgotado antes de um status final (num lote, também com pagamentos aguardando aprovação) |
-| 9 | resultado incerto: um envio pode ter sido feito (tempo esgotado, erro 5xx ou resposta ilegível depois do envio). Confira com o comando da dica antes de tentar de novo; um script não deve repetir o comando às cegas |
+| 8 | `pix consultar`, `pagamento lote consultar` ou `cobranca emitir` com `--aguardar`: tempo esgotado antes de um status final (num lote, também com pagamentos aguardando aprovação). Em `cobranca emitir`, a cobrança já foi solicitada: acompanhe-a com o `cobranca consultar` da dica, sem emitir de novo |
+| 9 | resultado incerto: um envio pode ter sido feito (tempo esgotado, erro 5xx ou resposta ilegível depois do envio), ou, em `cobranca emitir --aguardar`, a cobrança foi solicitada e a consulta falhou. Confira com o comando da dica antes de tentar de novo; um script não deve repetir o comando às cegas |
 
 Mensagens de erro vão para `stderr`, em português, com a explicação da API e dicas. Com `-v`/`-vv` a CLI mostra detalhes das requisições (método, caminho, status e tempo) — nunca tokens, segredos ou corpos de resposta.
 

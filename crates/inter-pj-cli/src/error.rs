@@ -67,6 +67,31 @@ pub(crate) enum CliError {
         /// reading of the payments.
         escopos: &'static str,
     },
+    /// A charge whose issue is unknown: it may have been issued. The API
+    /// refuses an identical one for 30 minutes, but not after that.
+    #[error("{source}")]
+    EmissaoIncerta {
+        source: InterError,
+        /// Command that finds the charge, to run before trying again.
+        consulta: String,
+    },
+    /// `cobranca emitir --aguardar`: the API could not issue the charge.
+    #[error("a cobrança não foi emitida: {situacao}")]
+    CobrancaNaoEmitida { situacao: String },
+    /// `cobranca emitir --aguardar`: the charge was requested (the API
+    /// gave its code), but the wait ended before its final situation: the
+    /// time ran out (`source` is `None`), or a query failed in a way that
+    /// waiting does not fix.
+    #[error("a cobrança foi solicitada (código {codigo}), mas {motivo}")]
+    EmissaoSemDesfecho {
+        codigo: String,
+        /// What happened: `o tempo de espera acabou (60 s) com ela ainda em
+        /// processamento`.
+        motivo: String,
+        /// Command that queries the charge, on this account.
+        consulta: String,
+        source: Option<Box<InterError>>,
+    },
     /// The user did not confirm the operation.
     #[error("operação cancelada: nada foi enviado")]
     Cancelado,
@@ -120,14 +145,22 @@ impl CliError {
             Self::Config(_) | Self::ConfigFile { .. } => exit::CONFIG,
             Self::Io { .. } => exit::UNEXPECTED,
             Self::Cancelado => exit::CANCELLED,
-            Self::PixNaoPago { .. } | Self::LoteComErro { .. } | Self::SemQrCode(_) => {
-                exit::REJECTED
+            Self::PixNaoPago { .. }
+            | Self::LoteComErro { .. }
+            | Self::CobrancaNaoEmitida { .. }
+            | Self::SemQrCode(_) => exit::REJECTED,
+            Self::TempoEsgotado { .. } | Self::EmissaoSemDesfecho { source: None, .. } => {
+                exit::WAIT_TIMEOUT
             }
-            Self::TempoEsgotado { .. } => exit::WAIT_TIMEOUT,
             // Built only when the request may have been processed: a script
             // must not repeat them blindly, unlike a `429` or a refused
             // connection (6).
-            Self::ResultadoIncerto { .. } | Self::PagamentoIncerto { .. } => exit::UNCERTAIN,
+            Self::ResultadoIncerto { .. }
+            | Self::PagamentoIncerto { .. }
+            | Self::EmissaoIncerta { .. }
+            | Self::EmissaoSemDesfecho {
+                source: Some(_), ..
+            } => exit::UNCERTAIN,
             Self::Inter(err) => match err {
                 InterError::InvalidInput(_) => exit::USAGE,
                 InterError::Config(_) | InterError::Identity(_) => exit::CONFIG,
@@ -185,41 +218,63 @@ impl CliError {
                     ),
                 ];
             }
+            Self::EmissaoIncerta { consulta, .. } => {
+                return vec![
+                    "a cobrança pode ter sido emitida; por 30 minutos, a API recusa outra com o mesmo seu número, valor, vencimento e pagador".to_owned(),
+                    format!("confira antes de tentar de novo: {consulta}"),
+                    "a consulta precisa da permissão de leitura das cobranças (boleto-cobranca.read), e uma lista vazia logo depois do erro não prova que nada foi emitido: a emissão termina depois da resposta; espere alguns minutos e confira o valor, o vencimento e o pagador das cobranças encontradas".to_owned(),
+                ];
+            }
+            Self::EmissaoSemDesfecho {
+                consulta, source, ..
+            } => {
+                let mut dicas = vec![
+                    "a cobrança já foi solicitada: não a emita de novo, porque depois de 30 minutos a API aceita outra igual".to_owned(),
+                    format!("acompanhe com: {consulta}"),
+                ];
+                dicas.extend(source.as_deref().map(dicas_da_api).unwrap_or_default());
+                return dicas;
+            }
             _ => return Vec::new(),
         };
-        let hints: Vec<&str> = match err {
-            InterError::Api(api) if problem_type(api) == Some("SCROLL_ALREADY_ACTIVE") => vec![
-                "já existe uma leitura do extrato em modo scroll para esta conta (outra execução?); ela expira após 6 minutos sem uso",
+        dicas_da_api(err)
+    }
+}
+
+/// Suggestions for an error of the API or of the connection.
+fn dicas_da_api(err: &InterError) -> Vec<String> {
+    let hints: Vec<&str> = match err {
+        InterError::Api(api) if problem_type(api) == Some("SCROLL_ALREADY_ACTIVE") => vec![
+            "já existe uma leitura do extrato em modo scroll para esta conta (outra execução?); ela expira após 6 minutos sem uso",
+        ],
+        InterError::Api(api) if problem_type(api) == Some("SCROLL_EXPIRED") => vec![
+            "a leitura em modo scroll expirou (6 minutos sem requisições); execute o comando novamente",
+        ],
+        InterError::Auth(api) if api.note.is_none() => vec![
+            "confira o client_id, o client_secret e se o certificado/chave são os da mesma integração",
+        ],
+        InterError::Api(api) => match api.kind() {
+            ApiErrorKind::Unauthorized => {
+                vec!["o token foi recusado; tente `inter-pj auth limpar` e repita o comando"]
+            }
+            ApiErrorKind::Forbidden => vec![
+                "confira se a integração tem os escopos necessários habilitados no Internet Banking PJ",
+                "se a integração tem mais de uma conta, informe --conta-corrente",
             ],
-            InterError::Api(api) if problem_type(api) == Some("SCROLL_EXPIRED") => vec![
-                "a leitura em modo scroll expirou (6 minutos sem requisições); execute o comando novamente",
-            ],
-            InterError::Auth(api) if api.note.is_none() => vec![
-                "confira o client_id, o client_secret e se o certificado/chave são os da mesma integração",
-            ],
-            InterError::Api(api) => match api.kind() {
-                ApiErrorKind::Unauthorized => {
-                    vec!["o token foi recusado; tente `inter-pj auth limpar` e repita o comando"]
-                }
-                ApiErrorKind::Forbidden => vec![
-                    "confira se a integração tem os escopos necessários habilitados no Internet Banking PJ",
-                    "se a integração tem mais de uma conta, informe --conta-corrente",
-                ],
-                ApiErrorKind::RateLimited => {
-                    vec!["limite de requisições atingido; aguarde um minuto e tente novamente"]
-                }
-                ApiErrorKind::Unavailable => vec![
-                    "o serviço pode estar em manutenção ou fora da janela de funcionamento; tente mais tarde",
-                ],
-                _ => Vec::new(),
-            },
-            InterError::Transport(_) | InterError::TokenTransport(_) => vec![
-                "confira a conexão/proxy e se o certificado (.crt) e a chave (.key) da integração estão válidos",
+            ApiErrorKind::RateLimited => {
+                vec!["limite de requisições atingido; aguarde um minuto e tente novamente"]
+            }
+            ApiErrorKind::Unavailable => vec![
+                "o serviço pode estar em manutenção ou fora da janela de funcionamento; tente mais tarde",
             ],
             _ => Vec::new(),
-        };
-        hints.into_iter().map(str::to_owned).collect()
-    }
+        },
+        InterError::Transport(_) | InterError::TokenTransport(_) => vec![
+            "confira a conexão/proxy e se o certificado (.crt) e a chave (.key) da integração estão válidos",
+        ],
+        _ => Vec::new(),
+    };
+    hints.into_iter().map(str::to_owned).collect()
 }
 
 fn problem_type(api: &ApiError) -> Option<&str> {
