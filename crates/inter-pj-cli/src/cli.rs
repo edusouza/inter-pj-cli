@@ -15,6 +15,7 @@ use inter_pj::banking::{
     DataDoPagamento, IdIdempotente, TAMANHO_PAGINA_MAXIMO, TipoConta, TipoOperacao, TipoTransacao,
 };
 use inter_pj::boleto::CodigoBarras;
+use inter_pj::cobranca::Uf;
 use inter_pj::documento::Documento;
 use inter_pj::pix::{BrCode, ChavePix};
 use rust_decimal::Decimal;
@@ -25,6 +26,20 @@ use crate::valor::{parse_valor, parse_valor_ou_zero};
 mod erro;
 
 pub(crate) use erro::Portugues;
+
+mod pix;
+
+pub(crate) use pix::{
+    DescontoAte, DevedorCobvArgs, EncargosCobvArgs, Momento, PeriodoJuros, PeriodoPixArgs,
+    PixCobCommand, PixCobConsultarArgs, PixCobCriarArgs, PixCobListarArgs, PixCobRevisarArgs,
+    PixCobvCommand, PixCobvConsultarArgs, PixCobvCriarArgs, PixCobvListarArgs, PixCobvRevisarArgs,
+    PixDevolucaoCommand, PixDevolucaoConsultarArgs, PixDevolucaoSolicitarArgs, PixLocCommand,
+    PixLocConsultarArgs, PixLocCriarArgs, PixLocDesvincularArgs, PixLocListarArgs,
+    PixLoteCobvArquivoArgs, PixLoteCobvCommand, PixLoteCobvConsultarArgs, PixLoteCobvIdArgs,
+    PixLoteCobvListarArgs, PixLoteCobvSituacaoArgs, PixPagarQrcodeArgs, PixRecebidoConsultarArgs,
+    PixRecebidosCommand, PixRecebidosListarArgs, PixSandboxCommand, PixSandboxPagarArgs, SimNao,
+    StatusCobArg,
+};
 
 const AFTER_HELP: &str = "\
 Credenciais:
@@ -299,6 +314,13 @@ pub(crate) enum Command {
         subcommand_value_name = "COMANDO"
     )]
     Pagamento(PagamentoCommand),
+    /// Cobranças: boletos com Pix para os clientes da empresa
+    #[command(
+        subcommand,
+        subcommand_help_heading = "Comandos",
+        subcommand_value_name = "COMANDO"
+    )]
+    Cobranca(CobrancaCommand),
     /// Tokens de acesso OAuth
     #[command(
         subcommand,
@@ -323,11 +345,22 @@ impl Command {
             | Self::Pagamento(
                 PagamentoCommand::Boleto(BoletoCommand::Listar(_))
                 | PagamentoCommand::Darf(DarfCommand::Listar(_)),
+            )
+            | Self::Cobranca(CobrancaCommand::Listar(_) | CobrancaCommand::Sumario(_))
+            | Self::Pix(
+                PixCommand::Cob(PixCobCommand::Listar(_))
+                | PixCommand::Cobv(PixCobvCommand::Listar(_))
+                | PixCommand::Recebidos(PixRecebidosCommand::Listar(_))
+                | PixCommand::Loc(PixLocCommand::Listar(_))
+                | PixCommand::LoteCobv(PixLoteCobvCommand::Listar(_)),
             ) => true,
             Self::Extrato(args) => !matches!(args.comando, Some(ExtratoCommand::Pdf(_))),
-            Self::Conta | Self::Pix(_) | Self::Pagamento(_) | Self::Auth(_) | Self::Config(_) => {
-                false
-            }
+            Self::Conta
+            | Self::Pix(_)
+            | Self::Pagamento(_)
+            | Self::Cobranca(_)
+            | Self::Auth(_)
+            | Self::Config(_) => false,
         }
     }
 }
@@ -498,6 +531,56 @@ pub(crate) enum PixCommand {
     Enviar(Box<PixEnviarArgs>),
     /// Consulta o status e o histórico de um Pix enviado (últimos 90 dias)
     Consultar(PixConsultarArgs),
+    /// Cobranças imediatas: QR Code dinâmico, para pagar na hora
+    #[command(
+        subcommand,
+        subcommand_help_heading = "Comandos",
+        subcommand_value_name = "COMANDO"
+    )]
+    Cob(PixCobCommand),
+    /// Cobranças com vencimento: QR Code para pagar até uma data, com multa, juros, abatimento e desconto
+    #[command(
+        subcommand,
+        subcommand_help_heading = "Comandos",
+        subcommand_value_name = "COMANDO"
+    )]
+    Cobv(PixCobvCommand),
+    /// Pix recebidos pela conta, com as suas devoluções
+    #[command(
+        subcommand,
+        subcommand_help_heading = "Comandos",
+        subcommand_value_name = "COMANDO"
+    )]
+    Recebidos(PixRecebidosCommand),
+    /// Devoluções de Pix recebidos: tiram dinheiro da conta
+    #[command(
+        subcommand,
+        subcommand_help_heading = "Comandos",
+        subcommand_value_name = "COMANDO"
+    )]
+    Devolucao(PixDevolucaoCommand),
+    /// Locations: os endereços dos QR Codes das cobranças
+    #[command(
+        subcommand,
+        subcommand_help_heading = "Comandos",
+        subcommand_value_name = "COMANDO"
+    )]
+    Loc(PixLocCommand),
+    /// Lotes de cobranças com vencimento, criados ou alterados a partir de um arquivo
+    #[command(
+        name = "lote-cobv",
+        subcommand,
+        subcommand_help_heading = "Comandos",
+        subcommand_value_name = "COMANDO"
+    )]
+    LoteCobv(PixLoteCobvCommand),
+    /// Sandbox: pagamentos de cobranças Pix, para testar o fluxo completo (recusados em produção)
+    #[command(
+        subcommand,
+        subcommand_help_heading = "Comandos",
+        subcommand_value_name = "COMANDO"
+    )]
+    Sandbox(PixSandboxCommand),
 }
 
 #[derive(Debug, Args)]
@@ -647,6 +730,537 @@ pub(crate) struct PixEnviarArgs {
         help_heading = "Segurança"
     )]
     pub(crate) id_idempotente: Option<IdIdempotente>,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum CobrancaCommand {
+    /// Emite uma cobrança (pelas opções ou por --arquivo), após mostrar um resumo e pedir confirmação
+    Emitir(Box<CobrancaEmitirArgs>),
+    /// Imprime um arquivo JSON de exemplo para --arquivo, com dados fictícios
+    Modelo(CobrancaModeloArgs),
+    /// Cobranças de um período (padrão: com vencimento nos últimos 30 dias), com filtros
+    Listar(CobrancaListarArgs),
+    /// Quantidade e valor das cobranças de um período, por situação
+    Sumario(CobrancaSumarioArgs),
+    /// Mostra uma cobrança: situação, valores, boleto e Pix (com o QR Code, se pedido)
+    Consultar(CobrancaConsultarArgs),
+    /// Grava o PDF de uma cobrança, com o boleto e o QR Code do Pix
+    Pdf(CobrancaPdfArgs),
+    /// Cancela uma cobrança, após mostrá-la e pedir confirmação
+    Cancelar(CobrancaCancelarArgs),
+    /// Altera o valor ou o vencimento de uma cobrança, após mostrar o antes e o depois
+    Editar(CobrancaEditarArgs),
+    /// Mostra em que pé está uma alteração feita com `cobranca editar`
+    Edicao(CobrancaEdicaoArgs),
+    /// Sandbox: paga uma cobrança, para testar o fluxo completo (recusado em produção)
+    Pagar(CobrancaPagarArgs),
+}
+
+/// Where the charge comes from: a file, or the options.
+#[derive(Debug, Args)]
+#[command(group(
+    ArgGroup::new("origem")
+        .required(true)
+        .args(["arquivo", "seu_numero"])
+))]
+pub(crate) struct CobrancaEmitirArgs {
+    /// Arquivo JSON com a cobrança, nos campos da API ("-" para a entrada padrão); veja `cobranca modelo`
+    #[arg(long, value_name = "ARQUIVO", help_heading = "Origem (escolha uma)")]
+    pub(crate) arquivo: Option<PathBuf>,
+
+    /// Seu número da cobrança, até 15 caracteres (ex.: o número da nota)
+    #[arg(
+        long,
+        value_name = "TEXTO",
+        requires_all = ["valor", "vencimento", "pagador_documento", "pagador_nome", "pagador_endereco", "pagador_cidade", "pagador_uf", "pagador_cep"],
+        help_heading = "Origem (escolha uma)"
+    )]
+    pub(crate) seu_numero: Option<String>,
+
+    /// Valor: 150,00, 1.500,00 ou 150.00 (de R$ 2,50 a R$ 99.999.999,99)
+    #[arg(long, value_name = "VALOR", value_parser = parse_valor, requires = "seu_numero", help_heading = "Cobrança")]
+    pub(crate) valor: Option<Decimal>,
+
+    /// Vencimento (AAAA-MM-DD), hoje ou depois
+    #[arg(long, value_name = "AAAA-MM-DD", value_parser = parse_data, requires = "seu_numero", help_heading = "Cobrança")]
+    pub(crate) vencimento: Option<NaiveDate>,
+
+    /// Dias após o vencimento até a cobrança não paga ser cancelada, de 0 a 60 [padrão: 0]
+    #[arg(
+        long,
+        value_name = "DIAS",
+        requires = "seu_numero",
+        help_heading = "Cobrança"
+    )]
+    pub(crate) dias_agenda: Option<u32>,
+
+    /// Desconto por pagar antes: percentual (2%) ou valor (10,00)
+    #[arg(long, value_name = "TAXA|VALOR", value_parser = parse_taxa_ou_valor, requires = "seu_numero", help_heading = "Cobrança")]
+    pub(crate) desconto: Option<TaxaOuValor>,
+
+    /// Dias antes do vencimento até quando o desconto vale [padrão: 0, até o vencimento]
+    #[arg(
+        long,
+        value_name = "DIAS",
+        requires = "desconto",
+        help_heading = "Cobrança"
+    )]
+    pub(crate) desconto_dias: Option<u32>,
+
+    /// Multa por atraso: percentual (2%) ou valor (4,00)
+    #[arg(long, value_name = "TAXA|VALOR", value_parser = parse_taxa_ou_valor, requires = "seu_numero", help_heading = "Cobrança")]
+    pub(crate) multa: Option<TaxaOuValor>,
+
+    /// Juros por atraso: percentual ao mês (1%) ou valor por dia (0,33)
+    #[arg(long, value_name = "TAXA|VALOR", value_parser = parse_taxa_ou_valor, requires = "seu_numero", help_heading = "Cobrança")]
+    pub(crate) juros: Option<TaxaOuValor>,
+
+    /// Linha impressa no boleto, até 78 caracteres; repita para até 5 linhas
+    #[arg(long, value_name = "TEXTO", action = ArgAction::Append, requires = "seu_numero", help_heading = "Cobrança")]
+    pub(crate) mensagem: Vec<String>,
+
+    /// Formas de recebimento: boleto, pix ou boleto,pix [padrão: boleto e, se a conta tiver chave, Pix]
+    #[arg(
+        long,
+        value_name = "FORMAS",
+        value_enum,
+        value_delimiter = ',',
+        ignore_case = true,
+        requires = "seu_numero",
+        help_heading = "Cobrança"
+    )]
+    pub(crate) receber_com: Vec<FormaArg>,
+
+    /// CPF ou CNPJ do pagador
+    #[arg(long, value_name = "CPF/CNPJ", value_parser = parse_documento, requires = "seu_numero", help_heading = "Pagador")]
+    pub(crate) pagador_documento: Option<Documento>,
+
+    /// Nome do pagador, até 100 caracteres
+    #[arg(
+        long,
+        value_name = "NOME",
+        requires = "seu_numero",
+        help_heading = "Pagador"
+    )]
+    pub(crate) pagador_nome: Option<String>,
+
+    /// Rua do pagador, até 100 caracteres
+    #[arg(
+        long,
+        value_name = "RUA",
+        requires = "seu_numero",
+        help_heading = "Pagador"
+    )]
+    pub(crate) pagador_endereco: Option<String>,
+
+    /// Número no endereço
+    #[arg(
+        long,
+        value_name = "NUMERO",
+        requires = "seu_numero",
+        help_heading = "Pagador"
+    )]
+    pub(crate) pagador_numero: Option<String>,
+
+    /// Complemento do endereço
+    #[arg(
+        long,
+        value_name = "TEXTO",
+        requires = "seu_numero",
+        help_heading = "Pagador"
+    )]
+    pub(crate) pagador_complemento: Option<String>,
+
+    /// Bairro
+    #[arg(
+        long,
+        value_name = "BAIRRO",
+        requires = "seu_numero",
+        help_heading = "Pagador"
+    )]
+    pub(crate) pagador_bairro: Option<String>,
+
+    /// Cidade
+    #[arg(
+        long,
+        value_name = "CIDADE",
+        requires = "seu_numero",
+        help_heading = "Pagador"
+    )]
+    pub(crate) pagador_cidade: Option<String>,
+
+    /// UF (sigla do estado)
+    #[arg(long, value_name = "UF", value_parser = parse_uf, requires = "seu_numero", help_heading = "Pagador")]
+    pub(crate) pagador_uf: Option<Uf>,
+
+    /// CEP: 30110-000 ou 30110000
+    #[arg(long, value_name = "CEP", value_parser = parse_cep, requires = "seu_numero", help_heading = "Pagador")]
+    pub(crate) pagador_cep: Option<String>,
+
+    /// E-mail do pagador
+    #[arg(
+        long,
+        value_name = "EMAIL",
+        requires = "seu_numero",
+        help_heading = "Pagador"
+    )]
+    pub(crate) pagador_email: Option<String>,
+
+    /// Telefone com DDD: (31) 99999-9999
+    #[arg(long, value_name = "TELEFONE", value_parser = parse_telefone, requires = "seu_numero", help_heading = "Pagador")]
+    pub(crate) pagador_telefone: Option<Telefone>,
+
+    #[command(flatten)]
+    pub(crate) depois: DepoisDaEmissaoArgs,
+
+    /// Confirma sem perguntar (para scripts)
+    #[arg(long, conflicts_with = "simular", help_heading = "Segurança")]
+    pub(crate) sim: bool,
+
+    /// Mostra a requisição que seria enviada, sem enviar nada
+    #[arg(long, conflicts_with = "aguardar", help_heading = "Segurança")]
+    pub(crate) simular: bool,
+}
+
+/// `cobranca emitir`: what to do once the charge is requested.
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Depois da emissão")]
+pub(crate) struct DepoisDaEmissaoArgs {
+    /// Espera a emissão (consulta a cada 6 segundos) e mostra o boleto e o Pix
+    #[arg(long)]
+    pub(crate) aguardar: bool,
+
+    /// Tempo máximo de espera com --aguardar: 60s, 5m [padrão: 60s]
+    #[arg(
+        long,
+        value_name = "DURACAO",
+        value_parser = parse_duracao,
+        default_value = "60s",
+        hide_default_value = true,
+        requires = "aguardar"
+    )]
+    pub(crate) timeout: Duration,
+
+    /// Com --aguardar, desenha o QR Code do Pix no terminal
+    #[arg(long, requires = "aguardar")]
+    pub(crate) qrcode: bool,
+
+    /// Com --aguardar, grava o QR Code do Pix em PNG ("-" para a saída padrão)
+    #[arg(long, value_name = "ARQUIVO", requires = "aguardar")]
+    pub(crate) qrcode_png: Option<PathBuf>,
+
+    /// Sobrescreve a imagem se ela já existir
+    #[arg(long, requires = "qrcode_png")]
+    pub(crate) sobrescrever: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct CobrancaModeloArgs {}
+
+/// `--desconto`, `--multa` and `--juros`: a percentage (`2%`) or an amount (`4,00`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TaxaOuValor {
+    Taxa(Decimal),
+    Valor(Decimal),
+}
+
+/// A phone split into DDD and number.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Telefone {
+    pub(crate) ddd: String,
+    pub(crate) numero: String,
+}
+
+/// `--receber-com`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum FormaArg {
+    Boleto,
+    Pix,
+}
+
+/// Filters shared by `cobranca listar` and `cobranca sumario`.
+#[derive(Debug, Clone, Args)]
+pub(crate) struct FiltroCobrancaArgs {
+    #[command(flatten)]
+    pub(crate) periodo: PeriodoArgs,
+
+    /// Data a que o período se refere: vencimento (padrão), emissao ou pagamento
+    #[arg(
+        long,
+        value_enum,
+        ignore_case = true,
+        value_name = "DATA",
+        hide_possible_values = true
+    )]
+    pub(crate) filtrar_por: Option<FiltrarDataPorArg>,
+
+    /// Apenas nesta situação: a-receber, recebida, atrasada, cancelada, expirada, marcada-recebida, em-processamento, falha-emissao ou protesto
+    #[arg(
+        long,
+        value_enum,
+        ignore_case = true,
+        value_name = "SITUACAO",
+        hide_possible_values = true
+    )]
+    pub(crate) situacao: Option<SituacaoArg>,
+
+    /// Apenas deste pagador (nome)
+    #[arg(long, value_name = "NOME")]
+    pub(crate) pagador: Option<String>,
+
+    /// Apenas deste pagador (CPF ou CNPJ)
+    #[arg(long, value_name = "CPF/CNPJ", value_parser = parse_documento)]
+    pub(crate) documento: Option<Documento>,
+
+    /// Apenas com este seu número
+    #[arg(long, value_name = "TEXTO")]
+    pub(crate) seu_numero: Option<String>,
+
+    /// Apenas deste tipo: simples, parcelada ou recorrente
+    #[arg(
+        long,
+        value_enum,
+        ignore_case = true,
+        value_name = "TIPO",
+        hide_possible_values = true
+    )]
+    pub(crate) tipo: Option<TipoCobrancaArg>,
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct CobrancaListarArgs {
+    #[command(flatten)]
+    pub(crate) filtro: FiltroCobrancaArgs,
+
+    /// Ordem: pagador (padrão), vencimento, emissao, valor, situacao, seu-numero, tipo ou codigo
+    #[arg(
+        long,
+        value_enum,
+        ignore_case = true,
+        value_name = "CAMPO",
+        hide_possible_values = true
+    )]
+    pub(crate) ordenar_por: Option<OrdenarPorArg>,
+
+    /// Ordem decrescente
+    #[arg(long)]
+    pub(crate) decrescente: bool,
+
+    /// Só esta página (começa em 0), em vez de todas
+    #[arg(long, value_name = "N")]
+    pub(crate) pagina: Option<u32>,
+
+    /// Cobranças por página com --pagina, até 1000 [padrão: 100]
+    #[arg(
+        long,
+        value_name = "N",
+        requires = "pagina",
+        value_parser = clap::value_parser!(u32).range(1..=1000)
+    )]
+    pub(crate) itens_por_pagina: Option<u32>,
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct CobrancaSumarioArgs {
+    #[command(flatten)]
+    pub(crate) filtro: FiltroCobrancaArgs,
+}
+
+/// `--filtrar-por` of the charges.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum FiltrarDataPorArg {
+    /// Data de vencimento (padrão)
+    Vencimento,
+    /// Data de emissão
+    #[value(name = "emissao", alias = "emissão")]
+    Emissao,
+    /// Data do pagamento
+    Pagamento,
+}
+
+/// `--situacao`: the words of the text output, or the API's codes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum SituacaoArg {
+    #[value(name = "a-receber", alias = "a_receber")]
+    AReceber,
+    #[value(name = "recebida", alias = "recebido")]
+    Recebida,
+    #[value(name = "atrasada", alias = "atrasado")]
+    Atrasada,
+    #[value(name = "cancelada", alias = "cancelado")]
+    Cancelada,
+    #[value(name = "expirada", alias = "expirado")]
+    Expirada,
+    #[value(name = "marcada-recebida", alias = "marcado_recebido")]
+    MarcadaRecebida,
+    #[value(name = "em-processamento", alias = "em_processamento")]
+    EmProcessamento,
+    #[value(name = "falha-emissao", alias = "falha_emissao")]
+    FalhaEmissao,
+    Protesto,
+}
+
+/// `--tipo` of the charges.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum TipoCobrancaArg {
+    #[value(name = "simples")]
+    Simples,
+    #[value(name = "parcelada", alias = "parcelado")]
+    Parcelada,
+    #[value(name = "recorrente")]
+    Recorrente,
+}
+
+/// `--ordenar-por` of the charges.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum OrdenarPorArg {
+    Pagador,
+    Vencimento,
+    #[value(name = "emissao", alias = "emissão")]
+    Emissao,
+    Valor,
+    #[value(name = "situacao", alias = "situação")]
+    Situacao,
+    #[value(name = "seu-numero", alias = "seu-número")]
+    SeuNumero,
+    Tipo,
+    #[value(name = "codigo", alias = "código")]
+    Codigo,
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct CobrancaConsultarArgs {
+    /// Código da cobrança (codigoSolicitacao), mostrado por `cobranca emitir` e `cobranca listar`
+    #[arg(value_name = "CODIGO")]
+    pub(crate) codigo: String,
+
+    /// Desenha no terminal o QR Code do Pix, para ler com o celular
+    #[arg(long)]
+    pub(crate) qrcode: bool,
+
+    /// Grava o QR Code do Pix em uma imagem PNG ("-" para a saída padrão)
+    #[arg(long, value_name = "ARQUIVO")]
+    pub(crate) qrcode_png: Option<PathBuf>,
+
+    /// Sobrescreve a imagem se ela já existir
+    #[arg(long, requires = "qrcode_png")]
+    pub(crate) sobrescrever: bool,
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct CobrancaPdfArgs {
+    /// Código da cobrança (codigoSolicitacao)
+    #[arg(value_name = "CODIGO")]
+    pub(crate) codigo: String,
+
+    /// Arquivo a gravar ("-" para a saída padrão). Padrão: cobranca-<codigo>.pdf
+    #[arg(short = 'o', long, value_name = "ARQUIVO")]
+    pub(crate) saida: Option<PathBuf>,
+
+    /// Sobrescreve o arquivo se ele já existir
+    #[arg(long)]
+    pub(crate) sobrescrever: bool,
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct CobrancaCancelarArgs {
+    /// Código da cobrança (codigoSolicitacao)
+    #[arg(value_name = "CODIGO")]
+    pub(crate) codigo: String,
+
+    /// Motivo do cancelamento, até 50 caracteres
+    #[arg(long, value_name = "TEXTO", value_parser = parse_motivo)]
+    pub(crate) motivo: String,
+
+    /// Confirma sem perguntar (para scripts)
+    #[arg(long, help_heading = "Segurança")]
+    pub(crate) sim: bool,
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+#[command(group(
+    ArgGroup::new("alteracao")
+        .required(true)
+        .multiple(true)
+        .args(["valor", "vencimento"])
+))]
+pub(crate) struct CobrancaEditarArgs {
+    /// Código da cobrança (codigoSolicitacao)
+    #[arg(value_name = "CODIGO")]
+    pub(crate) codigo: String,
+
+    /// Novo valor: 150,00, 1.500,00 ou 150.00 (de R$ 2,50 a R$ 99.999.999,99)
+    #[arg(long, value_name = "VALOR", value_parser = parse_valor)]
+    pub(crate) valor: Option<Decimal>,
+
+    /// Novo vencimento (AAAA-MM-DD), hoje ou depois
+    #[arg(long, value_name = "AAAA-MM-DD", value_parser = parse_data)]
+    pub(crate) vencimento: Option<NaiveDate>,
+
+    #[command(flatten)]
+    pub(crate) espera: EsperaEdicaoArgs,
+
+    /// Confirma sem perguntar (para scripts)
+    #[arg(long, help_heading = "Segurança")]
+    pub(crate) sim: bool,
+}
+
+/// `--aguardar` of `cobranca editar` and `cobranca edicao`.
+#[derive(Debug, Clone, Copy, Args)]
+pub(crate) struct EsperaEdicaoArgs {
+    /// Espera o fim da alteração (consulta a cada 6 segundos)
+    #[arg(long)]
+    pub(crate) aguardar: bool,
+
+    /// Tempo máximo de espera com --aguardar: 60s, 5m [padrão: 60s]
+    #[arg(
+        long,
+        value_name = "DURACAO",
+        value_parser = parse_duracao,
+        default_value = "60s",
+        hide_default_value = true,
+        requires = "aguardar"
+    )]
+    pub(crate) timeout: Duration,
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct CobrancaEdicaoArgs {
+    /// Código da alteração (codigoEdicao), mostrado por `cobranca editar`
+    #[arg(value_name = "CODIGO_EDICAO")]
+    pub(crate) codigo_edicao: String,
+
+    #[command(flatten)]
+    pub(crate) espera: EsperaEdicaoArgs,
+
+    /// Com --aguardar, para a alteração que `cobranca editar` acabou de pedir e que a API pode demorar a mostrar: o 404 só adia a próxima consulta (o comando sugerido por `editar` já traz esta opção). Sem ela, o 404 é um erro na hora
+    #[arg(long, requires = "aguardar")]
+    pub(crate) recem_pedida: bool,
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Opções")]
+pub(crate) struct CobrancaPagarArgs {
+    /// Código da cobrança (codigoSolicitacao)
+    #[arg(value_name = "CODIGO")]
+    pub(crate) codigo: String,
+
+    /// Como pagar: boleto (código de barras) ou pix (QR Code)
+    #[arg(
+        long,
+        value_enum,
+        ignore_case = true,
+        value_name = "FORMA",
+        hide_possible_values = true
+    )]
+    pub(crate) com: FormaArg,
 }
 
 #[derive(Debug, Subcommand)]
@@ -1104,6 +1718,61 @@ fn parse_conta(value: &str) -> Result<String, String> {
 
 fn parse_documento(value: &str) -> Result<Documento, String> {
     Documento::parse(value).map_err(|err| err.to_string())
+}
+
+fn parse_uf(value: &str) -> Result<Uf, String> {
+    value
+        .parse()
+        .map_err(|err: inter_pj::cobranca::UfError| err.to_string())
+}
+
+fn parse_motivo(value: &str) -> Result<String, String> {
+    inter_pj::cobranca::motivo_cancelamento(value).map_err(str::to_owned)
+}
+
+/// 8 digits, with or without punctuation.
+fn parse_cep(value: &str) -> Result<String, String> {
+    let cep: String = value
+        .chars()
+        .filter(|c| !matches!(c, '-' | '.' | ' '))
+        .collect();
+    if cep.len() == 8 && cep.bytes().all(|b| b.is_ascii_digit()) {
+        Ok(cep)
+    } else {
+        Err("o CEP tem 8 dígitos (ex.: 30110-000)".to_owned())
+    }
+}
+
+/// A Brazilian phone with DDD, with or without `+55` and punctuation.
+fn parse_telefone(value: &str) -> Result<Telefone, String> {
+    let mut digitos: String = value.chars().filter(char::is_ascii_digit).collect();
+    if matches!(digitos.len(), 12 | 13) && digitos.starts_with("55") {
+        digitos.drain(..2);
+    }
+    if !matches!(digitos.len(), 10 | 11) || value.chars().any(|c| c.is_ascii_alphabetic()) {
+        return Err("telefone com DDD, como (31) 99999-9999".to_owned());
+    }
+    let numero = digitos.split_off(2);
+    Ok(Telefone {
+        ddd: digitos,
+        numero,
+    })
+}
+
+/// `2%` (or `2,5%`) is a percentage; anything else an amount (`4,00`).
+fn parse_taxa_ou_valor(value: &str) -> Result<TaxaOuValor, String> {
+    let value = value.trim();
+    match value.strip_suffix('%') {
+        Some(taxa) => taxa
+            .trim()
+            .replace(',', ".")
+            .parse::<Decimal>()
+            .ok()
+            .filter(|taxa| !taxa.is_sign_negative())
+            .map(TaxaOuValor::Taxa)
+            .ok_or_else(|| format!("percentual inválido: {value}")),
+        None => parse_valor(value).map(TaxaOuValor::Valor),
+    }
 }
 
 fn parse_codigo_barras(value: &str) -> Result<CodigoBarras, String> {

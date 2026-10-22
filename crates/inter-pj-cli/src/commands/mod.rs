@@ -1,11 +1,13 @@
 //! Command implementations and the context they share.
 
 mod auth;
+mod cobranca;
 mod config;
 mod conta;
 mod extrato;
 mod pagamento;
 mod pix;
+mod qrcode;
 mod saldo;
 mod simulacao;
 
@@ -16,7 +18,7 @@ use std::time::Duration;
 use chrono::{DateTime, Days, FixedOffset, NaiveDate, Utc};
 use clap::ArgMatches;
 use clap::parser::ValueSource;
-use inter_pj::{ClientIdentity, Credentials, InterClient};
+use inter_pj::{ApiErrorKind, ClientIdentity, Credentials, Error as InterError, InterClient};
 use secrecy::ExposeSecret;
 
 use crate::cli::{Cli, Command, Formato, GlobalArgs, PeriodoArgs};
@@ -53,7 +55,7 @@ impl Env for SystemEnv {
 pub(crate) async fn run(cli: Cli, matches: &ArgMatches) -> Result<(), CliError> {
     if cli.global.formato() == Formato::Csv && !cli.command.aceita_csv() {
         return Err(CliError::Usage(
-            "o formato csv vale apenas para listagens (saldo, extrato e pagamentos); use texto ou json"
+            "o formato csv vale apenas para listagens (saldo, extrato, pagamentos e cobranças); use texto ou json"
                 .to_owned(),
         ));
     }
@@ -64,6 +66,7 @@ pub(crate) async fn run(cli: Cli, matches: &ArgMatches) -> Result<(), CliError> 
         Command::Extrato(args) => extrato::run(&context, args).await,
         Command::Pix(command) => pix::run(&context, command).await,
         Command::Pagamento(command) => pagamento::run(&context, command).await,
+        Command::Cobranca(command) => cobranca::run(&context, command).await,
         Command::Auth(command) => auth::run(&context, command).await,
         Command::Config(command) => config::run(&context, &command),
     }
@@ -255,6 +258,19 @@ fn hoje_em(agora: DateTime<Utc>) -> NaiveDate {
     agora.with_timezone(&BRASILIA).date_naive()
 }
 
+/// An error after which the next query of a wait (`--aguardar`) may
+/// answer: the rate limit, the service, the network.
+fn passageiro(err: &InterError) -> bool {
+    match err {
+        InterError::Api(api) => matches!(
+            api.kind(),
+            ApiErrorKind::RateLimited | ApiErrorKind::Unavailable | ApiErrorKind::Server
+        ),
+        InterError::Transport(_) | InterError::TokenTransport(_) => true,
+        _ => false,
+    }
+}
+
 /// Dates of a listing: without `--fim`, today; without `--inicio`, the
 /// [`DIAS_PADRAO`] days that end on `--fim`.
 fn intervalo(periodo: PeriodoArgs, hoje: NaiveDate) -> (NaiveDate, NaiveDate) {
@@ -340,5 +356,89 @@ mod tests {
         assert_eq!(source_of(&m, "ambiente", "INTER_AMBIENTE"), None);
         let cli = Cli::from_arg_matches(&m).unwrap();
         assert!(cli.global.ambiente.is_none());
+    }
+}
+
+/// A command against a mock API, with a sandbox profile and a token with
+/// the scopes the test needs.
+#[cfg(test)]
+pub(crate) mod testes {
+    use std::collections::HashMap;
+    use std::fs;
+
+    use clap::{CommandFactory, FromArgMatches};
+    use serde_json::json;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    use super::{Context, Env};
+    use crate::cli::{Cli, Command};
+
+    struct EnvFalso(HashMap<&'static str, String>);
+
+    impl Env for EnvFalso {
+        fn var(&self, name: &str) -> Option<String> {
+            self.0.get(name).cloned()
+        }
+    }
+
+    pub(crate) struct Cenario {
+        pub(crate) server: MockServer,
+        pub(crate) context: Context,
+        _dir: tempfile::TempDir,
+    }
+
+    /// The scenario and the command of `inter-pj <args>`, with a token for
+    /// `escopos`.
+    pub(crate) async fn cenario(args: &[&str], escopos: &str) -> (Cenario, Command) {
+        let server = MockServer::start().await;
+        let dir = tempfile::tempdir().unwrap();
+        let rcgen::CertifiedKey { cert, signing_key } =
+            rcgen::generate_simple_self_signed(vec!["cliente.teste".to_owned()]).unwrap();
+        let certificado = dir.path().join("certificado.crt");
+        let chave = dir.path().join("chave.key");
+        fs::write(&certificado, cert.pem()).unwrap();
+        fs::write(&chave, signing_key.serialize_pem()).unwrap();
+        let config = dir.path().join("config.toml");
+        fs::write(
+            &config,
+            format!(
+                "[perfis.padrao]\nambiente = \"sandbox\"\nclient_id = \"id-de-teste\"\ncertificado = '{}'\nchave_privada = '{}'\n",
+                certificado.display(),
+                chave.display()
+            ),
+        )
+        .unwrap();
+        let config = config.display().to_string();
+        let mut full = vec!["inter-pj", "--config", &config];
+        full.extend_from_slice(args);
+        let matches = Cli::command().try_get_matches_from(&full).unwrap();
+        let cli = Cli::from_arg_matches(&matches).unwrap();
+        let env = EnvFalso(HashMap::from([
+            ("INTER_CLIENT_SECRET", "segredo-de-teste".to_owned()),
+            ("INTER_BASE_URL", server.uri()),
+            (
+                "INTER_CACHE_DIR",
+                dir.path().join("cache").display().to_string(),
+            ),
+        ]));
+        let context = Context::new(cli.global, &matches, &env).unwrap();
+        Mock::given(method("POST"))
+            .and(path("/oauth/v2/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "access_token": "tok",
+                "expires_in": 3600,
+                "scope": escopos
+            })))
+            .mount(&server)
+            .await;
+        (
+            Cenario {
+                server,
+                context,
+                _dir: dir,
+            },
+            cli.command,
+        )
     }
 }

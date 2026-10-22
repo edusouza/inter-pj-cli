@@ -12,11 +12,13 @@ use url::{Host, Url};
 
 use crate::auth::{self, AccessToken, TokenManager, TokenStore};
 use crate::banking::Banking;
+use crate::cobranca::Cobranca;
 use crate::credentials::Credentials;
 use crate::endpoint::{self, Endpoint, Method};
 use crate::environment::Environment;
 use crate::error::{ApiError, Error, Result};
 use crate::identity::{ClientIdentity, IdentityError};
+use crate::pix::Pix;
 use crate::retry::{self, RetryMode, RetryPolicy};
 use crate::scope::ScopeSet;
 
@@ -67,6 +69,17 @@ impl InterClient {
     /// Operations of the Banking API (balance, statements, payments...).
     pub fn banking(&self) -> Banking<'_> {
         Banking::new(self)
+    }
+
+    /// Operations of the Cobrança API (charges: boleto with Pix).
+    pub fn cobranca(&self) -> Cobranca<'_> {
+        Cobranca::new(self)
+    }
+
+    /// Operations of the Pix API (charges with a dynamic QR Code, Pix
+    /// received, refunds).
+    pub fn pix(&self) -> Pix<'_> {
+        Pix::new(self)
     }
 
     /// Returns an access token covering `scopes`, reusing a cached one when possible.

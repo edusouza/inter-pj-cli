@@ -52,12 +52,44 @@ let (Some(valor), Some(vencimento)) = (codigo.valor(), codigo.vencimento(hoje)) 
 let boleto = PagamentoBoleto::new(codigo, valor, vencimento);
 let resposta = client.banking().pagar_boleto(&boleto).await?;
 println!("{:?} {:?}", resposta.status_pagamento, resposta.codigo_transacao);
+
+// Cobrança (boleto com Pix) para um cliente: o tipo de pessoa vem do CPF/CNPJ,
+// e a emissão termina depois; a consulta traz o boleto e o copia e cola.
+use inter_pj::cobranca::{EmissaoCobranca, Pagador, Uf};
+let pagador = Pagador::new(
+    "12.345.678/0001-95".parse()?,
+    "Cliente Exemplo Ltda",
+    "Avenida Brasil",
+    "Belo Horizonte",
+    Uf::Mg,
+    "30110000",
+);
+let vencimento = NaiveDate::from_ymd_opt(2026, 10, 20).unwrap();
+let cobranca = EmissaoCobranca::new("NF-123", Decimal::new(15_000, 2), vencimento, pagador);
+let solicitacao = client.cobranca().emitir(&cobranca).await?;
+if let Some(codigo) = solicitacao.codigo_solicitacao {
+    let emitida = client.cobranca().consultar(&codigo).await?;
+    println!("{:?} {:?}", emitida.cobranca.situacao, emitida.pix.and_then(|p| p.pix_copia_e_cola));
+}
+
+// Cobrança Pix imediata (QR Code dinâmico): com um txid próprio, repetir a
+// criação depois de um resultado incerto não cria uma segunda cobrança.
+use inter_pj::pix::{CobSolicitada, Txid};
+let txid = Txid::novo();
+let mut cob = CobSolicitada::new("pix@empresa.example".parse()?, Decimal::new(14_990, 2));
+cob.calendario.expiracao = Some(3600);
+let criada = client.pix().criar_cob(&txid, &cob).await?;
+println!("{:?} {:?}", criada.status, criada.pix_copia_e_cola);
 # Ok(())
 # }
 ```
 
 Também há DARF sem código de barras (`pagar_darf`, `darfs`) e lotes de 2 a 150 boletos e DARFs (`enviar_lote`, `consultar_lote`).
 
-Consultas são repetidas automaticamente em falhas temporárias (`429`, `5xx`, conexão), conforme a `RetryPolicy` do cliente. Operações com efeitos só são repetidas quando certamente não foram processadas (`429`, conexão recusada): o Pix com a mesma chave de idempotência; boletos, DARFs e lotes, que não têm essa chave, devem ser consultados antes de uma nova tentativa quando o resultado for incerto.
+Na API de Cobrança, além de emitir e consultar: `listar` (uma página) e `listar_todas`, `sumario` por situação, `pdf`, `cancelar` (o motivo é conferido por `motivo_cancelamento`), `editar` (vencimento e valor) com `consultar_edicao`, e `pagar_no_sandbox`, recusado fora do sandbox antes de qualquer requisição.
+
+Na API Pix, as cobranças imediatas também podem ser criadas com o txid escolhido pelo Inter (`criar_cob_sem_txid`), revisadas ou removidas (`revisar_cob`), consultadas com os Pix que as pagaram (`consultar_cob`) e listadas por período (`listar_cobs`, `listar_todas_cobs`). As cobranças com vencimento (`criar_cobv`, `revisar_cobv`, `consultar_cobv`, `listar_cobvs`, `listar_todas_cobvs`) têm devedor com endereço, multa, juros (8 modalidades), abatimento e até 3 descontos por data, conferidos antes do envio. Os Pix recebidos são listados por período (`listar_pix_recebidos`, `listar_todos_pix_recebidos`) e consultados pelo `endToEndId` (`consultar_pix_recebido`); `devolver` devolve todo ou parte de um Pix com um `IdDevolucao` próprio, que torna segura a repetição de um pedido de resultado incerto, e `consultar_devolucao` acompanha a devolução. Também há locations de payload (`criar_loc`, `listar_locs`, `consultar_loc`, `desvincular_loc`), lotes de cobranças com vencimento (`criar_lote_cobv`, conferido item a item e sem txids repetidos, `revisar_lote_cobv`, `consultar_lote_cobv`, `sumario_lote_cobv`, `consultar_lote_cobv_por_situacao`, `listar_lotes_cobv`) e, só no sandbox, o pagamento de cobranças pelo txid ou pelo copia e cola (`pagar_cob_no_sandbox`, `pagar_cobv_no_sandbox`, `pagar_copia_e_cola_no_sandbox`).
+
+Consultas são repetidas automaticamente em falhas temporárias (`429`, `5xx`, conexão), conforme a `RetryPolicy` do cliente. Operações com efeitos só são repetidas quando certamente não foram processadas (`429`, conexão recusada): o Pix com a mesma chave de idempotência, e as cobranças Pix e as devoluções com o mesmo txid ou id, que a API não duplica; boletos, DARFs e lotes, que não têm essa chave, devem ser consultados antes de uma nova tentativa quando o resultado for incerto.
 
 Sem vínculo com o Banco Inter. Licença MIT OR Apache-2.0.

@@ -4,16 +4,18 @@
 
 ```text
 ┌──────────────────────── crates/inter-pj-cli (binário `inter-pj`) ─────────────────────────┐
-│ cli.rs        definição dos comandos (clap) e ajuda em português                          │
+│ cli.rs, cli/  definição dos comandos (clap) e ajuda em português                          │
 │ config.rs     arquivo TOML, perfis, precedência flag > env > arquivo, origem dos valores  │
 │ doctor.rs     diagnóstico do texto do arquivo: caminhos do Windows entre aspas duplas     │
-│ commands/     saldo, extrato, pix, pagamento (boleto, darf, lote), auth, config           │
+│ commands/     saldo, extrato, pix, pagamento, cobranca, auth, config                      │
 │ token_store   cache de tokens em arquivo (600, gravação atômica)                          │
 │ confirmacao   resumo + [s/N] antes de mover dinheiro (só com stdin em terminal)           │
-│ arquivo/      arquivos de pagamento: JSON da API e CSV (RFC 4180, Excel pt-BR)            │
+│ arquivo/      pagamentos e cobranças em arquivo: JSON da API e CSV (Excel pt-BR)          │
 │ valor.rs      valores em reais digitados (150,00 / 1.500,00) e por extenso                │
 │ tabela.rs     tabelas em texto alinhado e CSV (RFC 4180, modo Excel pt-BR)                │
 │ output.rs     R$ no formato brasileiro, JSON, escrita em stdout                           │
+│ qr.rs         QR Code do Pix no terminal e em PNG (gravador próprio)                      │
+│ saida.rs      PDF e PNG gravados com permissão 600, sem sobrescrever, ou em stdout        │
 │ files.rs      gravação de arquivos sensíveis com permissão 600                            │
 │ error.rs      códigos de saída e dicas                                                    │
 └──────────────────────────────────────┬────────────────────────────────────────────────────┘
@@ -27,9 +29,11 @@
 │ scope.rs      os 36 escopos documentados                                                  │
 │ problem.rs    parser tolerante de erros (RFC 7807 e variações)                            │
 │ banking/      saldo, extrato (scroll), PDF, Pix, pagamentos (boleto, DARF, lote)          │
+│ cobranca/     emissão, consulta, listagem, sumário, PDF, cancelamento e edição            │
 │ boleto.rs     linha digitável e código de barras (FEBRABAN): DVs, valor, vencimento       │
 │ documento.rs  CPF e CNPJ (inclusive o alfanumérico) com dígitos verificadores             │
-│ pix/          chave Pix (formatos do DICT) e leitura do copia e cola (BR Code, CRC16)     │
+│ pix/          API Pix: cobranças, recebidos, devoluções, locations, lotes e sandbox       │
+│               chave Pix (formatos do DICT) e leitura do copia e cola (BR Code, CRC16)     │
 └───────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -58,7 +62,7 @@ Os endpoints ficam em um só lugar (`endpoint.rs`) e são usados tanto para mont
 
 ### Retentativas só quando repetir é seguro
 
-Cada requisição tem um modo de repetição. Consultas (`GET`) e o pedido de token são repetidas em `429`, `500`, `502`, `503`, `504`, falhas de conexão e tempo esgotado. As requisições do modo *scroll* do extrato mudam estado no servidor (avançam o cursor): repeti-las depois de um `504` poderia pular um lote inteiro, então elas só são repetidas quando certamente não foram processadas (`429` ou conexão recusada). O envio de Pix também só é repetido nesses dois casos, e sempre com a mesma chave de idempotência; depois de um `5xx` ou de tempo esgotado o resultado é incerto e a decisão fica com quem chamou. Pagamentos por código de barras, DARFs, lotes e cancelamentos seguem a mesma regra, mas não têm chave de idempotência: depois de um resultado incerto, o pagamento deve ser consultado antes de uma nova tentativa. Nenhuma outra operação com efeitos é repetida. Falhas de TLS (certificado recusado, CA desconhecida) também não, porque repetir não resolve.
+Cada requisição tem um modo de repetição. Consultas (`GET`) e o pedido de token são repetidas em `429`, `500`, `502`, `503`, `504`, falhas de conexão e tempo esgotado. As requisições do modo *scroll* do extrato mudam estado no servidor (avançam o cursor): repeti-las depois de um `504` poderia pular um lote inteiro, então elas só são repetidas quando certamente não foram processadas (`429` ou conexão recusada). O envio de Pix também só é repetido nesses dois casos, e sempre com a mesma chave de idempotência; depois de um `5xx` ou de tempo esgotado o resultado é incerto e a decisão fica com quem chamou. As cobranças Pix e as devoluções seguem a mesma regra e, como levam o txid ou o id da devolução no caminho, quem chamou pode repeti-las com segurança. Pagamentos por código de barras, DARFs, lotes, cancelamentos e as operações da API de Cobrança seguem a mesma regra, mas não têm chave de idempotência: depois de um resultado incerto, o pagamento ou a cobrança deve ser consultado antes de uma nova tentativa. Nenhuma outra operação com efeitos é repetida. Falhas de TLS (certificado recusado, CA desconhecida) também não, porque repetir não resolve.
 
 A espera cresce exponencialmente a partir de 1 s, com *jitter* (entre metade e o total do intervalo) e teto de 60 s; um `Retry-After` maior que o teto faz a CLI desistir na hora, com a dica de aguardar.
 
@@ -104,6 +108,28 @@ Os pagamentos (boleto, DARF e lote) não têm chave de idempotência. Nesse mesm
 DARFs (`pagamento darf pagar --arquivo`) e lotes (`pagamento lote enviar --arquivo`) vêm de arquivos com os nomes de campo da API, para que a documentação do Inter valha também para eles. Campos desconhecidos são recusados, porque um erro de digitação (`valorMuta`) não pode apagar a multa em silêncio, e cada erro aponta o arquivo, a linha ou posição e o campo. Valores aceitam número JSON (`47.14`) ou texto como as pessoas digitam (`"47,14"`, com as mesmas regras de `valor.rs`); datas, só `AAAA-MM-DD`, porque `05/10` é ambíguo entre planilhas brasileiras e americanas.
 
 O CSV do lote segue a RFC 4180 (aspas, quebras de linha dentro de aspas, CRLF). O separador, `,` ou `;`, é detectado pelo cabeçalho, e o BOM é ignorado, como o Excel em português grava. Cada linha vira o mesmo objeto JSON do outro formato, então as duas entradas passam pela mesma validação. O lote inteiro é conferido antes do envio, e todos os problemas são relatados de uma vez. O Excel, ao abrir um CSV, troca números longos por notação científica (perdendo dígitos) e tira zeros à esquerda: esses casos são reconhecidos e explicados. Os modelos (`pagamento lote modelo`) usam a linha digitável e o CNPJ formatados, que o Excel mantém como texto.
+
+### Cobranças: emissão assíncrona e QR Code
+
+A emissão é assíncrona: a API responde com o código da solicitação, e a cobrança fica `EM_PROCESSAMENTO` até o boleto e o Pix serem gerados; logo depois do pedido, a consulta pode ainda nem encontrá-la. `cobranca emitir --aguardar` trata os dois casos como emissão em andamento e consulta a cada 6 segundos, o limite do sandbox (10 por minuto). A edição segue o mesmo padrão, acompanhada pelo `codigoEdicao`.
+
+Não há chave de idempotência, mas a API recusa, por 30 minutos, uma cobrança com o mesmo seu número, valor, vencimento e pagador. Um resultado incerto vem com o comando que procura a cobrança pelo seu número, e as dicas que trazem comandos põem entre aspas o que o shell interpretaria.
+
+`EmissaoCobranca::validar` confere o que a documentação define: tamanhos, valor de R$ 2,50 a R$ 99.999.999,99, `numDiasAgenda` até 60, CPF/CNPJ do pagador e do beneficiário final, UF, CEP e a chave de acesso da nota fiscal (dígito verificador, número e série). `tipoPessoa` vem do documento, para que os dois nunca discordem. Os erros apontam o campo da API, que a CLI traduz para a opção (`--pagador-email`) ou para o caminho no arquivo (`pagador.cep`).
+
+O QR Code do Pix é gerado localmente a partir do copia e cola, depois de conferido o CRC16, com o crate `qrcode` sem recursos opcionais (nenhuma dependência de imagem). No terminal, cada caractere desenha dois módulos (`▀`, `▄`, `█`): com a saída em um terminal, em preto no branco por cores ANSI, qualquer que seja o tema; sem cores, os módulos claros é que são desenhados, como no `qrencode -t UTF8`, o que funciona em fundos escuros. O PNG sai de um gravador próprio: 1 bit por pixel, blocos *deflate* sem compressão, CRC-32 e Adler-32. Os testes leem de volta, com um decodificador independente (`rqrr`, só nos testes), o QR Code desenhado nos dois modos e o PNG gravado.
+
+### Pix Cobrança: txid, valores e devoluções
+
+A API Pix segue o padrão do Banco Central: uma cobrança é identificada pelo seu txid (26 a 35 letras e dígitos) e criada com `PUT /cob/{txid}` ou `PUT /cobv/{txid}`. A CLI gera o txid antes do envio (32 dígitos hexadecimais, do gerador aleatório do aws-lc-rs) e o mostra no resumo. Como a API não cria duas cobranças com o mesmo txid, um resultado incerto vem com o comando que consulta a cobrança e o que repete a criação com `--txid`, sem risco de duplicá-la. A devolução funciona da mesma forma, com o seu id no caminho (`PUT /pix/{e2eId}/devolucao/{id}`), e repetir um id que o Pix já tem mostra a devolução existente e o seu desfecho, inclusive no código de saída. Os lotes também levam o seu id no caminho, e as suas cobranças, os seus txids, que a API não repete; ainda assim, um resultado incerto vem com o comando que consulta o lote antes de uma nova tentativa.
+
+Os valores vão como texto com 2 casas (`"37.00"`, até 10 dígitos antes da vírgula), como a especificação define, e as modalidades de multa, juros, abatimento e desconto, como números. Os horários chegam em RFC 3339 e são mostrados no fuso local; os períodos das listagens aceitam datas, lidas como dias inteiros no fuso local, ou data e hora com fuso. As funções que desenham recebem o fuso, para que os testes não dependam da máquina.
+
+Uma devolução é um envio de dinheiro e tem os trilhos do Pix: consulta do Pix antes, resumo, confirmação só de um terminal, `limite_por_operacao` e `--simular`. O que ainda pode ser devolvido é calculado de forma conservadora: do valor do Pix saem as devoluções realizadas e as em andamento, inclusive as de status desconhecido; só as não realizadas não contam. Uma devolução maior que o restante é recusada antes do envio.
+
+A revisão de uma cobrança com vencimento muda só o que foi informado, então ela é conferida depois da consulta, com a cobrança como ficará: um novo vencimento anterior à data de um desconto atual, por exemplo, é recusado antes do envio. Cobranças pagas ou removidas são recusadas sem nenhuma alteração.
+
+O CSV dos lotes de cobranças tem os caminhos dos campos da API como colunas (`valor.multa.valorPerc`, `valor.desconto.descontoDataFixa[0].data`), e cada linha vira o mesmo objeto do JSON, conferido pela mesma validação da criação avulsa. As posições das listas ficam como nas colunas, para que as mensagens apontem a coluna certa, e colunas desconhecidas são recusadas. Como no lote de pagamentos, os estragos do Excel (txid, CPF, CNPJ e location em notação científica; CPF, CNPJ e CEP sem os zeros à esquerda) são reconhecidos e explicados, e txids repetidos são apontados antes do envio.
 
 ### Extrato completo: paginação e scroll
 
