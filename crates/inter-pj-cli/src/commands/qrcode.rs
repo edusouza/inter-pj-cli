@@ -31,7 +31,8 @@ impl OpcoesQr {
         png: Option<PathBuf>,
         sobrescrever: bool,
     ) -> Result<Self, CliError> {
-        let png = png.map(|caminho| Saida::new(caminho, sobrescrever));
+        let png =
+            png.map(|caminho| Saida::new(caminho, sobrescrever, "qrcode.png", "--qrcode-png"));
         if qrcode && (context.formato() == Formato::Json || png.as_ref().is_some_and(Saida::stdout))
         {
             return Err(CliError::Usage(
@@ -95,8 +96,15 @@ impl OpcoesQr {
             copia_e_cola
                 .clone()
                 .and_then(QrPix::new)
-                .map_err(CliError::Usage)
+                .map_err(CliError::SemQrCode)
         };
+        // In a query, a QR Code that cannot be made fails the command
+        // before anything is shown, whichever option asked for it (5): a
+        // script must not read the charge and miss the image. After a
+        // creation, its failure is only a warning, below.
+        if criada.is_none() && (self.qrcode || self.png.is_some()) {
+            qr_code()?;
+        }
         // After a creation, the failure of the image is only a warning.
         let falhou = |png: &Saida, err: CliError| match criada {
             None => Err(err),
