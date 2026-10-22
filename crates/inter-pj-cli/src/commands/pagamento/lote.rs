@@ -9,7 +9,7 @@ use inter_pj::banking::{
     StatusDarfDoLote, StatusLote,
 };
 use inter_pj::boleto::TipoCodigo;
-use inter_pj::{ApiErrorKind, Environment, Error as InterError, InterClient, endpoint};
+use inter_pj::{Environment, InterClient, endpoint};
 
 use super::{darf, pagar};
 use crate::arquivo::{self, ArquivoLote, MODELO_CSV, MODELO_JSON};
@@ -17,7 +17,7 @@ use crate::chamada::{argumento, chamada};
 use crate::cli::{
     Formato, LoteCommand, LoteConsultarArgs, LoteEnviarArgs, LoteModeloArgs, TipoArquivo,
 };
-use crate::commands::{Context, hoje, simulacao};
+use crate::commands::{Context, hoje, passageiro, simulacao};
 use crate::confirmacao::{Terminal, confirmar, descrever_ambiente, verificar_limite};
 use crate::error::CliError;
 use crate::output::{self, data_hora_br};
@@ -425,19 +425,6 @@ async fn aguardar(
             Err(err) => return Err((ultimo.map(Box::new), err.into())),
         }
         tokio::time::sleep(intervalo.min(prazo - agora)).await;
-    }
-}
-
-/// An error after which the next query may answer: the rate limit, the
-/// service, the network.
-fn passageiro(err: &InterError) -> bool {
-    match err {
-        InterError::Api(api) => matches!(
-            api.kind(),
-            ApiErrorKind::RateLimited | ApiErrorKind::Unavailable | ApiErrorKind::Server
-        ),
-        InterError::Transport(_) | InterError::TokenTransport(_) => true,
-        _ => false,
     }
 }
 

@@ -10,11 +10,12 @@ use inter_pj::cobranca::{
 };
 use inter_pj::{Environment, Error as InterError, InterClient, endpoint};
 
-use super::consultar::{OpcoesQr, mostrar};
-use super::{argumento, descrever_situacao, percentual};
+use super::consultar::{OpcoesQr, mostrar, mostrar_emitida};
+use super::{descrever_situacao, percentual};
 use crate::arquivo;
+use crate::chamada::{argumento, chamada};
 use crate::cli::{CobrancaEmitirArgs, FormaArg, Formato, TaxaOuValor};
-use crate::commands::{Context, hoje, simulacao};
+use crate::commands::{Context, hoje, passageiro, simulacao};
 use crate::confirmacao::{Terminal, confirmar, descrever_ambiente};
 use crate::error::CliError;
 use crate::output;
@@ -23,6 +24,10 @@ use crate::valor::por_extenso;
 /// Between two queries with `--aguardar`: 10 per minute, the rate limit of
 /// the sandbox (production allows 120).
 const INTERVALO: Duration = Duration::from_secs(6);
+
+/// What a wait without an end reports as done, and why not to repeat it.
+const SOLICITADA: &str = "a cobrança foi solicitada";
+const NAO_REPITA: &str = "a cobrança já foi solicitada: não a emita de novo, porque depois de 30 minutos a API aceita outra igual";
 
 pub(super) async fn emitir(
     context: &Context,
@@ -105,17 +110,33 @@ async fn emitir_com(
         }
     };
 
-    let (detalhe, emitida) = aguardar(&client, &codigo, args.depois.timeout, intervalo).await?;
+    // From here on the charge exists: whatever happens to the wait, its
+    // code is not lost.
+    let consulta = format!("{} cobranca consultar {}", chamada(), argumento(&codigo));
+    eprintln!(
+        "{}",
+        output::sem_controle(&format!(
+            "Cobrança solicitada: código {codigo}. Acompanhe com: {consulta}"
+        ))
+    );
+    let (detalhe, emitida) =
+        aguardar(&client, &codigo, &consulta, args.depois.timeout, intervalo).await?;
     let erro = match detalhe.cobranca.situacao.as_ref() {
-        _ if !emitida => CliError::TempoEsgotado {
-            oque: "a cobrança",
-            status: "em processamento".to_owned(),
-            segundos: args.depois.timeout.as_secs(),
+        _ if !emitida => CliError::SemDesfecho {
+            oque: SOLICITADA,
+            codigo,
+            motivo: format!(
+                "o tempo de espera acabou ({} s) com ela ainda em processamento",
+                args.depois.timeout.as_secs()
+            ),
+            consulta,
+            repetir: NAO_REPITA,
+            source: None,
         },
         Some(situacao @ SituacaoCobranca::FalhaEmissao) => CliError::CobrancaNaoEmitida {
             situacao: descrever_situacao(situacao),
         },
-        _ => return mostrar(context, &settings, &detalhe, &opcoes),
+        _ => return mostrar_emitida(context, &settings, &detalhe, &opcoes),
     };
     // No QR Code yet, and nothing for an image on the standard output.
     if !opcoes.png_no_stdout() {
@@ -124,10 +145,11 @@ async fn emitir_com(
     Err(erro)
 }
 
-/// The command that finds the charge by its seu número.
+/// The command that finds the charge by its seu número, on this account.
 fn procurar(cobranca: &EmissaoCobranca) -> String {
     format!(
-        "inter-pj cobranca listar --filtrar-por emissao --seu-numero {}",
+        "{} cobranca listar --filtrar-por emissao --seu-numero {}",
+        chamada(),
         argumento(&cobranca.seu_numero)
     )
 }
@@ -405,7 +427,8 @@ fn formas(formas: &[FormaRecebimento]) -> String {
 fn render_solicitacao(codigo: Option<&str>, cobranca: &EmissaoCobranca) -> String {
     match codigo {
         Some(codigo) => format!(
-            "Cobrança solicitada: a emissão termina em instantes.\nCódigo  {codigo}\n\nAcompanhe com: inter-pj cobranca consultar {}",
+            "Cobrança solicitada: a emissão termina em instantes.\nCódigo  {codigo}\n\nAcompanhe com: {} cobranca consultar {}",
+            chamada(),
             argumento(codigo)
         ),
         // The API documents the code as always present.
@@ -417,42 +440,79 @@ fn render_solicitacao(codigo: Option<&str>, cobranca: &EmissaoCobranca) -> Strin
 }
 
 /// Queries every `intervalo` until the charge leaves `EM_PROCESSAMENTO` or
-/// `timeout` passes. Right after the request, the charge may not be found
-/// yet: that counts as being issued.
+/// `timeout` passes; `false` with the last charge seen when the time ran
+/// out. The charge was requested: right after the request it may not be
+/// found yet, and an error the next query may not have (the rate limit, the
+/// service, the network) is no news either. Any other error, or the time
+/// running out before the query found the charge, ends the wait with its
+/// code and `consulta`, the command that follows it.
 async fn aguardar(
     client: &InterClient,
     codigo: &str,
+    consulta: &str,
     timeout: Duration,
     intervalo: Duration,
 ) -> Result<(CobrancaDetalhada, bool), CliError> {
+    let sem_desfecho = |motivo: String, source: Option<InterError>| CliError::SemDesfecho {
+        oque: SOLICITADA,
+        codigo: codigo.to_owned(),
+        motivo,
+        consulta: consulta.to_owned(),
+        repetir: NAO_REPITA,
+        source: source.map(Box::new),
+    };
     let prazo = Instant::now() + timeout;
     let mut anunciado = false;
+    let mut ultima = None;
     loop {
-        let ultima = match client.cobranca().consultar(codigo).await {
+        // The failure of this query, when the next one may not have it.
+        let falha = match client.cobranca().consultar(codigo).await {
             Ok(cobranca)
                 if cobranca.cobranca.situacao != Some(SituacaoCobranca::EmProcessamento) =>
             {
                 return Ok((cobranca, true));
             }
-            Ok(cobranca) => Some(cobranca),
+            Ok(cobranca) => {
+                ultima = Some(cobranca);
+                None
+            }
             Err(InterError::Api(api)) if api.status == 404 => None,
-            Err(err) => return Err(err.into()),
+            Err(err) if passageiro(&err) => Some(output::limpo(&err.to_string()).into_owned()),
+            Err(err) => {
+                let motivo = format!("a consulta falhou: {err}");
+                return Err(sem_desfecho(motivo, Some(err)));
+            }
         };
         let agora = Instant::now();
         if agora >= prazo {
-            return ultima
-                .map(|cobranca| (cobranca, false))
-                .ok_or(CliError::TempoEsgotado {
-                    oque: "a cobrança",
-                    status: "em processamento".to_owned(),
-                    segundos: timeout.as_secs(),
-                });
+            let segundos = timeout.as_secs();
+            return match (ultima, falha) {
+                (Some(cobranca), _) => Ok((cobranca, false)),
+                (None, Some(falha)) => Err(sem_desfecho(
+                    format!(
+                        "o tempo de espera acabou ({segundos} s) sem uma resposta da consulta: {falha}"
+                    ),
+                    None,
+                )),
+                (None, None) => Err(sem_desfecho(
+                    format!(
+                        "o tempo de espera acabou ({segundos} s) sem que a consulta a encontrasse"
+                    ),
+                    None,
+                )),
+            };
         }
-        if !anunciado {
+        let espera = intervalo.min(prazo - agora);
+        if let Some(falha) = &falha {
+            eprintln!(
+                "aguardando: a consulta falhou ({falha}); nova tentativa em {} s",
+                espera.as_secs()
+            );
+        } else if !anunciado {
             eprintln!("aguardando a emissão...");
             anunciado = true;
         }
-        tokio::time::sleep(intervalo.min(prazo - agora)).await;
+        tokio::time::sleep(espera).await;
     }
 }
 
@@ -785,17 +845,158 @@ Cobrança a emitir
         )
         .await
         .unwrap_err();
-        assert!(matches!(err, CliError::TempoEsgotado { .. }), "{err}");
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "a cobrança foi solicitada (código {CODIGO}), mas o tempo de espera acabou (1 s) com ela ainda em processamento"
+            )
+        );
         assert_eq!(err.exit_code(), 8);
+        let dicas = err.hints();
+        assert_eq!(
+            dicas,
+            [
+                "a cobrança já foi solicitada: não a emita de novo, porque depois de 30 minutos a API aceita outra igual".to_owned(),
+                format!("acompanhe com: inter-pj cobranca consultar {CODIGO}"),
+            ]
+        );
         assert!(!png.exists());
+    }
+
+    /// The POST and the mock of the queries, in order.
+    async fn solicitada(cenario: &Cenario, consultas: Vec<ResponseTemplate>) {
+        Mock::given(method("POST"))
+            .and(path("/cobranca/v3/cobrancas"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(json!({"codigoSolicitacao": CODIGO})),
+            )
+            .expect(1)
+            .mount(&cenario.server)
+            .await;
+        let ultima = consultas.len() - 1;
+        for (i, resposta) in consultas.into_iter().enumerate() {
+            let mock = Mock::given(method("GET"))
+                .and(path(format!("/cobranca/v3/cobrancas/{CODIGO}")))
+                .respond_with(resposta);
+            // The last answer repeats.
+            let mock = if i < ultima {
+                mock.up_to_n_times(1).expect(1)
+            } else {
+                mock
+            };
+            mock.mount(&cenario.server).await;
+        }
+    }
+
+    fn situacao(situacao: &str) -> ResponseTemplate {
+        ResponseTemplate::new(200).set_body_json(json!({
+            "cobranca": {"codigoSolicitacao": CODIGO, "situacao": situacao}
+        }))
+    }
+
+    /// The charge was requested: a query that the next one may answer (the
+    /// rate limit, the service) does not end the wait, nor issue it again.
+    #[tokio::test]
+    async fn the_wait_goes_on_after_a_passing_error() {
+        let (cenario, args) = cenario(&["--aguardar", "--sim", "--sem-retentativa"]).await;
+        solicitada(
+            &cenario,
+            vec![
+                ResponseTemplate::new(429),
+                ResponseTemplate::new(503),
+                situacao("EM_PROCESSAMENTO"),
+                situacao("A_RECEBER"),
+            ],
+        )
+        .await;
+        emitir_com(
+            &cenario.context,
+            &args,
+            &mut TerminalFalso::default(),
+            Duration::from_millis(10),
+        )
+        .await
+        .unwrap();
+    }
+
+    /// An error that waiting does not fix (here, no permission to read)
+    /// ends the wait with the code, as an uncertain result (9): the charge
+    /// was requested, and repeating the command would issue another.
+    #[tokio::test]
+    async fn an_error_after_the_request_keeps_the_code() {
+        let (cenario, args) = cenario(&["--aguardar", "--sim", "--sem-retentativa"]).await;
+        solicitada(&cenario, vec![ResponseTemplate::new(403)]).await;
+        let err = emitir_com(
+            &cenario.context,
+            &args,
+            &mut TerminalFalso::default(),
+            Duration::from_millis(10),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            err.to_string().starts_with(&format!(
+                "a cobrança foi solicitada (código {CODIGO}), mas a consulta falhou: "
+            )),
+            "{err}"
+        );
+        assert_eq!(err.exit_code(), 9);
+        let dicas = err.hints();
+        assert!(dicas[0].contains("não a emita de novo"), "{dicas:?}");
+        assert_eq!(
+            dicas[1],
+            format!("acompanhe com: inter-pj cobranca consultar {CODIGO}")
+        );
+        // Then the hints of the error itself.
+        assert!(
+            dicas.iter().any(|dica| dica.contains("escopos")),
+            "{dicas:?}"
+        );
+    }
+
+    /// Until the deadline, the query did not find the charge, or did not
+    /// answer: the message says so, instead of a situation never seen.
+    #[tokio::test]
+    async fn the_deadline_without_the_charge_says_what_happened() {
+        for (resposta, motivo) in [
+            (
+                ResponseTemplate::new(404),
+                "o tempo de espera acabou (1 s) sem que a consulta a encontrasse",
+            ),
+            (
+                ResponseTemplate::new(503),
+                "o tempo de espera acabou (1 s) sem uma resposta da consulta: ",
+            ),
+        ] {
+            let (cenario, args) = cenario(&[
+                "--aguardar",
+                "--sim",
+                "--sem-retentativa",
+                "--timeout",
+                "1s",
+            ])
+            .await;
+            solicitada(&cenario, vec![resposta]).await;
+            let err = emitir_com(
+                &cenario.context,
+                &args,
+                &mut TerminalFalso::default(),
+                Duration::from_millis(300),
+            )
+            .await
+            .unwrap_err();
+            assert!(
+                err.to_string().starts_with(&format!(
+                    "a cobrança foi solicitada (código {CODIGO}), mas {motivo}"
+                )),
+                "{err}"
+            );
+            assert_eq!(err.exit_code(), 8);
+        }
     }
 
     #[test]
     fn hints_can_be_pasted_in_a_shell() {
-        assert_eq!(argumento("NF-123"), "NF-123");
-        assert_eq!(argumento("NF 123"), "'NF 123'");
-        assert_eq!(argumento("D'Ávila"), r"'D'\''Ávila'");
-        assert_eq!(argumento("$(x)"), "'$(x)'");
         let mut cobranca = das_opcoes(&args(&OPCOES)).unwrap();
         cobranca.seu_numero = "NF 123".to_owned();
         assert_eq!(
