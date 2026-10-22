@@ -7,6 +7,7 @@ mod api;
 mod brcode;
 mod chave;
 mod cob;
+mod cobv;
 mod comum;
 mod recebido;
 mod txid;
@@ -19,6 +20,12 @@ pub use cob::{
     CalendarioCob, CalendarioCobGerado, Cob, CobRevisada, CobSolicitada, FiltroCobs, LocCob,
     MAX_SOLICITACAO_PAGADOR, ModalidadeAgente, PaginaCobs, ParametrosConsulta, Retirada, StatusCob,
     ValorCob, ValorCobGerado, ValorCobRevisada, ValorRetirada,
+};
+pub use cobv::{
+    AbatimentoCobv, CalendarioCobv, CalendarioCobvGerado, Cobv, CobvRevisada, CobvSolicitada,
+    DescontoCobv, DescontoData, DescontoDataGerado, DevedorCobv, EncargoCobv, FiltroCobvs,
+    JurosCobv, MAX_DESCONTOS_DATA_FIXA, ModalidadeJuros, MultaCobv, PaginaCobvs, ValorCobv,
+    ValorCobvGerado, ValorCobvRevisada,
 };
 pub use comum::{
     CobrancaPixError, Devedor, ITENS_POR_PAGINA_MAXIMO_PIX, InfoAdicional, LocationPix,

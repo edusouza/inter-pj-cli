@@ -292,6 +292,34 @@ pub mod pix {
         path: "/pix/v2/cob",
         scopes: &[Scope::CobRead],
     };
+
+    /// `PUT /pix/v2/cobv/{txid}` — creates a charge with a due date.
+    pub const CRIAR_COBV: Endpoint = Endpoint {
+        method: Method::Put,
+        path: "/pix/v2/cobv/{txid}",
+        scopes: &[Scope::CobvWrite],
+    };
+
+    /// `PATCH /pix/v2/cobv/{txid}` — changes or removes a charge with a due date.
+    pub const REVISAR_COBV: Endpoint = Endpoint {
+        method: Method::Patch,
+        path: "/pix/v2/cobv/{txid}",
+        scopes: &[Scope::CobvWrite],
+    };
+
+    /// `GET /pix/v2/cobv/{txid}` — a charge with a due date.
+    pub const CONSULTAR_COBV: Endpoint = Endpoint {
+        method: Method::Get,
+        path: "/pix/v2/cobv/{txid}",
+        scopes: &[Scope::CobvRead],
+    };
+
+    /// `GET /pix/v2/cobv` — charges with a due date of a period, paginated.
+    pub const LISTAR_COBVS: Endpoint = Endpoint {
+        method: Method::Get,
+        path: "/pix/v2/cobv",
+        scopes: &[Scope::CobvRead],
+    };
 }
 
 /// Every operation implemented by this crate.
@@ -324,4 +352,8 @@ pub const ALL: &[Endpoint] = &[
     pix::REVISAR_COB,
     pix::CONSULTAR_COB,
     pix::LISTAR_COBS,
+    pix::CRIAR_COBV,
+    pix::REVISAR_COBV,
+    pix::CONSULTAR_COBV,
+    pix::LISTAR_COBVS,
 ];
