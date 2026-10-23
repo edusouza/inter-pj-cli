@@ -9,15 +9,33 @@
 //!
 //! When the webhook's server does not accept a notification, Inter tries
 //! again up to 4 times: 20, 30, 60 and 120 minutes later (Banking: 5, 10, 30
-//! and 60).
+//! and 60). Each API also keeps the history of the attempts
+//! ([`Callback`]), latest first, and sends again, on request, the callbacks
+//! of up to [`MAX_IDS_REENVIO`] operations at a time.
 
 use std::fmt;
+use std::future::Future;
 use std::str::FromStr;
 
+use chrono::{DateTime, FixedOffset, SecondsFormat};
 use serde::{Deserialize, Serialize, Serializer};
+use serde_json::Value;
 
+use crate::endpoint::Endpoint;
 use crate::error::{Error, Result};
 use crate::serde_util::lenient;
+
+/// Fewest callbacks per page of a history (`tamanhoPagina`).
+pub const ITENS_POR_PAGINA_CALLBACKS_MINIMO: u32 = 10;
+
+/// Most callbacks per page of a history (`tamanhoPagina`).
+pub const ITENS_POR_PAGINA_CALLBACKS_MAXIMO: u32 = 50;
+
+/// Most operations whose callbacks one request sends again.
+pub const MAX_IDS_REENVIO: usize = 50;
+
+/// Safety net against an API that never reports the last page.
+const MAX_PAGINAS: u32 = 10_000;
 
 /// The address of a webhook, checked as the documentation requires: it
 /// starts with `https://`, has no spaces and names a server. The scheme is
@@ -230,8 +248,334 @@ pub(crate) fn se_existir(resultado: Result<Webhook>) -> Result<Option<Webhook>> 
     }
 }
 
+/// Which callbacks of a history to read: the attempts made from `inicio` to
+/// `fim`, optionally only those of one operation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct FiltroCallbacks {
+    /// Start of the period, inclusive.
+    pub inicio: DateTime<FixedOffset>,
+    /// End of the period, inclusive.
+    pub fim: DateTime<FixedOffset>,
+    /// Only the callbacks of this operation: the `endToEnd` of a Pix sent or
+    /// the `codigoTransacao` of a boleto paid (Banking), the
+    /// `codigoSolicitacao` of a charge (Cobrança) or the txid of a Pix
+    /// charge (Pix). Checked before the request.
+    pub identificador: Option<String>,
+}
+
+impl FiltroCallbacks {
+    /// The attempts made from `inicio` to `fim`.
+    ///
+    /// # Errors
+    ///
+    /// When the period ends before it starts.
+    pub fn new(
+        inicio: DateTime<FixedOffset>,
+        fim: DateTime<FixedOffset>,
+    ) -> Result<Self, PeriodoCallbacksError> {
+        if fim < inicio {
+            return Err(PeriodoCallbacksError);
+        }
+        Ok(Self {
+            inicio,
+            fim,
+            identificador: None,
+        })
+    }
+
+    pub(crate) fn query(&self) -> [(&'static str, String); 2] {
+        [
+            ("dataHoraInicio", data_hora(self.inicio)),
+            ("dataHoraFim", data_hora(self.fim)),
+        ]
+    }
+
+    /// The identifier of the filter, trimmed, when there is one.
+    pub(crate) fn identificador(&self) -> Option<&str> {
+        self.identificador
+            .as_deref()
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+    }
+}
+
+/// A period that ends before it starts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("o período termina antes de começar")]
+pub struct PeriodoCallbacksError;
+
+/// `2026-09-01T00:00:00-03:00`, as the documentation accepts
+/// (`yyyy-MM-dd'T'HH:mm[:ss][.SSS]XXX`).
+fn data_hora(momento: DateTime<FixedOffset>) -> String {
+    momento.to_rfc3339_opts(SecondsFormat::Secs, true)
+}
+
+/// A page of a history of callbacks, as received.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+pub struct PaginaCallbacks {
+    /// Callbacks of every page.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient::u64"
+    )]
+    pub total_elementos: Option<u64>,
+    /// Number of pages.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient::u64"
+    )]
+    pub total_paginas: Option<u64>,
+    /// Whether this is the first page.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient::bool"
+    )]
+    pub primeira_pagina: Option<bool>,
+    /// Whether this is the last page.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient::bool"
+    )]
+    pub ultima_pagina: Option<bool>,
+    /// The attempts, latest first.
+    #[serde(default, deserialize_with = "lenient::vec")]
+    pub data: Vec<Callback>,
+}
+
+impl PaginaCallbacks {
+    /// Whether pages after `pagina` remain. Without the number of pages, a
+    /// page of `itens_por_pagina` callbacks means there may be more.
+    pub fn tem_mais(&self, pagina: u32, itens_por_pagina: u32) -> bool {
+        if let Some(ultima) = self.ultima_pagina {
+            return !ultima;
+        }
+        match self.total_paginas {
+            Some(paginas) => u64::from(pagina) + 1 < paginas,
+            None => self.data.len() as u64 >= u64::from(itens_por_pagina),
+        }
+    }
+}
+
+/// An attempt to send a callback to a webhook, as received.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+pub struct Callback {
+    /// The address of the webhook when the attempt was made.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient::string"
+    )]
+    pub webhook_url: Option<String>,
+    /// What was sent, as sent: its format depends on the API and the kind
+    /// of webhook. See [`valores`](Self::valores).
+    #[serde(default, skip_serializing_if = "Value::is_null")]
+    pub payload: Value,
+    /// Which attempt this was, from 1.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient::u64"
+    )]
+    pub numero_tentativa: Option<u64>,
+    /// When the attempt was made (RFC 3339; Cobrança and Pix).
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient::string"
+    )]
+    pub data_hora_disparo: Option<String>,
+    /// When the attempt was made (RFC 3339; Banking).
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient::string"
+    )]
+    pub data_envio: Option<String>,
+    /// Whether the webhook's server accepted it.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient::bool"
+    )]
+    pub sucesso: Option<bool>,
+    /// The status the webhook's server answered.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient::u64"
+    )]
+    pub http_status: Option<u64>,
+    /// Why the attempt failed.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient::string"
+    )]
+    pub mensagem_erro: Option<String>,
+}
+
+impl Callback {
+    /// When the attempt was made, whatever the API calls it.
+    pub fn disparo(&self) -> Option<&str> {
+        self.data_hora_disparo
+            .as_deref()
+            .or(self.data_envio.as_deref())
+    }
+
+    /// Every value of the field `nome` in the payload, in order and without
+    /// repetitions: in the payload itself, in the items of a list, and in the
+    /// lists and objects of those (`{"pix": [{"txid": ...}]}`). Numbers come
+    /// as text.
+    ///
+    /// ```
+    /// use inter_pj::webhook::Callback;
+    ///
+    /// let callback: Callback = serde_json::from_value(serde_json::json!({
+    ///     "payload": {"pix": [{"txid": "7978c0c97ea847e78e8849634473c1f1"}]}
+    /// }))
+    /// .unwrap();
+    /// assert_eq!(callback.valores("txid"), ["7978c0c97ea847e78e8849634473c1f1"]);
+    /// ```
+    pub fn valores(&self, nome: &str) -> Vec<String> {
+        let mut valores = Vec::new();
+        coletar(&self.payload, nome, 0, &mut valores);
+        valores
+    }
+}
+
+fn coletar(valor: &Value, nome: &str, profundidade: usize, valores: &mut Vec<String>) {
+    if profundidade > 4 {
+        return;
+    }
+    match valor {
+        Value::Object(objeto) => {
+            let encontrado = match objeto.get(nome) {
+                Some(Value::String(texto)) if !texto.trim().is_empty() => {
+                    Some(texto.trim().to_owned())
+                }
+                Some(Value::Number(numero)) => Some(numero.to_string()),
+                _ => None,
+            };
+            if let Some(encontrado) = encontrado
+                && !valores.contains(&encontrado)
+            {
+                valores.push(encontrado);
+            }
+            for (chave, filho) in objeto {
+                if chave != nome {
+                    coletar(filho, nome, profundidade + 1, valores);
+                }
+            }
+        }
+        Value::Array(itens) => {
+            for item in itens {
+                coletar(item, nome, profundidade + 1, valores);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The answer of a retry of callbacks, as received.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+pub struct ReenvioCallbacks {
+    /// The identifiers whose callbacks will be sent again; the others were
+    /// not found.
+    #[serde(default, deserialize_with = "lenient::vec")]
+    pub found_ids: Vec<String>,
+}
+
+/// The page size of a history, checked.
+pub(crate) fn itens_por_pagina(itens: Option<u32>) -> Result<Option<u32>> {
+    match itens {
+        Some(itens)
+            if !(ITENS_POR_PAGINA_CALLBACKS_MINIMO..=ITENS_POR_PAGINA_CALLBACKS_MAXIMO)
+                .contains(&itens) =>
+        {
+            Err(Error::InvalidInput(
+                format!(
+                    "callbacks por página: de {ITENS_POR_PAGINA_CALLBACKS_MINIMO} a {ITENS_POR_PAGINA_CALLBACKS_MAXIMO}"
+                )
+                .into(),
+            ))
+        }
+        itens => Ok(itens),
+    }
+}
+
+/// How many operations a retry may name: from 1 to [`MAX_IDS_REENVIO`].
+pub(crate) fn quantos_reenviar(quantos: usize) -> Result<()> {
+    if (1..=MAX_IDS_REENVIO).contains(&quantos) {
+        Ok(())
+    } else {
+        Err(Error::InvalidInput(
+            format!("informe de 1 a {MAX_IDS_REENVIO} identificadores por reenvio, não {quantos}")
+                .into(),
+        ))
+    }
+}
+
+/// Every callback of a history of `operacao`, reading pages of
+/// [`ITENS_POR_PAGINA_CALLBACKS_MAXIMO`] until the last one.
+///
+/// Every page announces the callbacks of the history (`totalElementos`): the
+/// end of the pages is trusted only once they all arrived, so that a last
+/// page announced too early, or an empty page in the middle, does not end
+/// the history with part of it. Without the total, the last page is the one
+/// the API says it is. A history that goes past [`MAX_PAGINAS`] is an error
+/// too: a list that may miss a failed callback is never returned as whole.
+pub(crate) async fn todos<F, Fut>(operacao: Endpoint, mut pagina: F) -> Result<Vec<Callback>>
+where
+    F: FnMut(u32) -> Fut,
+    Fut: Future<Output = Result<PaginaCallbacks>>,
+{
+    let incompleto = |message: String| Error::Decode {
+        operation: operacao.to_string(),
+        message,
+    };
+    let mut callbacks = Vec::new();
+    let mut numero = 0;
+    loop {
+        let mut atual = pagina(numero).await?;
+        let recebidos = atual.data.len();
+        let fim = recebidos == 0 || !atual.tem_mais(numero, ITENS_POR_PAGINA_CALLBACKS_MAXIMO);
+        callbacks.append(&mut atual.data);
+        tracing::info!("callbacks: página {} com {recebidos}", numero + 1);
+        let lidos = callbacks.len() as u64;
+        match atual.total_elementos {
+            Some(total) if lidos >= total => return Ok(callbacks),
+            Some(total) if fim => {
+                return Err(incompleto(format!(
+                    "o histórico de callbacks terminou com {lidos} de {total}; execute o comando novamente"
+                )));
+            }
+            None if fim => return Ok(callbacks),
+            _ => {}
+        }
+        if numero + 1 >= MAX_PAGINAS {
+            return Err(incompleto(format!(
+                "o histórico de callbacks passou de {MAX_PAGINAS} páginas sem chegar ao fim"
+            )));
+        }
+        numero += 1;
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use super::*;
 
     #[test]
@@ -316,6 +660,187 @@ mod tests {
         assert_eq!(
             se_existir(Ok(Webhook::default())).unwrap(),
             Some(Webhook::default())
+        );
+    }
+
+    #[test]
+    fn periods_are_sent_with_their_offset() {
+        let inicio = DateTime::parse_from_rfc3339("2026-09-01T00:00:00-03:00").unwrap();
+        let fim = DateTime::parse_from_rfc3339("2026-09-02T00:00:00Z").unwrap();
+        let filtro = FiltroCallbacks::new(inicio, fim).unwrap();
+        assert_eq!(
+            filtro.query(),
+            [
+                ("dataHoraInicio", "2026-09-01T00:00:00-03:00".to_owned()),
+                ("dataHoraFim", "2026-09-02T00:00:00Z".to_owned()),
+            ]
+        );
+        assert_eq!(
+            FiltroCallbacks::new(fim, inicio),
+            Err(PeriodoCallbacksError)
+        );
+        let mut filtro = filtro;
+        filtro.identificador = Some("  ".to_owned());
+        assert_eq!(filtro.identificador(), None);
+        filtro.identificador = Some(" abc ".to_owned());
+        assert_eq!(filtro.identificador(), Some("abc"));
+    }
+
+    #[test]
+    fn pages_end_where_the_api_says() {
+        let pagina = |ultima: Option<bool>, paginas: Option<u64>, itens: usize| PaginaCallbacks {
+            total_paginas: paginas,
+            ultima_pagina: ultima,
+            data: vec![Callback::default(); itens],
+            ..PaginaCallbacks::default()
+        };
+        assert!(!pagina(Some(true), Some(9), 50).tem_mais(0, 50));
+        assert!(pagina(Some(false), None, 1).tem_mais(0, 50));
+        assert!(pagina(None, Some(2), 50).tem_mais(0, 50));
+        assert!(!pagina(None, Some(2), 50).tem_mais(1, 50));
+        assert!(pagina(None, None, 50).tem_mais(0, 50));
+        assert!(!pagina(None, None, 49).tem_mais(0, 50));
+    }
+
+    /// A page of `itens` callbacks, with the counters the API may send.
+    fn pagina_de(itens: usize, total: Option<u64>, ultima: Option<bool>) -> PaginaCallbacks {
+        PaginaCallbacks {
+            total_elementos: total,
+            ultima_pagina: ultima,
+            data: vec![Callback::default(); itens],
+            ..PaginaCallbacks::default()
+        }
+    }
+
+    /// The history `todos` reads from `paginas`, one per request; past
+    /// them, the last one again.
+    async fn historico(paginas: Vec<PaginaCallbacks>) -> Result<Vec<Callback>> {
+        let operacao = crate::endpoint::cobranca::WEBHOOK_CALLBACKS;
+        todos(operacao, |numero| {
+            let indice = usize::try_from(numero).unwrap().min(paginas.len() - 1);
+            let pagina = paginas[indice].clone();
+            async move { Ok(pagina) }
+        })
+        .await
+    }
+
+    fn mensagem(resultado: Result<Vec<Callback>>) -> String {
+        match resultado {
+            Err(Error::Decode { operation, message }) => {
+                assert_eq!(operation, "GET /cobranca/v3/cobrancas/webhook/callbacks");
+                message
+            }
+            outro => panic!("esperado Error::Decode, veio {outro:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_history_ends_only_with_every_callback_it_announces() {
+        // Whole: every callback of the total, or the last page without one.
+        let lidos = historico(vec![
+            pagina_de(50, Some(60), Some(false)),
+            pagina_de(10, Some(60), Some(true)),
+        ])
+        .await
+        .unwrap();
+        assert_eq!(lidos.len(), 60);
+        let lidos = historico(vec![
+            pagina_de(50, None, Some(false)),
+            pagina_de(10, None, Some(true)),
+        ])
+        .await
+        .unwrap();
+        assert_eq!(lidos.len(), 60);
+        assert_eq!(
+            historico(vec![pagina_de(0, Some(0), Some(true))])
+                .await
+                .unwrap(),
+            Vec::<Callback>::new()
+        );
+
+        // A last page announced too early, or an empty page in the middle.
+        assert_eq!(
+            mensagem(historico(vec![pagina_de(50, Some(120), Some(true))]).await),
+            "o histórico de callbacks terminou com 50 de 120; execute o comando novamente"
+        );
+        assert_eq!(
+            mensagem(
+                historico(vec![
+                    pagina_de(50, Some(120), Some(false)),
+                    pagina_de(0, Some(120), Some(false)),
+                ])
+                .await
+            ),
+            "o histórico de callbacks terminou com 50 de 120; execute o comando novamente"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_history_that_never_ends_is_an_error() {
+        // Pages that always say more follow, without a total to reach.
+        assert_eq!(
+            mensagem(historico(vec![pagina_de(1, None, Some(false))]).await),
+            format!("o histórico de callbacks passou de {MAX_PAGINAS} páginas sem chegar ao fim")
+        );
+    }
+
+    #[test]
+    fn values_are_found_wherever_the_payload_keeps_them() {
+        let callback = |payload: Value| Callback {
+            payload,
+            ..Callback::default()
+        };
+        // Cobrança: a list of charges.
+        let cobranca = callback(json!([
+            {"codigoSolicitacao": "0b7e4c1a-5d3f-4a2b-9c8d-7e6f5a4b3c2d", "situacao": "RECEBIDO"},
+            {"codigoSolicitacao": "0b7e4c1a-5d3f-4a2b-9c8d-7e6f5a4b3c2d"},
+            {"codigoSolicitacao": "1c8f5d2b-6e4a-4b3c-8d9e-8f7a6b5c4d3e"}
+        ]));
+        assert_eq!(
+            cobranca.valores("codigoSolicitacao"),
+            [
+                "0b7e4c1a-5d3f-4a2b-9c8d-7e6f5a4b3c2d",
+                "1c8f5d2b-6e4a-4b3c-8d9e-8f7a6b5c4d3e"
+            ]
+        );
+        // Pix: the Banco Central's `{"pix": [...]}`.
+        let pix = callback(
+            json!({"pix": [{"endToEndId": "E00416968202609241310abcdEFGH123", "txid": "7978c0c97ea847e78e8849634473c1f1", "valor": "37.00"}]}),
+        );
+        assert_eq!(pix.valores("txid"), ["7978c0c97ea847e78e8849634473c1f1"]);
+        // Banking: one object; numbers come as text.
+        let banking = callback(
+            json!({"codigoTransacao": "8bbdede4-35db-4ec9-b652-e176841e62c8", "numero": 42}),
+        );
+        assert_eq!(banking.valores("numero"), ["42"]);
+        assert_eq!(banking.valores("txid"), Vec::<String>::new());
+        assert_eq!(callback(Value::Null).valores("txid"), Vec::<String>::new());
+        assert_eq!(callback(json!({})).valores("txid"), Vec::<String>::new());
+    }
+
+    #[test]
+    fn the_time_of_an_attempt_has_two_names() {
+        let cobranca: Callback =
+            serde_json::from_value(json!({"dataHoraDisparo": "2026-09-24T14:15:22Z"})).unwrap();
+        let banking: Callback =
+            serde_json::from_value(json!({"dataEnvio": "2026-09-24T14:15:23Z"})).unwrap();
+        assert_eq!(cobranca.disparo(), Some("2026-09-24T14:15:22Z"));
+        assert_eq!(banking.disparo(), Some("2026-09-24T14:15:23Z"));
+    }
+
+    #[test]
+    fn limits_are_checked_before_anything_is_sent() {
+        assert_eq!(itens_por_pagina(None).unwrap(), None);
+        assert_eq!(itens_por_pagina(Some(10)).unwrap(), Some(10));
+        assert_eq!(itens_por_pagina(Some(50)).unwrap(), Some(50));
+        assert!(itens_por_pagina(Some(9)).is_err());
+        assert!(itens_por_pagina(Some(51)).is_err());
+        assert!(quantos_reenviar(1).is_ok());
+        assert!(quantos_reenviar(50).is_ok());
+        assert!(quantos_reenviar(0).is_err());
+        assert_eq!(
+            quantos_reenviar(51).unwrap_err().to_string(),
+            "informe de 1 a 50 identificadores por reenvio, não 51"
         );
     }
 }

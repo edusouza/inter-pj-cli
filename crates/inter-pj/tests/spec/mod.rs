@@ -20,9 +20,27 @@ pub fn spec() -> &'static Value {
     })
 }
 
+/// Where the specification contradicts itself about an address: our path
+/// and the key the specification lists the operation under.
+pub const DIVERGENCIAS: &[(&str, &str)] = &[(
+    // The operation's own description shows this address, which, like the
+    // retries of the Banking and Pix APIs, is the path of the history plus
+    // `/retry`; the key lacks `/cobrancas`.
+    "/cobranca/v3/cobrancas/webhook/callbacks/retry",
+    "/cobranca/v3/webhook/callbacks/retry",
+)];
+
+/// The key of the specification for one of our paths.
+pub fn spec_path(path: &'static str) -> &'static str {
+    DIVERGENCIAS
+        .iter()
+        .find(|(nosso, _)| *nosso == path)
+        .map_or(path, |(_, especificacao)| especificacao)
+}
+
 pub fn operation(endpoint: &Endpoint) -> &'static Value {
     let method = endpoint.method.as_str().to_lowercase();
-    let op = &spec()["paths"][endpoint.path][method.as_str()];
+    let op = &spec()["paths"][spec_path(endpoint.path)][method.as_str()];
     assert!(op.is_object(), "{endpoint} não existe na especificação");
     op
 }
