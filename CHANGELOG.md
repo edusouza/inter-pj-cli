@@ -6,6 +6,10 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+### Adicionado
+
+- `inter-pj conta`: mostra o banco (077 - Banco Inter S.A.), a agência (0001) e a conta, em texto ou JSON, para passar a quem vai depositar ou transferir. A API não informa esses dados: o número e o dígito verificador vêm das novas chaves `numero_conta` e `digito_conta` do perfil, que só existem no arquivo de configuração e vão sempre juntas. O comando não faz nenhuma chamada ao banco nem precisa das credenciais. `config mostrar` e `config verificar` mostram a conta mascarada (`*****21-0`), e o gitleaks passa a procurar também `numero_conta`.
+
 ## [0.6.0] - 2026-09-24
 
 Pix Cobrança: cobranças Pix imediatas e com vencimento, com o QR Code, os Pix recebidos e as suas devoluções, locations, lotes de cobranças e pagamentos no sandbox.

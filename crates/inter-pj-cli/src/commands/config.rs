@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 
 use super::Context;
 use crate::cli::{ConfigCommand, Formato, InitArgs, VerificarArgs};
-use crate::config::{ConfigFile, LoadedConfig, Setting, Settings, TEMPLATE};
+use crate::config::{ConfigFile, LoadedConfig, NumeroConta, Setting, Settings, TEMPLATE};
 use crate::doctor::{self, Aspas};
 use crate::error::CliError;
 use crate::files::write_private;
@@ -176,6 +176,12 @@ fn describe(settings: &Settings) -> Vec<Row> {
             |c| output::mask(c, 2),
         ),
         row(
+            "numeroConta",
+            "Número da conta",
+            settings.numero_conta.as_ref(),
+            numero_conta_mascarado,
+        ),
+        row(
             "escopos",
             "Escopos adicionais",
             settings.escopos.as_ref(),
@@ -194,6 +200,12 @@ fn describe(settings: &Settings) -> Vec<Row> {
             Clone::clone,
         ),
     ]
+}
+
+/// `*****21-0`: the account number masked as `conta_corrente` is, and the
+/// check digit.
+fn numero_conta_mascarado(conta: &NumeroConta) -> String {
+    format!("{}-{}", output::mask(&conta.numero, 2), conta.digito)
 }
 
 /// How serious a finding of `config verificar` is.
@@ -456,6 +468,16 @@ fn perfil(settings: &Settings, achados: &mut Vec<Achado>) {
                 ),
             )
         });
+    }
+    if let Some(conta) = &settings.numero_conta {
+        achados.push(ok(
+            "numero_conta",
+            format!(
+                "{} ({})",
+                numero_conta_mascarado(&conta.value),
+                conta.source
+            ),
+        ));
     }
     if let Some(escopos) = &settings.escopos {
         achados.push(ok(

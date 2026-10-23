@@ -120,6 +120,78 @@ async fn conta_corrente_do_perfil_e_da_flag_vao_no_cabecalho() {
         .success();
 }
 
+// --- conta -------------------------------------------------------------------
+
+#[tokio::test(flavor = "multi_thread")]
+async fn conta_mostra_banco_agencia_e_conta_sem_chamar_a_api() {
+    let env = TestEnv::new().await;
+    env.write_config("numero_conta = \"7654321\"\ndigito_conta = \"0\"");
+
+    // No credentials needed: nothing is asked of the API.
+    env.cmd()
+        .env_remove("INTER_CLIENT_SECRET")
+        .arg("conta")
+        .assert()
+        .success()
+        .stdout("Banco    077 - Banco Inter S.A.\nAgência  0001\nConta    7654321-0\n")
+        .stderr("");
+
+    let assert = env.cmd().args(["conta", "--json"]).assert().success();
+    let json: Value = serde_json::from_str(&stdout_of(&assert)).unwrap();
+    assert_eq!(
+        json,
+        json!({
+            "banco": "077",
+            "nomeBanco": "Banco Inter S.A.",
+            "agencia": "0001",
+            "numeroConta": "7654321",
+            "digitoConta": "0",
+        })
+    );
+
+    env.cmd()
+        .args(["conta", "--formato", "csv"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("o formato csv vale apenas"));
+    assert_eq!(env.server.received_requests().await.unwrap().len(), 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn conta_sem_numero_ou_invalida_e_erro_de_configuracao() {
+    let env = TestEnv::new().await;
+    env.write_config("");
+    env.cmd().arg("conta").assert().code(3).stderr(
+        predicate::str::contains("configuração incompleta").and(predicate::str::contains(
+            "numero_conta e digito_conta: defina os dois no perfil",
+        )),
+    );
+
+    let cases = [
+        ("numero_conta = \"7654321\"", "digito_conta não definido"),
+        (
+            "numero_conta = \"7654321-0\"\ndigito_conta = \"0\"",
+            "numero_conta inválido",
+        ),
+        (
+            "numero_conta = \"7654321\"\ndigito_conta = \"10\"",
+            "digito_conta inválido",
+        ),
+    ];
+    for (linhas, mensagem) in cases {
+        env.write_config(linhas);
+        let assert = env
+            .cmd()
+            .arg("conta")
+            .assert()
+            .code(3)
+            .stderr(predicate::str::contains(mensagem));
+        // Never echo the account.
+        let stderr = stderr_of(&assert);
+        assert!(!stderr.contains("7654321"), "{stderr}");
+    }
+}
+
 // --- cache de token -------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread")]
@@ -532,7 +604,7 @@ async fn config_caminho_mostra_configuracao_e_cache() {
 async fn config_mostrar_indica_origem_e_oculta_segredos() {
     let env = TestEnv::new().await;
     env.write_config(
-        "client_secret = \"segredo-gravado-no-arquivo\"\nconta_corrente = \"7654321\"",
+        "client_secret = \"segredo-gravado-no-arquivo\"\nconta_corrente = \"7654321\"\nnumero_conta = \"7654321\"\ndigito_conta = \"0\"",
     );
 
     let assert = env
@@ -546,6 +618,9 @@ async fn config_mostrar_indica_origem_e_oculta_segredos() {
             predicate::str::contains("producao (variável INTER_AMBIENTE)")
                 .and(predicate::str::contains("definido (oculto) (arquivo)"))
                 .and(predicate::str::contains("*****21 (arquivo)"))
+                .and(predicate::str::contains(
+                    "Número da conta      *****21-0 (arquivo)",
+                ))
                 .and(predicate::str::contains(
                     "Escopos adicionais   (não definido)",
                 ))
@@ -776,7 +851,9 @@ async fn config_verificar_corrigir_nao_sobrescreve_uma_copia() {
 #[tokio::test(flavor = "multi_thread")]
 async fn config_verificar_confere_o_perfil_completo() {
     let env = TestEnv::new().await;
-    env.write_config("conta_corrente = \"7654321\"");
+    env.write_config(
+        "conta_corrente = \"7654321\"\nnumero_conta = \"7654321\"\ndigito_conta = \"0\"",
+    );
     let assert = env.cmd().args(["config", "verificar"]).assert().success();
     let stdout = stdout_of(&assert);
     assert_contains_all(
@@ -792,6 +869,7 @@ async fn config_verificar_confere_o_perfil_completo() {
             ),
             "ok        certificado e chave: lidos e aceitos pela biblioteca TLS",
             "ok        conta_corrente: *****21 (arquivo)",
+            "ok        numero_conta: *****21-0 (arquivo)",
             "Nenhum problema encontrado.",
         ],
     );

@@ -10,6 +10,7 @@ Esta CLI acessa uma conta bancária empresarial. Segurança e privacidade são r
 | Certificado e chave (mTLS) | lidos do disco apenas para montar a identidade TLS; chaves protegidas por senha são recusadas com instrução clara; as cópias mantidas pela CLI são zeradas da memória ao descartar |
 | Token de acesso | pedido com os escopos mínimos de cada comando; cache em arquivo com permissão `600` (diretório `700`) e gravação atômica; só é exibido com `auth token --exibir` |
 | Conta corrente | enviada no cabeçalho `x-conta-corrente` (marcado como sensível); mascarada em `config mostrar`; nunca ecoada em mensagens de erro |
+| Número e dígito da conta (`numero_conta`, `digito_conta`) | lidos só do arquivo de configuração e nunca enviados ao banco; mostrados por inteiro apenas por `inter-pj conta`; mascarados em `config mostrar` e `config verificar`; nunca ecoados em mensagens de erro |
 | Arquivo de configuração | criado com permissão `600`; a CLI avisa se ele (ou a chave privada) puder ser lido por outros usuários |
 
 Outras proteções:

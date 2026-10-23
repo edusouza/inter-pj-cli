@@ -54,6 +54,11 @@ chave_privada = ''
 # Somente dígitos; necessário apenas se a integração tiver mais de uma conta.
 # conta_corrente = ""
 
+# Número da conta e dígito verificador, mostrados por `inter-pj conta` com o
+# banco e a agência (opcional). O número vai sem o dígito.
+# numero_conta = ""
+# digito_conta = ""
+
 # Escopos pedidos em todo token, além dos exigidos por cada comando (opcional).
 # Todos precisam estar habilitados na integração.
 # escopos = ["extrato.read"]
@@ -82,6 +87,8 @@ pub(crate) struct Profile {
     pub(crate) certificado: Option<PathBuf>,
     pub(crate) chave_privada: Option<PathBuf>,
     pub(crate) conta_corrente: Option<String>,
+    pub(crate) numero_conta: Option<String>,
+    pub(crate) digito_conta: Option<String>,
     pub(crate) escopos: Option<Vec<String>>,
     pub(crate) limite_por_operacao: Option<ValorArquivo>,
 }
@@ -114,6 +121,20 @@ impl ValorArquivo {
             // Shortest representation that round-trips: 1000.5 stays 1000.5.
             Self::Real(real) => exato(real.to_string()),
         }
+    }
+}
+
+/// The account number and its check digit, from `numero_conta` and
+/// `digito_conta`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct NumeroConta {
+    pub(crate) numero: String,
+    pub(crate) digito: String,
+}
+
+impl fmt::Display for NumeroConta {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}-{}", self.numero, self.digito)
     }
 }
 
@@ -258,6 +279,7 @@ pub(crate) struct Settings {
     pub(crate) certificado: Option<Setting<PathBuf>>,
     pub(crate) chave_privada: Option<Setting<PathBuf>>,
     pub(crate) conta_corrente: Option<Setting<String>>,
+    pub(crate) numero_conta: Option<Setting<NumeroConta>>,
     pub(crate) escopos: Option<Setting<ScopeSet>>,
     pub(crate) limite_por_operacao: Option<Setting<Decimal>>,
     pub(crate) base_url: Option<Setting<String>>,
@@ -315,6 +337,7 @@ impl Settings {
         };
 
         let limite_por_operacao = limite(&profile, &perfil.value)?;
+        let numero_conta = numero_conta(&profile, &perfil.value)?;
         let escopos = escopos(&profile, &perfil.value)?;
         let ambiente = pick(inputs.ambiente, non_empty(profile.ambiente))
             .map(|setting| {
@@ -369,6 +392,7 @@ impl Settings {
             certificado,
             chave_privada,
             conta_corrente,
+            numero_conta,
             escopos,
             limite_por_operacao,
             base_url,
@@ -448,6 +472,19 @@ impl Settings {
         }
     }
 
+    /// The account number and check digit, or an error saying where to set
+    /// them.
+    pub(crate) fn for_conta(&self) -> Result<&NumeroConta, CliError> {
+        self.numero_conta
+            .as_ref()
+            .map(|conta| &conta.value)
+            .ok_or_else(|| {
+                CliError::Config(self.missing_message(&[
+                    "numero_conta e digito_conta: defina os dois no perfil do arquivo de configuração",
+                ]))
+            })
+    }
+
     fn missing_message(&self, missing: &[&str]) -> String {
         let mut message = format!(
             "configuração incompleta (perfil \"{}\"):",
@@ -499,6 +536,42 @@ fn limite(profile: &Profile, perfil: &str) -> Result<Option<Setting<Decimal>>, C
     })?;
     Ok(Some(Setting {
         value,
+        source: Source::File,
+    }))
+}
+
+/// `numero_conta` and `digito_conta` of the profile, set together. Errors
+/// never echo the values: they are the user's account.
+fn numero_conta(profile: &Profile, perfil: &str) -> Result<Option<Setting<NumeroConta>>, CliError> {
+    let numero = non_empty(profile.numero_conta.clone());
+    let digito = non_empty(profile.digito_conta.clone());
+    let (numero, digito) = match (numero, digito) {
+        (None, None) => return Ok(None),
+        (Some(numero), Some(digito)) => (numero.trim().to_owned(), digito.trim().to_owned()),
+        (numero, _) => {
+            let (definida, falta) = if numero.is_some() {
+                ("numero_conta", "digito_conta")
+            } else {
+                ("digito_conta", "numero_conta")
+            };
+            return Err(CliError::Config(format!(
+                "{falta} não definido no perfil \"{perfil}\": {definida} e {falta} vão juntos"
+            )));
+        }
+    };
+    let digitos = |texto: &str| texto.bytes().all(|b| b.is_ascii_digit());
+    if numero.len() > 20 || !digitos(&numero) {
+        return Err(CliError::Config(format!(
+            "numero_conta inválido no perfil \"{perfil}\": use apenas dígitos, sem o dígito verificador, que vai em digito_conta"
+        )));
+    }
+    if digito.len() != 1 || !digitos(&digito) {
+        return Err(CliError::Config(format!(
+            "digito_conta inválido no perfil \"{perfil}\": use um único dígito, de 0 a 9"
+        )));
+    }
+    Ok(Some(Setting {
+        value: NumeroConta { numero, digito },
         source: Source::File,
     }))
 }
@@ -770,6 +843,47 @@ mod tests {
         }
         let settings = Settings::resolve(&loaded(FULL), Inputs::default()).unwrap();
         assert!(settings.limite_por_operacao.is_none());
+    }
+
+    #[test]
+    fn account_number_and_check_digit_go_together() {
+        let resolve = |linhas: &str| {
+            Settings::resolve(
+                &loaded(&format!("[perfis.padrao]\n{linhas}")),
+                Inputs::default(),
+            )
+        };
+        let settings = resolve("numero_conta = \" 7654321 \"\ndigito_conta = \"0\"").unwrap();
+        let conta = settings.numero_conta.as_ref().unwrap();
+        assert_eq!(conta.value.to_string(), "7654321-0");
+        assert_eq!(conta.source, Source::File);
+        assert_eq!(settings.for_conta().unwrap(), &conta.value);
+
+        let settings = resolve("numero_conta = \"\"\ndigito_conta = \"\"").unwrap();
+        assert!(settings.numero_conta.is_none());
+        let err = settings.for_conta().unwrap_err().to_string();
+        assert!(err.contains("numero_conta e digito_conta"), "{err}");
+
+        for (linhas, esperado) in [
+            ("numero_conta = \"7654321\"", "digito_conta não definido"),
+            ("digito_conta = \"0\"", "numero_conta não definido"),
+            (
+                "numero_conta = \"7654321-0\"\ndigito_conta = \"0\"",
+                "numero_conta inválido",
+            ),
+            (
+                "numero_conta = \"7654321\"\ndigito_conta = \"10\"",
+                "digito_conta inválido",
+            ),
+            (
+                "numero_conta = \"7654321\"\ndigito_conta = \"X\"",
+                "digito_conta inválido",
+            ),
+        ] {
+            let err = resolve(linhas).unwrap_err().to_string();
+            assert!(err.contains(esperado), "{linhas}: {err}");
+            assert!(!err.contains("7654321"), "{linhas}: {err}");
+        }
     }
 
     #[test]

@@ -27,6 +27,23 @@ O saldo disponível ao fim de um dia:
 $ inter-pj saldo --data 2026-08-31
 ```
 
+## Banco, agência e conta
+
+Para passar os dados da conta a quem vai depositar ou transferir, grave o número e o dígito
+verificador no perfil, em `numero_conta` e `digito_conta` (veja a
+[configuração](../referencia/configuracao.md)), e rode:
+
+```console
+$ inter-pj conta
+Banco    077 - Banco Inter S.A.
+Agência  0001
+Conta    7654321-0
+```
+
+A API do Inter não informa esses dados. O banco e a agência são os mesmos em todas as contas
+do Inter, e a conta vem do perfil: o comando não faz nenhuma chamada ao banco nem precisa das
+credenciais.
+
 ## O extrato
 
 Sem opções, o extrato traz os últimos 30 dias, hoje incluído:
