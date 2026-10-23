@@ -21,6 +21,7 @@ use chrono::{DateTime, FixedOffset, SecondsFormat};
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::Value;
 
+use crate::endpoint::Endpoint;
 use crate::error::{Error, Result};
 use crate::serde_util::lenient;
 
@@ -525,26 +526,47 @@ pub(crate) fn quantos_reenviar(quantos: usize) -> Result<()> {
     }
 }
 
-/// Every callback of a history, reading pages of
+/// Every callback of a history of `operacao`, reading pages of
 /// [`ITENS_POR_PAGINA_CALLBACKS_MAXIMO`] until the last one.
-pub(crate) async fn todos<F, Fut>(nome: &str, mut pagina: F) -> Result<Vec<Callback>>
+///
+/// Every page announces the callbacks of the history (`totalElementos`): the
+/// end of the pages is trusted only once they all arrived, so that a last
+/// page announced too early, or an empty page in the middle, does not end
+/// the history with part of it. Without the total, the last page is the one
+/// the API says it is. A history that goes past [`MAX_PAGINAS`] is an error
+/// too: a list that may miss a failed callback is never returned as whole.
+pub(crate) async fn todos<F, Fut>(operacao: Endpoint, mut pagina: F) -> Result<Vec<Callback>>
 where
     F: FnMut(u32) -> Fut,
     Fut: Future<Output = Result<PaginaCallbacks>>,
 {
+    let incompleto = |message: String| Error::Decode {
+        operation: operacao.to_string(),
+        message,
+    };
     let mut callbacks = Vec::new();
     let mut numero = 0;
     loop {
         let mut atual = pagina(numero).await?;
         let recebidos = atual.data.len();
-        let tem_mais = atual.tem_mais(numero, ITENS_POR_PAGINA_CALLBACKS_MAXIMO);
+        let fim = recebidos == 0 || !atual.tem_mais(numero, ITENS_POR_PAGINA_CALLBACKS_MAXIMO);
         callbacks.append(&mut atual.data);
-        tracing::info!("{nome}: página {} com {recebidos}", numero + 1);
-        let completo = atual
-            .total_elementos
-            .is_some_and(|total| callbacks.len() as u64 >= total);
-        if completo || recebidos == 0 || !tem_mais || numero + 1 >= MAX_PAGINAS {
-            return Ok(callbacks);
+        tracing::info!("callbacks: página {} com {recebidos}", numero + 1);
+        let lidos = callbacks.len() as u64;
+        match atual.total_elementos {
+            Some(total) if lidos >= total => return Ok(callbacks),
+            Some(total) if fim => {
+                return Err(incompleto(format!(
+                    "o histórico de callbacks terminou com {lidos} de {total}; execute o comando novamente"
+                )));
+            }
+            None if fim => return Ok(callbacks),
+            _ => {}
+        }
+        if numero + 1 >= MAX_PAGINAS {
+            return Err(incompleto(format!(
+                "o histórico de callbacks passou de {MAX_PAGINAS} páginas sem chegar ao fim"
+            )));
         }
         numero += 1;
     }
@@ -678,6 +700,88 @@ mod tests {
         assert!(!pagina(None, Some(2), 50).tem_mais(1, 50));
         assert!(pagina(None, None, 50).tem_mais(0, 50));
         assert!(!pagina(None, None, 49).tem_mais(0, 50));
+    }
+
+    /// A page of `itens` callbacks, with the counters the API may send.
+    fn pagina_de(itens: usize, total: Option<u64>, ultima: Option<bool>) -> PaginaCallbacks {
+        PaginaCallbacks {
+            total_elementos: total,
+            ultima_pagina: ultima,
+            data: vec![Callback::default(); itens],
+            ..PaginaCallbacks::default()
+        }
+    }
+
+    /// The history `todos` reads from `paginas`, one per request; past
+    /// them, the last one again.
+    async fn historico(paginas: Vec<PaginaCallbacks>) -> Result<Vec<Callback>> {
+        let operacao = crate::endpoint::cobranca::WEBHOOK_CALLBACKS;
+        todos(operacao, |numero| {
+            let indice = usize::try_from(numero).unwrap().min(paginas.len() - 1);
+            let pagina = paginas[indice].clone();
+            async move { Ok(pagina) }
+        })
+        .await
+    }
+
+    fn mensagem(resultado: Result<Vec<Callback>>) -> String {
+        match resultado {
+            Err(Error::Decode { operation, message }) => {
+                assert_eq!(operation, "GET /cobranca/v3/cobrancas/webhook/callbacks");
+                message
+            }
+            outro => panic!("esperado Error::Decode, veio {outro:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_history_ends_only_with_every_callback_it_announces() {
+        // Whole: every callback of the total, or the last page without one.
+        let lidos = historico(vec![
+            pagina_de(50, Some(60), Some(false)),
+            pagina_de(10, Some(60), Some(true)),
+        ])
+        .await
+        .unwrap();
+        assert_eq!(lidos.len(), 60);
+        let lidos = historico(vec![
+            pagina_de(50, None, Some(false)),
+            pagina_de(10, None, Some(true)),
+        ])
+        .await
+        .unwrap();
+        assert_eq!(lidos.len(), 60);
+        assert_eq!(
+            historico(vec![pagina_de(0, Some(0), Some(true))])
+                .await
+                .unwrap(),
+            Vec::<Callback>::new()
+        );
+
+        // A last page announced too early, or an empty page in the middle.
+        assert_eq!(
+            mensagem(historico(vec![pagina_de(50, Some(120), Some(true))]).await),
+            "o histórico de callbacks terminou com 50 de 120; execute o comando novamente"
+        );
+        assert_eq!(
+            mensagem(
+                historico(vec![
+                    pagina_de(50, Some(120), Some(false)),
+                    pagina_de(0, Some(120), Some(false)),
+                ])
+                .await
+            ),
+            "o histórico de callbacks terminou com 50 de 120; execute o comando novamente"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_history_that_never_ends_is_an_error() {
+        // Pages that always say more follow, without a total to reach.
+        assert_eq!(
+            mensagem(historico(vec![pagina_de(1, None, Some(false))]).await),
+            format!("o histórico de callbacks passou de {MAX_PAGINAS} páginas sem chegar ao fim")
+        );
     }
 
     #[test]

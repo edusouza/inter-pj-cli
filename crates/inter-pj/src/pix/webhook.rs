@@ -101,9 +101,12 @@ impl Pix<'_> {
     ///
     /// # Errors
     ///
-    /// The same as [`listar_callbacks`](Self::listar_callbacks).
+    /// The same as [`listar_callbacks`](Self::listar_callbacks); and a
+    /// history that ends before every callback its pages announce
+    /// (`totalElementos`), or that goes past 10,000 pages, is an
+    /// [`Error::Decode`], never a partial list.
     pub async fn listar_todos_callbacks(&self, filtro: &FiltroCallbacks) -> Result<Vec<Callback>> {
-        webhook::todos("callbacks", |pagina| {
+        webhook::todos(endpoint::pix::WEBHOOK_CALLBACKS, |pagina| {
             self.listar_callbacks(filtro, pagina, Some(ITENS_POR_PAGINA_CALLBACKS_MAXIMO))
         })
         .await
