@@ -625,7 +625,7 @@ async fn extrato_em_ofx_para_programas_de_contabilidade() {
         .assert()
         .success();
     let bytes = assert.get_output().stdout.clone();
-    assert!(stderr_of(&assert).is_empty(), "{}", stderr_of(&assert));
+    assert_eq!(stderr_of(&assert), "");
     // Windows-1252: "–" is 0x96, "ç" 0xE7, "ã" 0xE3, "·" 0xB7.
     let esperado = b"\x96 a\xe7\xe3o ";
     assert!(
@@ -887,7 +887,7 @@ async fn ofx_sem_o_saldo_do_fim_do_periodo_e_erro() {
         .stderr(predicate::str::contains(
             "a API não informou o saldo de 31/08/2026, que o OFX exige",
         ));
-    assert!(assert.get_output().stdout.is_empty());
+    assert_eq!(stdout_of(&assert), "");
 }
 
 #[tokio::test(flavor = "multi_thread")]
