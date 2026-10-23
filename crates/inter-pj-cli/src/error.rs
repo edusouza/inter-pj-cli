@@ -176,6 +176,10 @@ pub(crate) enum CliError {
     /// not check. The query worked, but what was asked cannot be made.
     #[error("{0}")]
     SemQrCode(String),
+    /// A response of the API without something the command needs, like
+    /// the balance that goes into the OFX of the statement.
+    #[error("{0}")]
+    RespostaIncompleta(String),
     /// `pagamento lote consultar --aguardar`, or `enviar`: some payments of
     /// the batch were not made, or the API says it had errors.
     #[error("o lote foi processado, mas {detalhe}")]
@@ -216,7 +220,7 @@ impl CliError {
         match self {
             Self::Usage(_) | Self::PagamentosRepetidos { .. } | Self::Periodo { .. } => exit::USAGE,
             Self::Config(_) | Self::ConfigFile { .. } => exit::CONFIG,
-            Self::Io { .. } => exit::UNEXPECTED,
+            Self::Io { .. } | Self::RespostaIncompleta(_) => exit::UNEXPECTED,
             Self::Cancelado => exit::CANCELLED,
             Self::PixNaoPago { .. }
             | Self::LoteComErro { .. }

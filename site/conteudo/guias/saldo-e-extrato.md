@@ -60,7 +60,20 @@ Sem `--saida`, o arquivo se chama `extrato-<início>-a-<fim>.pdf`, como em
 O PDF é gravado com permissão `600`, e a CLI **nunca substitui um arquivo existente** sem
 `--sobrescrever`.
 
+## O extrato em OFX, para a contabilidade
+
+```console
+$ inter-pj extrato --inicio 2026-08-01 --fim 2026-08-31 --formato ofx -o agosto.ofx
+$ inter-pj extrato completo --inicio 2026-08-01 --fim 2026-08-31 --todas-paginas --formato ofx -o agosto.ofx
+```
+
+O OFX é o formato que os programas de contabilidade, os ERPs e os de finanças pessoais
+importam. Ele leva a conta do perfil (`numero_conta` e `digito_conta`), as transações e o
+saldo do fim do período, e cada transação tem um identificador que é o mesmo a cada
+execução, para o programa não importar duas vezes o que já tem. Os detalhes estão nos
+[formatos de saída](formatos-de-saida.md#ofx).
+
 ## Para planilhas e programas
 
-O saldo e o extrato têm saída em JSON e em CSV, inclusive no formato do Excel em português:
-veja os [formatos de saída](formatos-de-saida.md).
+O saldo e o extrato têm saída em JSON e em CSV, inclusive no formato do Excel em português,
+e o extrato também em OFX: veja os [formatos de saída](formatos-de-saida.md).

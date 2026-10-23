@@ -186,11 +186,13 @@ pub(crate) fn print_csv(tabela: &Tabela, separador: Separador) -> Result<(), Cli
 
 /// Prints `text` as is (e.g. CSV, which carries its own line endings).
 pub(crate) fn print_raw(text: &str) -> Result<(), CliError> {
+    print_bytes(text.as_bytes())
+}
+
+/// Prints `bytes` as they are (e.g. a text in another encoding than UTF-8).
+pub(crate) fn print_bytes(bytes: &[u8]) -> Result<(), CliError> {
     let mut stdout = io::stdout().lock();
-    match stdout
-        .write_all(text.as_bytes())
-        .and_then(|()| stdout.flush())
-    {
+    match stdout.write_all(bytes).and_then(|()| stdout.flush()) {
         Err(err) if err.kind() != io::ErrorKind::BrokenPipe => {
             Err(CliError::io("falha ao escrever na saída padrão", err))
         }

@@ -59,6 +59,12 @@ pub(crate) async fn run(cli: Cli, matches: &ArgMatches) -> Result<(), CliError> 
                 .to_owned(),
         ));
     }
+    if cli.global.ofx() && !cli.command.aceita_ofx() {
+        return Err(CliError::Usage(
+            "o formato ofx vale apenas para o extrato (extrato e extrato completo); use texto, json ou csv"
+                .to_owned(),
+        ));
+    }
     let context = Context::new(cli.global, matches, &SystemEnv)?;
     match cli.command {
         Command::Saldo(args) => saldo::run(&context, &args).await,
@@ -119,6 +125,11 @@ impl Context {
 
     pub(crate) fn formato(&self) -> Formato {
         self.global.formato()
+    }
+
+    /// Whether the statement is to be written as OFX (`--formato ofx`).
+    pub(crate) fn ofx(&self) -> bool {
+        self.global.ofx()
     }
 
     pub(crate) fn separador(&self) -> Separador {

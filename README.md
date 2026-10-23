@@ -87,7 +87,7 @@ client_id = "<seu client_id>"
 certificado = '~/inter/certificado.crt'
 chave_privada = '~/inter/chave.key'
 # conta_corrente = "<numero>"     # só se a integração tiver mais de uma conta
-# numero_conta = "<numero>"       # opcional: número da conta, sem o dígito (`inter-pj conta`)
+# numero_conta = "<numero>"       # opcional: número da conta, sem o dígito (`conta` e OFX)
 # digito_conta = "<digito>"       # opcional: dígito verificador da conta
 # escopos = ["extrato.read"]      # opcional: escopos pedidos em todo token
 # limite_por_operacao = "1.000,00" # opcional: valor máximo de cada Pix ou pagamento
@@ -194,13 +194,16 @@ $ inter-pj extrato completo --inicio 2026-08-01 --fim 2026-08-31            # 1�
 $ inter-pj extrato completo --tipo-operacao D --tipo-transacao pix --pagina 1 --tamanho-pagina 100
 $ inter-pj extrato completo --inicio 2026-08-01 --fim 2026-08-31 --todas-paginas --formato csv > agosto.csv
 
+$ inter-pj extrato --inicio 2026-08-01 --fim 2026-08-31 --formato ofx -o agosto.ofx     # para a contabilidade
+
 $ inter-pj extrato pdf --inicio 2026-08-01 --fim 2026-08-31                 # extrato-2026-08-01-a-2026-08-31.pdf
 $ inter-pj extrato pdf --inicio 2026-08-01 --fim 2026-08-31 --saida - | lpr
 ```
 
 - A API aceita **no máximo 90 dias por consulta** (contando o primeiro e o último dia). A CLI confere o período antes de chamar a API; `--dividir-periodo` consulta períodos maiores em partes consecutivas.
 - `extrato completo` traz os detalhes de cada transação (pagador/recebedor do Pix, dados do boleto, do pagamento...). `--todas-paginas` percorre todas as páginas e, acima de 10.000 transações, passa para o modo *scroll* da API (um por conta, expira após 6 minutos sem uso).
-- `extrato pdf` grava o arquivo com permissão `600` e nunca substitui um arquivo existente sem `--sobrescrever`.
+- `--formato ofx` (no `extrato` e no `extrato completo --todas-paginas`) gera o extrato em OFX 1.02, para importar em programas de contabilidade, ERPs e de finanças pessoais: com a conta do perfil (`numero_conta` e `digito_conta`) e o saldo do fim do período, e com um `FITID` por transação que é o mesmo a cada execução, para o importador não repetir o que já tem. Sem `-o`/`--saida`, o OFX vai para a saída padrão.
+- `extrato pdf` e o OFX de `--saida` são gravados com permissão `600`, e um arquivo existente nunca é substituído sem `--sobrescrever`.
 
 ### Pix
 
@@ -872,6 +875,7 @@ erro: a devolução de R$ 260,00 passa do que resta do Pix: R$ 250,00 de R$ 300,
 | `texto` (padrão) | leitura: tabelas alinhadas, valores em `R$ 1.234,56`, datas `DD/MM/AAAA` |
 | `json` (ou `--json`) | automação: os nomes de campo da API e valores numéricos exatos |
 | `csv` | planilhas e scripts (`saldo`, `extrato` e as listagens de pagamentos, de cobranças, de cobranças Pix e seus lotes, de Pix recebidos e de locations): RFC 4180, datas `AAAA-MM-DD`, ponto decimal, saídas do extrato com valor negativo |
+| `ofx` | programas de contabilidade, ERPs e de finanças pessoais (`extrato` e `extrato completo --todas-paginas`): OFX 1.02 em Windows-1252, com a conta do perfil, o saldo do fim do período e um `FITID` estável por transação |
 
 Para o Excel em português, use `--formato csv --separador ';'`: ponto e vírgula, vírgula decimal e UTF-8 com BOM. Textos vindos de terceiros que começam com `=`, `+`, `-` ou `@` (ex.: a mensagem de um Pix) recebem um apóstrofo no CSV, para não serem executados como fórmula pela planilha.
 

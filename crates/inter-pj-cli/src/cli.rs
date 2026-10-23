@@ -195,17 +195,17 @@ pub(crate) struct GlobalArgs {
     )]
     pub(crate) conta_corrente: Option<String>,
 
-    /// Formato da saída: texto (padrão), json ou csv
+    /// Formato da saída: texto (padrão), json, csv ou ofx (só no extrato)
     #[arg(
         long,
         global = true,
         value_enum,
-        default_value_t = Formato::Texto,
+        default_value_t = FormatoArg::Texto,
         value_name = "FORMATO",
         hide_possible_values = true,
         hide_default_value = true
     )]
-    pub(crate) formato: Formato,
+    pub(crate) formato: FormatoArg,
 
     /// Atalho para --formato json
     #[arg(long, global = true)]
@@ -257,13 +257,21 @@ pub(crate) struct GlobalArgs {
 }
 
 impl GlobalArgs {
-    /// Effective output format (`--json` wins over `--formato`).
+    /// Effective output format (`--json` wins over `--formato`). With
+    /// `--formato ofx`, the statement writes the OFX ([`ofx`](Self::ofx))
+    /// and the rest, like the message of a file saved, is text.
     pub(crate) fn formato(&self) -> Formato {
-        if self.json {
-            Formato::Json
-        } else {
-            self.formato
+        match self.formato {
+            _ if self.json => Formato::Json,
+            FormatoArg::Texto | FormatoArg::Ofx => Formato::Texto,
+            FormatoArg::Json => Formato::Json,
+            FormatoArg::Csv => Formato::Csv,
         }
+    }
+
+    /// Whether the statement is to be written as OFX.
+    pub(crate) fn ofx(&self) -> bool {
+        self.formato == FormatoArg::Ofx && !self.json
     }
 
     /// Retry policy chosen with `--tentativas` / `--sem-retentativa`.
@@ -277,14 +285,25 @@ impl GlobalArgs {
 }
 
 /// Output formats.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Formato {
+    Texto,
+    Json,
+    Csv,
+}
+
+/// `--formato`: the output formats, plus OFX, a document that only the
+/// statement writes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum FormatoArg {
     /// Texto legível, com valores em reais
     Texto,
     /// JSON com os nomes de campo da API
     Json,
     /// CSV (RFC 4180) para planilhas
     Csv,
+    /// OFX 1.02, para importar o extrato em programas de contabilidade e finanças
+    Ofx,
 }
 
 #[derive(Debug, Subcommand)]
@@ -362,6 +381,11 @@ impl Command {
             | Self::Auth(_)
             | Self::Config(_) => false,
         }
+    }
+
+    /// Whether the command writes OFX: the statement, simple or enriched.
+    pub(crate) fn aceita_ofx(&self) -> bool {
+        matches!(self, Self::Extrato(args) if !matches!(args.comando, Some(ExtratoCommand::Pdf(_))))
     }
 }
 
@@ -447,6 +471,21 @@ pub(crate) struct ExtratoArgs {
     /// Divide períodos maiores que 90 dias em consultas consecutivas
     #[arg(long)]
     pub(crate) dividir_periodo: bool,
+
+    #[command(flatten)]
+    pub(crate) ofx: SaidaOfxArgs,
+}
+
+/// Where the OFX of a statement goes.
+#[derive(Debug, Clone, Args)]
+pub(crate) struct SaidaOfxArgs {
+    /// Grava o OFX (--formato ofx) neste arquivo, em vez da saída padrão
+    #[arg(short = 'o', long, value_name = "ARQUIVO")]
+    pub(crate) saida: Option<PathBuf>,
+
+    /// Sobrescreve o arquivo de --saida se ele já existir
+    #[arg(long, requires = "saida")]
+    pub(crate) sobrescrever: bool,
 }
 
 /// Period of a statement. Without dates: the last 30 days, today included.
@@ -508,6 +547,9 @@ pub(crate) struct ExtratoCompletoArgs {
     /// Divide períodos maiores que 90 dias em consultas consecutivas (requer --todas-paginas)
     #[arg(long, requires = "todas_paginas")]
     pub(crate) dividir_periodo: bool,
+
+    #[command(flatten)]
+    pub(crate) ofx: SaidaOfxArgs,
 }
 
 #[derive(Debug, Args)]
