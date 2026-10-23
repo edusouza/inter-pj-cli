@@ -44,6 +44,7 @@ Resultado do período  R$ 1.249,90
 | **0.4.0** | `pagamento boleto pagar` (boletos, contas e tributos pelo código, conferido localmente) · `boleto listar`/`cancelar` · `pagamento darf pagar`/`listar` · `pagamento lote enviar` (JSON ou planilha CSV), `consultar` e `modelo` · os trilhos de segurança do Pix |
 | **0.5.0** | `cobranca emitir` (pelas opções ou por arquivo JSON, com `modelo`) com resumo, confirmação e `--aguardar` · `cobranca consultar` com o QR Code do Pix no terminal ou em PNG · `cobranca pdf` · `cobranca listar`/`sumario` · `cobranca cancelar`/`editar`/`edicao` · `cobranca pagar` no sandbox |
 | **0.6.0** | `pix cob` e `pix cobv` (cobranças Pix imediatas e com vencimento, com multa, juros e descontos): criar, com um txid que torna segura a repetição, revisar, consultar com o QR Code e listar; `pix cobv` também por arquivo, com `modelo` · `pix recebidos` · `pix devolucao` com os trilhos de segurança do Pix · `pix loc` · `pix lote-cobv` (JSON ou planilha CSV) · pagamentos no sandbox |
+| **0.6.1** | `conta`: banco, agência e conta, das chaves `numero_conta` e `digito_conta` do perfil, sem chamar a API |
 
 O plano completo — webhooks e Pix Automático — está em [`docs/roadmap.md`](docs/roadmap.md) e é acompanhado pelas [issues do projeto](https://github.com/edusouza/inter-pj-cli/issues).
 
@@ -54,7 +55,7 @@ O plano completo — webhooks e Pix Automático — está em [`docs/roadmap.md`]
 **Com Cargo** (Rust 1.88 ou superior):
 
 ```console
-$ cargo install --locked --git https://github.com/edusouza/inter-pj-cli --tag v0.6.0 inter-pj-cli
+$ cargo install --locked --git https://github.com/edusouza/inter-pj-cli --tag v0.6.1 inter-pj-cli
 ```
 
 ## Configuração
