@@ -35,7 +35,7 @@ chave_privada = '~/inter/chave.key'
 | `certificado` | perfil | o certificado (`.crt`) baixado com a integração |
 | `chave_privada` | perfil | a chave privada (`.key`); não pode ter senha |
 | `conta_corrente` | perfil | só dígitos; só é preciso se a integração tiver mais de uma conta |
-| `numero_conta` | perfil | o número da conta, só dígitos e sem o dígito verificador; mostrado por `inter-pj conta` |
+| `numero_conta` | perfil | o número da conta, só dígitos e sem o dígito verificador; mostrado por `inter-pj conta` e usado no extrato em OFX (`--formato ofx`) |
 | `digito_conta` | perfil | o dígito verificador da conta, um só dígito; vai junto com `numero_conta` |
 | `escopos` | perfil | escopos pedidos em todo token, além dos de cada comando; todos precisam estar habilitados na integração |
 

@@ -55,7 +55,8 @@ chave_privada = ''
 # conta_corrente = ""
 
 # Número da conta e dígito verificador, mostrados por `inter-pj conta` com o
-# banco e a agência (opcional). O número vai sem o dígito.
+# banco e a agência e usados no extrato em OFX (opcional). O número vai sem o
+# dígito.
 # numero_conta = ""
 # digito_conta = ""
 

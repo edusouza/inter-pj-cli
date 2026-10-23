@@ -295,7 +295,7 @@ mod tests {
             erro(&["saldo", "--formato", "xml"]),
             "\
 erro: valor inválido 'xml' para '--formato <FORMATO>'
-  [valores possíveis: texto, json, csv]
+  [valores possíveis: texto, json, csv, ofx]
 
 Para mais informações, use '--help'.
 "
@@ -308,7 +308,7 @@ Para mais informações, use '--help'.
             erro(&["saldo", "--formato"]),
             "\
 erro: falta o valor de '--formato <FORMATO>'
-  [valores possíveis: texto, json, csv]
+  [valores possíveis: texto, json, csv, ofx]
 
 Para mais informações, use '--help'.
 "

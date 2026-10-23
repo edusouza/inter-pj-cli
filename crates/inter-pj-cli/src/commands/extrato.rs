@@ -2,9 +2,11 @@
 
 use std::borrow::Cow;
 use std::fmt::Write as _;
+use std::io::{self, IsTerminal};
 use std::path::PathBuf;
 
-use chrono::NaiveDate;
+use chrono::{NaiveDate, NaiveTime, Utc};
+use inter_pj::InterClient;
 use inter_pj::banking::{
     Detalhe, FiltroExtrato, PaginaExtrato, Periodo, PeriodoError, TipoOperacao, TipoTransacao,
     TransacaoCompleta, TransacaoSimples,
@@ -12,33 +14,41 @@ use inter_pj::banking::{
 use rust_decimal::Decimal;
 use serde_json::json;
 
-use super::{Context, hoje, intervalo};
+use super::{BRASILIA, Context, hoje, intervalo};
 use crate::cli::{
-    ExtratoArgs, ExtratoCommand, ExtratoCompletoArgs, ExtratoPdfArgs, Formato, PeriodoArgs,
+    ExtratoArgs, ExtratoCommand, ExtratoCompletoArgs, ExtratoPdfArgs, Formato, SaidaOfxArgs,
 };
+use crate::config::Settings;
 use crate::error::CliError;
 use crate::output;
 use crate::saida::{Saida, tamanho};
 use crate::tabela::{Celula, Coluna, Tabela};
+
+mod ofx;
 
 /// Longest description shown in the text output.
 const LARGURA_DESCRICAO: usize = 60;
 const LARGURA_CONTRAPARTE: usize = 30;
 
 pub(super) async fn run(context: &Context, args: ExtratoArgs) -> Result<(), CliError> {
-    match args.comando {
-        None => simples(context, args.periodo, args.dividir_periodo).await,
-        Some(ExtratoCommand::Completo(args)) => completo(context, &args).await,
-        Some(ExtratoCommand::Pdf(args)) => pdf(context, &args).await,
+    match &args.comando {
+        None => simples(context, &args).await,
+        Some(ExtratoCommand::Completo(args)) => completo(context, args).await,
+        Some(ExtratoCommand::Pdf(args)) => pdf(context, args).await,
     }
 }
 
 // --- extrato -----------------------------------------------------------------
 
-async fn simples(context: &Context, periodo: PeriodoArgs, dividir: bool) -> Result<(), CliError> {
-    let (inicio, fim) = intervalo(periodo, hoje());
-    let periodos = periodos(inicio, fim, dividir)?;
+async fn simples(context: &Context, args: &ExtratoArgs) -> Result<(), CliError> {
+    let (inicio, fim) = intervalo(args.periodo, hoje());
+    let periodos = periodos(inicio, fim, args.dividir_periodo)?;
+    let destino = DestinoOfx::de(context, &args.ofx)?;
     let settings = context.settings()?;
+    if destino.is_some() {
+        // The account goes into the OFX: without it, nothing is requested.
+        settings.for_conta()?;
+    }
     let client = context.client(&settings)?;
 
     let mut transacoes = Vec::new();
@@ -46,6 +56,12 @@ async fn simples(context: &Context, periodo: PeriodoArgs, dividir: bool) -> Resu
         transacoes.extend(client.banking().extrato(periodo).await?);
     }
 
+    if let Some(destino) = destino {
+        let transacoes = transacoes.iter().map(ofx::Transacao::simples).collect();
+        return destino
+            .gravar(context, &settings, &client, (inicio, fim), transacoes)
+            .await;
+    }
     match context.formato() {
         Formato::Json => output::print_json(&json!({ "transacoes": transacoes })),
         Formato::Csv => output::print_raw(&csv_simples(&transacoes).csv(context.separador())),
@@ -116,6 +132,12 @@ fn csv_simples(transacoes: &[TransacaoSimples]) -> Tabela {
 async fn completo(context: &Context, args: &ExtratoCompletoArgs) -> Result<(), CliError> {
     let (inicio, fim) = intervalo(args.periodo, hoje());
     let periodos = periodos(inicio, fim, args.dividir_periodo)?;
+    if context.ofx() && !args.todas_paginas {
+        return Err(CliError::Usage(
+            "o OFX traz o extrato inteiro do período: use --todas-paginas".to_owned(),
+        ));
+    }
+    let destino = DestinoOfx::de(context, &args.ofx)?;
     let filtro = |periodo: Periodo| {
         let mut filtro = FiltroExtrato::new(periodo);
         if let Some(tipo) = args.tipo_operacao {
@@ -127,6 +149,10 @@ async fn completo(context: &Context, args: &ExtratoCompletoArgs) -> Result<(), C
         filtro
     };
     let settings = context.settings()?;
+    if destino.is_some() {
+        // The account goes into the OFX: without it, nothing is requested.
+        settings.for_conta()?;
+    }
     let client = context.client(&settings)?;
 
     if !args.todas_paginas {
@@ -157,6 +183,12 @@ async fn completo(context: &Context, args: &ExtratoCompletoArgs) -> Result<(), C
                 .extrato_completo_todas(&filtro(periodo))
                 .await?,
         );
+    }
+    if let Some(destino) = destino {
+        let transacoes = transacoes.iter().map(ofx::Transacao::completa).collect();
+        return destino
+            .gravar(context, &settings, &client, (inicio, fim), transacoes)
+            .await;
     }
     match context.formato() {
         Formato::Json => output::print_json(&json!({ "transacoes": transacoes })),
@@ -428,6 +460,119 @@ async fn pdf(context: &Context, args: &ExtratoPdfArgs) -> Result<(), CliError> {
                 tamanho(documento.len())
             ))
         }
+    }
+}
+
+// --- extrato --formato ofx -----------------------------------------------------
+
+/// The last second of a day, the end of a period that ended before today.
+const FIM_DO_DIA: NaiveTime = match NaiveTime::from_hms_opt(23, 59, 59) {
+    Some(hora) => hora,
+    None => panic!("fim do dia"),
+};
+
+/// `--formato ofx`: where the OFX goes, checked before any request.
+#[derive(Debug)]
+struct DestinoOfx {
+    /// The file of `--saida`; without it (or with `-`), the standard output.
+    arquivo: Option<Saida>,
+}
+
+impl DestinoOfx {
+    /// `None` without `--formato ofx`, which `--saida` requires.
+    fn de(context: &Context, args: &SaidaOfxArgs) -> Result<Option<Self>, CliError> {
+        if !context.ofx() {
+            return match args.saida {
+                Some(_) => Err(CliError::Usage(
+                    "--saida vale apenas com --formato ofx; nos outros formatos, redirecione a saída (> arquivo)"
+                        .to_owned(),
+                )),
+                None => Ok(None),
+            };
+        }
+        let arquivo = args
+            .saida
+            .as_ref()
+            .filter(|caminho| caminho.as_os_str() != "-")
+            .map(|caminho| {
+                Saida::new(caminho.clone(), args.sobrescrever, "extrato.ofx", "--saida")
+            });
+        if let Some(arquivo) = &arquivo {
+            arquivo.conferir()?;
+        }
+        Ok(Some(Self { arquivo }))
+    }
+
+    /// Writes the OFX of `transacoes`, with the balance at the end of the
+    /// period. The transactions without a date or an amount (`None`), which
+    /// OFX requires, are left out, with a warning.
+    async fn gravar(
+        &self,
+        context: &Context,
+        settings: &Settings,
+        client: &InterClient,
+        (inicio, fim): (NaiveDate, NaiveDate),
+        transacoes: Vec<Option<ofx::Transacao<'_>>>,
+    ) -> Result<(), CliError> {
+        let saldo = client
+            .banking()
+            .saldo(Some(fim))
+            .await?
+            .disponivel
+            .ok_or_else(|| {
+                CliError::RespostaIncompleta(format!(
+                    "a API não informou o saldo de {}, que o OFX exige",
+                    fim.format("%d/%m/%Y")
+                ))
+            })?;
+        let agora = Utc::now().with_timezone(&BRASILIA).naive_local();
+
+        let recebidas = transacoes.len();
+        let transacoes: Vec<_> = transacoes.into_iter().flatten().collect();
+        match recebidas - transacoes.len() {
+            0 => {}
+            1 => eprintln!("aviso: 1 transação sem data ou sem valor ficou fora do OFX"),
+            fora => eprintln!("aviso: {fora} transações sem data ou sem valor ficaram fora do OFX"),
+        }
+        let quantidade = transacoes.len();
+        let documento = ofx::Extrato {
+            conta: settings.for_conta()?,
+            inicio,
+            // Up to today, the balance is the one of the moment of the query.
+            fim: if fim < agora.date() {
+                fim.and_time(FIM_DO_DIA)
+            } else {
+                agora
+            },
+            saldo,
+            agora,
+            transacoes,
+        }
+        .render();
+
+        let Some(arquivo) = &self.arquivo else {
+            // A terminal shows the text; a file or a program gets the bytes.
+            return if io::stdout().is_terminal() {
+                output::print(documento.replace("\r\n", "\n").trim_end())
+            } else {
+                output::print_bytes(&ofx::cp1252(&documento))
+            };
+        };
+        let bytes = ofx::cp1252(&documento);
+        arquivo.gravar(&bytes)?;
+        context.warn_if_sandbox(settings);
+        output::print(&format!(
+            "Extrato de {} a {} salvo em {} ({quantidade} {}, {})",
+            inicio.format("%d/%m/%Y"),
+            fim.format("%d/%m/%Y"),
+            arquivo.caminho().display(),
+            if quantidade == 1 {
+                "transação"
+            } else {
+                "transações"
+            },
+            tamanho(bytes.len())
+        ))
     }
 }
 

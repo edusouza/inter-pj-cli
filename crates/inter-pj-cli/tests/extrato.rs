@@ -5,6 +5,7 @@ mod common;
 
 use std::fs;
 
+use assert_cmd::assert::Assert;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use chrono::NaiveDate;
@@ -546,6 +547,389 @@ async fn extrato_pdf_aceita_no_maximo_90_dias() {
         .code(2)
         .stderr(predicate::str::contains(
             "dica: gere um PDF para cada período",
+        ));
+}
+
+// --- extrato --formato ofx -----------------------------------------------------------
+
+const SALDO: &str = "/banking/v2/saldo";
+const CONTA: &str = "numero_conta = \"7654321\"\ndigito_conta = \"0\"";
+
+async fn env_ofx() -> TestEnv {
+    let env = TestEnv::new().await;
+    env.write_config(CONTA);
+    env.mount_token("extrato.read", None).await;
+    env
+}
+
+/// The balance at the end of `data`, which goes into the OFX.
+async fn mount_saldo_em(env: &TestEnv, data: &str, saldo: Value, calls: u64) {
+    Mock::given(method("GET"))
+        .and(path(SALDO))
+        .and(query_param("dataSaldo", data))
+        .respond_with(ResponseTemplate::new(200).set_body_json(saldo))
+        .expect(calls)
+        .mount(&env.server)
+        .await;
+}
+
+/// The OFX as text, from Windows-1252 (Latin-1 but for 0x80 to 0x9F, which
+/// stay as they are), with LF line breaks and without the moment it was
+/// made, which changes on every run.
+fn ofx(bytes: &[u8]) -> String {
+    let texto: String = bytes.iter().map(|&byte| char::from(byte)).collect();
+    assert!(
+        !texto.replace("\r\n", "").contains(['\r', '\n']),
+        "linhas terminadas em CRLF"
+    );
+    texto
+        .split("\r\n")
+        .filter(|linha| !linha.starts_with("<DTSERVER>"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn ofx_da_saida(assert: &Assert) -> String {
+    ofx(&assert.get_output().stdout)
+}
+
+fn transacoes_ofx(ofx: &str) -> Vec<&str> {
+    ofx.split("<STMTTRN>\n")
+        .skip(1)
+        .map(|transacao| transacao.split("</STMTTRN>").next().unwrap())
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn extrato_em_ofx_para_programas_de_contabilidade() {
+    let env = env_ofx().await;
+    let body = json!({"transacoes": [
+        {"dataEntrada": "2026-08-03", "tipoTransacao": "PIX", "tipoOperacao": "C",
+         "valor": "1500.00", "titulo": "Pix recebido", "descricao": "Cliente Exemplo Ltda"},
+        {"dataEntrada": "2026-08-05", "tipoTransacao": "PAGAMENTO", "tipoOperacao": "D",
+         "valor": "250.1", "titulo": "Pagamento efetuado",
+         "descricao": "Energia & Luz <Ltda> – ação\n03/08/2026  R$ 9.999,00"},
+        {"dataEntrada": "2026-08-06", "tipoTransacao": "TARIFA", "tipoOperacao": "D",
+         "valor": "2.5", "titulo": "Tarifa", "descricao": "Tarifa"},
+        {"dataEntrada": "2026-08-06", "tipoTransacao": "TARIFA", "tipoOperacao": "D",
+         "valor": "2.5", "titulo": "Tarifa", "descricao": "Tarifa"}
+    ]});
+    mount_extrato(&env, "2026-08-01", "2026-08-31", body, 2).await;
+    mount_saldo_em(&env, "2026-08-31", json!({"disponivel": 3247.3}), 2).await;
+
+    let assert = env
+        .cmd()
+        .arg("extrato")
+        .args(AGOSTO)
+        .args(["--formato", "ofx"])
+        .assert()
+        .success();
+    let bytes = assert.get_output().stdout.clone();
+    assert!(stderr_of(&assert).is_empty(), "{}", stderr_of(&assert));
+    // Windows-1252: "–" is 0x96, "ç" 0xE7, "ã" 0xE3, "·" 0xB7.
+    let esperado = b"\x96 a\xe7\xe3o ";
+    assert!(
+        bytes
+            .windows(esperado.len())
+            .any(|janela| janela == esperado),
+        "Windows-1252"
+    );
+    let ofx = ofx(&bytes);
+    assert!(
+        ofx.starts_with(
+            "OFXHEADER:100\nDATA:OFXSGML\nVERSION:102\nSECURITY:NONE\nENCODING:USASCII\nCHARSET:1252\nCOMPRESSION:NONE\nOLDFILEUID:NONE\nNEWFILEUID:NONE\n\n<OFX>\n"
+        ),
+        "{ofx}"
+    );
+    assert!(
+        ofx.contains(
+            "<BANKACCTFROM>\n<BANKID>077\n<BRANCHID>0001\n<ACCTID>7654321-0\n<ACCTTYPE>CHECKING\n</BANKACCTFROM>\n<BANKTRANLIST>\n<DTSTART>20260801000000[-3:BRT]\n<DTEND>20260831235959[-3:BRT]\n"
+        ),
+        "{ofx}"
+    );
+    assert!(
+        ofx.contains("<LEDGERBAL>\n<BALAMT>3247.30\n<DTASOF>20260831235959[-3:BRT]\n</LEDGERBAL>"),
+        "o saldo do fim do período: {ofx}"
+    );
+    assert!(ofx.ends_with("</OFX>\n"), "{ofx}");
+
+    let transacoes = transacoes_ofx(&ofx);
+    assert_eq!(transacoes.len(), 4, "{ofx}");
+    assert!(
+        transacoes[0].starts_with(
+            "<TRNTYPE>XFER\n<DTPOSTED>20260803120000[-3:BRT]\n<TRNAMT>1500.00\n<FITID>"
+        ),
+        "{}",
+        transacoes[0]
+    );
+    assert!(
+        transacoes[0].ends_with("<MEMO>Pix recebido \u{b7} Cliente Exemplo Ltda\n"),
+        "{}",
+        transacoes[0]
+    );
+    assert!(
+        transacoes[1]
+            .contains("<TRNTYPE>PAYMENT\n<DTPOSTED>20260805120000[-3:BRT]\n<TRNAMT>-250.10\n"),
+        "{}",
+        transacoes[1]
+    );
+    // The special characters are escaped, and a line break in a text of a
+    // third party does not make a line of its own.
+    assert!(
+        transacoes[1].ends_with(
+            "<MEMO>Pagamento efetuado \u{b7} Energia &amp; Luz &lt;Ltda&gt; \u{96} a\u{e7}\u{e3}o 03/08/2026 R$ 9.999,00\n"
+        ),
+        "{}",
+        transacoes[1]
+    );
+    assert!(
+        transacoes[2].contains("<TRNTYPE>FEE\n") && transacoes[2].contains("<TRNAMT>-2.50\n"),
+        "{}",
+        transacoes[2]
+    );
+
+    // A FITID for each transaction, even for two equal ones on the same day,
+    // and the same in the next run, for the importer not to repeat them.
+    let fitid = |transacao: &str| {
+        transacao
+            .lines()
+            .find_map(|linha| linha.strip_prefix("<FITID>"))
+            .unwrap()
+            .to_owned()
+    };
+    let fitids: Vec<String> = transacoes.iter().map(|t| fitid(t)).collect();
+    let mut unicos = fitids.clone();
+    unicos.sort();
+    unicos.dedup();
+    assert_eq!(unicos.len(), 4, "{fitids:?}");
+
+    let de_novo = env
+        .cmd()
+        .arg("extrato")
+        .args(AGOSTO)
+        .args(["--formato", "ofx"])
+        .assert()
+        .success();
+    assert_eq!(ofx_da_saida(&de_novo), ofx);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn extrato_ofx_vai_para_um_arquivo_privado() {
+    let env = env_ofx().await;
+    // The existing file is detected before calling the API.
+    mount_extrato(&env, "2026-08-01", "2026-08-31", simples(), 2).await;
+    mount_saldo_em(&env, "2026-08-31", json!({"disponivel": 0}), 2).await;
+    let arquivo = env.path("agosto.ofx");
+
+    let out = stdout_of(
+        &env.cmd()
+            .arg("extrato")
+            .args(AGOSTO)
+            .args(["--formato", "ofx", "-o"])
+            .arg(&arquivo)
+            .assert()
+            .success()
+            .stderr(predicate::str::contains("aviso: ambiente sandbox")),
+    );
+    assert!(
+        out.starts_with("Extrato de 01/08/2026 a 31/08/2026 salvo em ")
+            && out.contains("agosto.ofx (3 transações, "),
+        "{out}"
+    );
+    let gravado = ofx(&fs::read(&arquivo).unwrap());
+    assert_eq!(transacoes_ofx(&gravado).len(), 3, "{gravado}");
+    assert!(gravado.contains("<BALAMT>0.00\n"), "{gravado}");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = fs::metadata(&arquivo).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "o extrato é um dado sensível");
+    }
+
+    env.cmd()
+        .arg("extrato")
+        .args(AGOSTO)
+        .args(["--formato", "ofx", "--saida"])
+        .arg(&arquivo)
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("já existe; use --sobrescrever"));
+
+    env.cmd()
+        .arg("extrato")
+        .args(AGOSTO)
+        .args(["--formato", "ofx", "--sobrescrever", "--saida"])
+        .arg(&arquivo)
+        .assert()
+        .success();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn extrato_ofx_de_um_periodo_dividido() {
+    let env = env_ofx().await;
+    let parte = |data: &str, valor: &str| {
+        json!({"transacoes": [{"dataEntrada": data, "tipoTransacao": "PIX",
+            "tipoOperacao": "C", "valor": valor, "titulo": "Pix recebido"}]})
+    };
+    mount_extrato(
+        &env,
+        "2026-01-01",
+        "2026-03-31",
+        parte("2026-02-10", "100"),
+        1,
+    )
+    .await;
+    mount_extrato(
+        &env,
+        "2026-04-01",
+        "2026-04-01",
+        parte("2026-04-01", "50"),
+        1,
+    )
+    .await;
+    mount_saldo_em(&env, "2026-04-01", json!({"disponivel": "150.00"}), 1).await;
+
+    let ofx = ofx_da_saida(
+        &env.cmd()
+            .args(["extrato", "--inicio", "2026-01-01", "--fim", "2026-04-01"])
+            .args(["--dividir-periodo", "--formato", "ofx", "--saida", "-"])
+            .assert()
+            .success(),
+    );
+    assert!(
+        ofx.contains("<DTSTART>20260101000000[-3:BRT]\n<DTEND>20260401235959[-3:BRT]\n"),
+        "{ofx}"
+    );
+    let transacoes = transacoes_ofx(&ofx);
+    assert_eq!(transacoes.len(), 2, "{ofx}");
+    assert!(transacoes[0].contains("<DTPOSTED>20260210120000[-3:BRT]\n<TRNAMT>100.00\n"));
+    assert!(transacoes[1].contains("<DTPOSTED>20260401120000[-3:BRT]\n<TRNAMT>50.00\n"));
+    assert!(ofx.contains("<BALAMT>150.00\n"), "{ofx}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn extrato_completo_em_ofx_usa_o_id_e_a_contraparte() {
+    let env = env_ofx().await;
+    Mock::given(method("GET"))
+        .and(path(COMPLETO))
+        .and(query_param("pagina", "0"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "totalPaginas": 1, "totalElementos": 2, "ultimaPagina": true,
+            "transacoes": [completa(7, "C", "10.00"), completa(8, "D", "3.20")]
+        })))
+        .expect(1)
+        .mount(&env.server)
+        .await;
+    mount_saldo_em(&env, "2026-08-31", json!({"disponivel": 6.8}), 1).await;
+
+    let ofx = ofx_da_saida(
+        &env.cmd()
+            .args(["extrato", "completo", "--todas-paginas", "--formato", "ofx"])
+            .args(AGOSTO)
+            .assert()
+            .success(),
+    );
+    let transacoes = transacoes_ofx(&ofx);
+    assert_eq!(
+        transacoes,
+        [
+            "<TRNTYPE>XFER\n<DTPOSTED>20260810120000[-3:BRT]\n<TRNAMT>10.00\n<FITID>7\n<NAME>Cliente Exemplo\n<MEMO>Pix recebido \u{b7} Transação 7\n",
+            "<TRNTYPE>XFER\n<DTPOSTED>20260810120000[-3:BRT]\n<TRNAMT>-3.20\n<FITID>8\n<NAME>Fornecedor Exemplo\n<MEMO>Pix enviado \u{b7} Transação 8\n",
+        ],
+        "{ofx}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn extrato_completo_em_ofx_exige_todas_as_paginas() {
+    let env = TestEnv::new().await;
+    env.write_config(CONTA);
+    env.mount_token("extrato.read", Some(0)).await;
+
+    env.cmd()
+        .args(["extrato", "completo", "--formato", "ofx"])
+        .args(AGOSTO)
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains(
+            "o OFX traz o extrato inteiro do período: use --todas-paginas",
+        ));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn ofx_precisa_da_conta_do_perfil() {
+    let env = TestEnv::new().await;
+    env.write_config("");
+    env.mount_token("extrato.read", Some(0)).await;
+
+    env.cmd()
+        .arg("extrato")
+        .args(AGOSTO)
+        .args(["--formato", "ofx"])
+        .assert()
+        .code(3)
+        .stderr(predicate::str::contains("numero_conta e digito_conta"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn ofx_sem_o_saldo_do_fim_do_periodo_e_erro() {
+    let env = env_ofx().await;
+    mount_extrato(&env, "2026-08-01", "2026-08-31", simples(), 1).await;
+    mount_saldo_em(&env, "2026-08-31", json!({}), 1).await;
+
+    let assert = env
+        .cmd()
+        .arg("extrato")
+        .args(AGOSTO)
+        .args(["--formato", "ofx"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "a API não informou o saldo de 31/08/2026, que o OFX exige",
+        ));
+    assert!(assert.get_output().stdout.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn ofx_vale_apenas_para_o_extrato() {
+    let env = TestEnv::new().await;
+    env.write_config(CONTA);
+    env.mount_token("extrato.read", Some(0)).await;
+    for args in [
+        &["saldo"][..],
+        &["conta"],
+        &["extrato", "pdf"],
+        &["pix", "recebidos", "listar"],
+    ] {
+        env.cmd()
+            .args(args)
+            .args(["--formato", "ofx"])
+            .assert()
+            .code(2)
+            .stderr(predicate::str::contains(
+                "o formato ofx vale apenas para o extrato",
+            ));
+    }
+    for args in [
+        &["extrato"][..],
+        &["extrato", "completo", "--todas-paginas"],
+    ] {
+        env.cmd()
+            .args(args)
+            .args(["--saida", "extrato.ofx"])
+            .assert()
+            .code(2)
+            .stderr(predicate::str::contains(
+                "--saida vale apenas com --formato ofx",
+            ));
+    }
+    // `--json` wins over `--formato`, as everywhere.
+    env.cmd()
+        .args(["extrato", "--formato", "ofx", "--json", "-o", "extrato.ofx"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains(
+            "--saida vale apenas com --formato ofx",
         ));
 }
 

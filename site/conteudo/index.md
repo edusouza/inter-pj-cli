@@ -41,7 +41,7 @@ Os valores e os nomes são fictícios, e as saídas mostram o formato, não o se
 - **Extrato**: o de um período, o completo, com os detalhes de cada transação e todas as
   páginas, e o PDF.
 - **Saída para pessoas e para programas**: texto alinhado, JSON com os nomes de campo da API
-  e CSV, inclusive no formato do Excel em português.
+  e CSV, inclusive no formato do Excel em português, e o extrato em OFX, para a contabilidade.
 - **Credenciais sob controle**: tokens pedidos só com os escopos de que o comando precisa,
   guardados num cache local, e o `client_secret` nunca numa opção de linha de comando.
 - **Configuração com perfis** (sandbox e produção lado a lado) e um diagnóstico do arquivo,

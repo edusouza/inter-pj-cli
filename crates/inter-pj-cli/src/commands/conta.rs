@@ -9,10 +9,10 @@ use crate::error::CliError;
 use crate::output;
 
 /// Code of Banco Inter in the Brazilian payment system (COMPE).
-const BANCO: &str = "077";
-const NOME_BANCO: &str = "Banco Inter S.A.";
+pub(super) const BANCO: &str = "077";
+pub(super) const NOME_BANCO: &str = "Banco Inter S.A.";
 /// Banco Inter has a single branch, the same for every account.
-const AGENCIA: &str = "0001";
+pub(super) const AGENCIA: &str = "0001";
 
 /// The bank, the branch and the account of the profile. The API has no
 /// operation that returns them: the account comes from the configuration
