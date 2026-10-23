@@ -813,9 +813,9 @@ mod tests {
             json!({"codigoTransacao": "8bbdede4-35db-4ec9-b652-e176841e62c8", "numero": 42}),
         );
         assert_eq!(banking.valores("numero"), ["42"]);
-        assert!(banking.valores("txid").is_empty());
-        assert!(callback(Value::Null).valores("txid").is_empty());
-        assert!(callback(json!({})).valores("txid").is_empty());
+        assert_eq!(banking.valores("txid"), Vec::<String>::new());
+        assert_eq!(callback(Value::Null).valores("txid"), Vec::<String>::new());
+        assert_eq!(callback(json!({})).valores("txid"), Vec::<String>::new());
     }
 
     #[test]

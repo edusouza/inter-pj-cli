@@ -163,7 +163,7 @@ async fn banking_filters_by_the_identifier_of_each_kind() {
         .listar_todos_callbacks(TipoWebhookBanking::BoletoPagamento, &filtro)
         .await
         .unwrap();
-    assert!(callbacks.is_empty());
+    assert_eq!(callbacks, Vec::new());
 }
 
 #[tokio::test]
@@ -248,7 +248,7 @@ async fn retries_send_the_ids_and_name_those_found() {
         )
         .await
         .unwrap();
-    assert!(reenvio.found_ids.is_empty());
+    assert_eq!(reenvio.found_ids, Vec::<String>::new());
     let reenvio = client
         .banking()
         .reenviar_callbacks(TipoWebhookBanking::PixPagamento, &[CODIGO.to_owned()])
