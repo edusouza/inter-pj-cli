@@ -6,6 +6,10 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e 
 
 ## [Não lançado]
 
+## [0.6.2] - 2026-10-26
+
+O extrato em OFX, para importar em programas de contabilidade, ERPs e de finanças pessoais.
+
 ### Adicionado
 
 - `inter-pj extrato --formato ofx` e `inter-pj extrato completo --todas-paginas --formato ofx`: o extrato do período em OFX 1.02 (SGML, em Windows-1252, como os bancos brasileiros o escrevem), o formato que programas de contabilidade, ERPs e de finanças pessoais importam. O arquivo traz o banco (077), a agência e a conta do perfil (`numero_conta` e `digito_conta`, conferidos antes de qualquer requisição), uma transação por movimentação, com o tipo (`CREDIT` ou `DEBIT`, ou um mais específico, como `XFER`, `PAYMENT` e `FEE`, quando o tipo da transação permite), a data no fuso de Brasília, o valor com sinal, a descrição e, no `extrato completo`, a contraparte; e o saldo ao fim do período (`LEDGERBAL`, o de `saldo --data <fim>`). O `FITID` de cada transação é o id do `extrato completo` e, no `extrato`, um hash da data, do valor e da descrição, numerado entre as transações iguais do mesmo dia: o mesmo a cada execução, para o importador não repetir o que já tem. Vale com `--dividir-periodo`; com `-o`/`--saida`, o arquivo é gravado com permissão `600` e um existente só é substituído com `--sobrescrever` (#564).
